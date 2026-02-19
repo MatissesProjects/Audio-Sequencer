@@ -6,7 +6,7 @@ This file tracks the epic-level progress of the AudioSequencer AI project.
 
 | ID | Title | Status | Target | Description |
 |---|---|---|---|---|
-| `sys-data` | **Data Persistence & State** | 🏗️ In Progress | MVP | SQLite schema for file metadata and ChromaDB setup for vector storage. |
+| `sys-data` | **Data Persistence & State** | ✅ Completed | MVP | SQLite schema for file metadata and ChromaDB setup for vector storage. |
 | `core-mir` | **Analysis Engine (MIR)** | ✅ Completed | MVP | `librosa`-based ingestion: BPM, Key, and LUFS extraction. |
 | `ai-embed` | **AI Embedding Engine** | 🏗️ Planned | v1.0 | Implement local `laion-clap` to convert audio to 512-d vectors for semantic search. |
 | `logic-seq` | **Sequencing & Scoring Logic** | ⏳ Blocked | MVP | The algorithm calculating compatibility scores (Tempo, Harmonic, Vector similarity). |

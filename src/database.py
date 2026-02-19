@@ -52,6 +52,28 @@ class DataManager:
     def get_conn(self):
         return sqlite3.connect(self.db_path)
 
+    def get_library_stats(self):
+        """Returns high-level statistics about the audio library."""
+        conn = self.get_conn()
+        cursor = conn.cursor()
+        
+        stats = {}
+        cursor.execute("SELECT COUNT(*) FROM tracks")
+        stats['total_tracks'] = cursor.fetchone()[0]
+        
+        if stats['total_tracks'] > 0:
+            cursor.execute("SELECT AVG(bpm), MIN(bpm), MAX(bpm) FROM tracks")
+            bpm_stats = cursor.fetchone()
+            stats['avg_bpm'] = round(bpm_stats[0], 2)
+            stats['min_bpm'] = round(bpm_stats[1], 2)
+            stats['max_bpm'] = round(bpm_stats[2], 2)
+            
+            cursor.execute("SELECT harmonic_key, COUNT(*) as count FROM tracks GROUP BY harmonic_key ORDER BY count DESC")
+            stats['key_distribution'] = dict(cursor.fetchall())
+        
+        conn.close()
+        return stats
+
 def init_db(db_path="audio_library.db"):
     # Keeping this for backward compatibility
     DataManager(db_path=db_path)
