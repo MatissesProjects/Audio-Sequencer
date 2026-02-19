@@ -7,3 +7,6 @@ soundfile
 chromadb
 tqdm
 pytest
+torch
+laion-clap
+transformers
