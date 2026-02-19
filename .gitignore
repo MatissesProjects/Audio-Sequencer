@@ -4,3 +4,4 @@ __pycache__/
 .env
 .pytest_cache/
 *.mp3
+vector_db/
