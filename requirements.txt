@@ -1,0 +1,9 @@
+librosa
+pedalboard
+pyrubberband
+pydub
+numpy
+soundfile
+chromadb
+tqdm
+pytest
