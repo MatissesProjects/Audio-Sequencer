@@ -15,7 +15,7 @@ Build the foundational "Ingestion Pipeline" that watches a directory, analyzes a
     - Chromagram / Harmonic Key
     - Loudness (LUFS/RMS)
 4. [x] **Ingestion Watcher:** Simple script to scan a folder and process all supported audio files (.wav, .mp3, .flac).
-5. [ ] **Validation:** Create a test suite with known audio samples to verify BPM/Key accuracy.
+5. [x] **Validation:** Create a test suite with known audio samples to verify BPM/Key accuracy.
 
 ## Definition of Done
 - A CLI script can scan a folder and populate a SQLite database with accurate musical metadata.
