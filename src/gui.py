@@ -8,6 +8,7 @@ from src.database import DataManager
 from src.scoring import CompatibilityScorer
 from src.processor import AudioProcessor
 from src.renderer import FlowRenderer
+from src.generator import TransitionGenerator
 
 class AudioSequencerApp(QMainWindow):
     def __init__(self):
@@ -16,6 +17,7 @@ class AudioSequencerApp(QMainWindow):
         self.scorer = CompatibilityScorer()
         self.processor = AudioProcessor()
         self.renderer = FlowRenderer()
+        self.generator = TransitionGenerator()
         self.selected_track = None
         self.init_ui()
         self.load_library()
@@ -57,14 +59,29 @@ class AudioSequencerApp(QMainWindow):
         canvas_layout.addWidget(self.active_track_label, alignment=Qt.AlignmentFlag.AlignCenter)
         
         # Playback Controls
-        controls_layout = QHBoxLayout()
+        controls_layout = QVBoxLayout()
+        
+        duration_layout = QHBoxLayout()
+        duration_layout.addWidget(QLabel("Target Duration (sec):"))
+        self.duration_input = QLineEdit("60")
+        self.duration_input.setFixedWidth(50)
+        duration_layout.addWidget(self.duration_input)
+        controls_layout.addLayout(duration_layout)
+
+        btn_row1 = QHBoxLayout()
         self.play_btn = QPushButton("▶ Preview Selected")
         self.play_btn.clicked.connect(self.play_selected)
-        self.mix_btn = QPushButton("🔀 Mix with Top Recommendation")
+        self.mix_btn = QPushButton("🔀 Quick Mix (Stretched)")
         self.mix_btn.clicked.connect(self.mix_with_top)
+        btn_row1.addWidget(self.play_btn)
+        btn_row1.addWidget(self.mix_btn)
         
-        controls_layout.addWidget(self.play_btn)
-        controls_layout.addWidget(self.mix_btn)
+        self.gen_btn = QPushButton("✨ AI Smart Transition & Loop (Gemini + Rhythmic Looping)")
+        self.gen_btn.setStyleSheet("background-color: #6200ea; color: white; padding: 15px;")
+        self.gen_btn.clicked.connect(self.generate_smart_mix)
+        
+        controls_layout.addLayout(btn_row1)
+        controls_layout.addWidget(self.gen_btn)
         canvas_layout.addLayout(controls_layout)
         
         main_layout.addWidget(canvas_panel, stretch=2)
@@ -165,6 +182,62 @@ class AudioSequencerApp(QMainWindow):
             os.startfile(final_mix)
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Mixing failed: {e}")
+
+    def generate_smart_mix(self):
+        if not self.selected_track or self.rec_list.rowCount() == 0:
+            QMessageBox.warning(self, "No Match", "Select a track with recommendations first.")
+            return
+        
+        target_dur = float(self.duration_input.text())
+        top_name = self.rec_list.item(0, 1).text()
+        conn = self.dm.get_conn()
+        conn.row_factory = sqlite3_factory
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM tracks WHERE filename = ?", (top_name,))
+        t2 = dict(cursor.fetchone())
+        conn.close()
+        
+        t1 = self.selected_track
+        
+        QMessageBox.information(self, "AI Processing", f"Looping tracks to {target_dur}s and generating transition...")
+        
+        try:
+            # 1. Parse onsets
+            onsets1 = [float(x) for x in t1['onsets_json'].split(',')] if t1['onsets_json'] else []
+            onsets2 = [float(x) for x in t2['onsets_json'].split(',')] if t2['onsets_json'] else []
+
+            # 2. Loop T1 and T2 to target duration
+            loop1_path = "temp_t1_looped.wav"
+            self.processor.loop_track(t1['file_path'], target_dur, onsets1, loop1_path)
+            
+            loop2_path = "temp_t2_looped.wav"
+            self.processor.loop_track(t2['file_path'], target_dur, onsets2, loop2_path)
+
+            # 3. Synchronize T2 Loop to T1 BPM
+            stretched_path = "temp_t2_stretched.wav"
+            self.processor.stretch_to_bpm(loop2_path, t2['bpm'], t1['bpm'], stretched_path)
+            
+            # 4. Gemini Transition Orchestration
+            params = self.generator.get_transition_params(t1, t2)
+            riser_path = "temp_ai_riser.wav"
+            self.generator.generate_riser(4.0, t1['bpm'], riser_path, params=params)
+            
+            # 5. Render Final Layered Mix
+            intermediate_mix = "temp_layered.wav"
+            self.renderer.mix_tracks(loop1_path, stretched_path, intermediate_mix)
+            
+            final_mix = "smart_looped_mix.wav"
+            self.renderer.mix_tracks(intermediate_mix, riser_path, final_mix, gain2=0.0)
+            
+            # Cleanup
+            for p in [loop1_path, loop2_path, riser_path, stretched_path, intermediate_mix]:
+                if os.path.exists(p): os.remove(p)
+                
+            QMessageBox.information(self, "Success", f"Looped Smart Mix Created!\nDuration: {target_dur}s")
+            os.startfile(final_mix)
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Looped Mix failed: {e}")
 
     def update_recommendations(self, track_id):
         conn = self.dm.get_conn()
