@@ -1,5 +1,9 @@
 import os
 import sys
+
+# Ensure the project root is in PYTHONPATH
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import argparse
 from src.database import DataManager
 from src.ingestion import IngestionEngine
