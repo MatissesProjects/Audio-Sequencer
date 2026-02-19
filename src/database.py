@@ -1,6 +1,7 @@
 import sqlite3
 import os
 import chromadb
+import numpy as np
 from chromadb.config import Settings
 
 class DataManager:
@@ -51,6 +52,30 @@ class DataManager:
 
     def get_conn(self):
         return sqlite3.connect(self.db_path)
+
+    def add_embedding(self, track_id, embedding, metadata=None):
+        """Stores a vector in ChromaDB and links it to the track_id."""
+        embed_id = f"track_{track_id}"
+        self.collection.add(
+            ids=[embed_id],
+            embeddings=[embedding.tolist() if isinstance(embedding, np.ndarray) else embedding],
+            metadatas=[metadata] if metadata else None
+        )
+        
+        # Link back to SQLite
+        conn = self.get_conn()
+        cursor = conn.cursor()
+        cursor.execute("UPDATE tracks SET clp_embedding_id = ? WHERE id = ?", (embed_id, track_id))
+        conn.commit()
+        conn.close()
+        return embed_id
+
+    def get_embedding(self, embed_id):
+        """Retrieves a vector from ChromaDB."""
+        result = self.collection.get(ids=[embed_id], include=['embeddings'])
+        if result and 'embeddings' in result and result['embeddings'] is not None and len(result['embeddings']) > 0:
+            return np.array(result['embeddings'][0])
+        return None
 
     def get_library_stats(self):
         """Returns high-level statistics about the audio library."""
