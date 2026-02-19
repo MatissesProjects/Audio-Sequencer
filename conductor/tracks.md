@@ -1,16 +1,28 @@
 # Tracks Registry
 
-This file tracks the high-level progress of the AudioSequencer AI project.
+This file tracks the epic-level progress of the AudioSequencer AI project.
 
-| ID | Title | Status | Description |
-|---|---|---|---|
-| `core-mir` | **Analysis Engine (Core MIR)** | ✅ Completed | librosa-based ingestion and feature extraction. |
-| `vector-search` | **AI Recommendation System** | 🏗️ Planned | CLAP embeddings and ChromaDB integration. |
-| `seq-engine` | **Sequencing & Layering** | ⏳ Blocked | Horizontal stitching and vertical layering logic. |
-| `gui-canvas` | **UI & Workflow** | ⏳ Blocked | PyQt6 interface and the "Flow" canvas. |
-| `ai-gen` | **Advanced AI Expansion** | ⏳ Blocked | Local AudioCraft integration for gap filling. |
+## Core Epics
 
-## Dependencies
-- `vector-search` depends on `core-mir`.
-- `seq-engine` depends on `core-mir`.
-- `gui-canvas` depends on all core engines.
+| ID | Title | Status | Target | Description |
+|---|---|---|---|---|
+| `sys-data` | **Data Persistence & State** | 🏗️ In Progress | MVP | SQLite schema for file metadata and ChromaDB setup for vector storage. |
+| `core-mir` | **Analysis Engine (MIR)** | ✅ Completed | MVP | `librosa`-based ingestion: BPM, Key, and LUFS extraction. |
+| `ai-embed` | **AI Embedding Engine** | 🏗️ Planned | v1.0 | Implement local `laion-clap` to convert audio to 512-d vectors for semantic search. |
+| `logic-seq` | **Sequencing & Scoring Logic** | ⏳ Blocked | MVP | The algorithm calculating compatibility scores (Tempo, Harmonic, Vector similarity). |
+| `audio-dsp` | **Audio Manipulation (DSP)** | ⏳ Blocked | MVP | `pyrubberband`/`pedalboard` implementation for artifact-free time-stretching and pitch-shifting. |
+| `audio-rndr`| **Playback & Export Engine** | ⏳ Blocked | MVP | `pydub` engine for applying crossfades, EQ ducking, and rendering the final mix file. |
+| `gui-core` | **UI Canvas & Browser** | ⏳ Blocked | MVP | PyQt6 library browser, drag-and-drop timeline, and real-time state visualization. |
+| `ai-gen` | **Generative Audio Expansion** | ⏳ Blocked | v2.0 | Local `AudioCraft` generation for custom transition sweeps/risers. |
+
+## Dependency Graph
+- `sys-data` is foundational.
+- `ai-embed` depends on `sys-data` and `core-mir`.
+- `logic-seq` depends on `sys-data` and `core-mir`.
+- `audio-dsp` runs independently but is fed parameters by `logic-seq`.
+- `audio-rndr` depends on `audio-dsp`.
+- `gui-core` depends on all MVP tracks to function fully.
+
+## Active Sprint / Next Actions
+1. Spin up the SQLite database schema (`sys-data`) to store the outputs from `core-mir`.
+2. Write unit tests to ensure `core-mir` accurately captures transient data for seamless looping.

@@ -19,9 +19,13 @@ class AnalysisModule:
 
         # 1. BPM Detection
         onset_env = librosa.onset.onset_strength(y=y, sr=sr)
-        tempo, _ = librosa.beat.beat_track(onset_envelope=onset_env, sr=sr)
+        tempo, beat_frames = librosa.beat.beat_track(onset_envelope=onset_env, sr=sr)
         # librosa 0.10+ returns tempo as a scalar or array; handle both
         bpm = float(tempo[0]) if isinstance(tempo, (np.ndarray, list)) else float(tempo)
+        
+        # 1b. Beat Onsets (for seamless looping/alignment)
+        beat_times = librosa.frames_to_time(beat_frames, sr=sr)
+        onsets_json = ",".join([str(round(t, 4)) for t in beat_times])
 
         # 2. Harmonic Key Detection (Simplified Chromagram)
         # Using a simple chromagram-based approach for root note estimation
@@ -44,6 +48,7 @@ class AnalysisModule:
             "duration": duration,
             "sample_rate": sr,
             "bpm": round(bpm, 2),
+            "onsets_json": onsets_json,
             "harmonic_key": harmonic_key,
             "energy": energy
         }
