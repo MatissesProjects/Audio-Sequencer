@@ -10,3 +10,4 @@ pytest
 torch
 laion-clap
 transformers
+PyQt6

@@ -8,11 +8,11 @@ This file tracks the epic-level progress of the AudioSequencer AI project.
 |---|---|---|---|---|
 | `sys-data` | **Data Persistence & State** | ✅ Completed | MVP | SQLite schema for file metadata and ChromaDB setup for vector storage. |
 | `core-mir` | **Analysis Engine (MIR)** | ✅ Completed | MVP | `librosa`-based ingestion: BPM, Key, and LUFS extraction. |
-| `ai-embed` | **AI Embedding Engine** | 🏗️ Planned | v1.0 | Implement local `laion-clap` to convert audio to 512-d vectors for semantic search. |
+| `ai-embed` | **AI Embedding Engine** | ✅ Completed | v1.0 | Implement local `laion-clap` to convert audio to 512-d vectors for semantic search. |
 | `logic-seq` | **Sequencing & Scoring Logic** | ✅ Completed | MVP | The algorithm calculating compatibility scores (Tempo, Harmonic, Vector similarity). |
 | `audio-dsp` | **Audio Manipulation (DSP)** | ✅ Completed | MVP | `pedalboard` implementation for artifact-free time-stretching and pitch-shifting. |
-| `audio-rndr`| **Playback & Export Engine** | ⏳ Blocked | MVP | `pydub` engine for applying crossfades, EQ ducking, and rendering the final mix file. |
-| `gui-core` | **UI Canvas & Browser** | ⏳ Blocked | MVP | PyQt6 library browser, drag-and-drop timeline, and real-time state visualization. |
+| `audio-rndr`| **Playback & Export Engine** | ✅ Completed | MVP | `pydub` engine for applying crossfades, EQ ducking, and rendering the final mix file. |
+| `gui-core` | **UI Canvas & Browser** | 🏗️ In Progress | MVP | PyQt6 library browser, drag-and-drop timeline, and real-time state visualization. |
 | `ai-gen` | **Generative Audio Expansion** | ⏳ Blocked | v2.0 | Local `AudioCraft` generation for custom transition sweeps/risers. |
 
 ## Dependency Graph

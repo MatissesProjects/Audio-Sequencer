@@ -1,4 +1,5 @@
 import os
+import sys
 import argparse
 from src.database import DataManager
 from src.ingestion import IngestionEngine
@@ -6,10 +7,11 @@ from src.embeddings import EmbeddingEngine
 from tqdm import tqdm
 
 def main():
-    parser = argparse.ArgumentParser(description="AudioSequencer AI - Analysis & Ingestion")
+    parser = argparse.ArgumentParser(description="AudioSequencer AI - The Flow")
     parser.add_argument("--scan", type=str, help="Directory to scan for audio files")
     parser.add_argument("--stats", action="store_true", help="Show library statistics")
     parser.add_argument("--embed", action="store_true", help="Generate AI embeddings for all tracks")
+    parser.add_argument("--gui", action="store_true", help="Launch the Desktop GUI")
     
     args = parser.parse_args()
     dm = DataManager()
@@ -48,6 +50,14 @@ def main():
             for key, count in stats['key_distribution'].items():
                 print(f"  {key}: {count}")
         print("================================\n")
+
+    if args.gui:
+        from PyQt6.QtWidgets import QApplication
+        from src.gui import AudioSequencerApp
+        app = QApplication(sys.argv)
+        window = AudioSequencerApp()
+        window.show()
+        sys.exit(app.exec())
 
 if __name__ == "__main__":
     main()
