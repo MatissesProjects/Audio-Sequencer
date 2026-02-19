@@ -2,6 +2,7 @@ import sqlite3
 import os
 from src.scoring import CompatibilityScorer
 from src.processor import AudioProcessor
+from src.renderer import FlowRenderer
 
 def run_test():
     conn = sqlite3.connect('audio_library.db')
@@ -17,26 +18,31 @@ def run_test():
     t1, t2 = rows[0], rows[1]
     scorer = CompatibilityScorer()
     proc = AudioProcessor()
+    rend = FlowRenderer()
     
     scores = scorer.get_total_score(t1, t2)
     
-    print("\n=== Advanced Compatibility Test ===")
-    print(f"Track A: {t1['filename']} ({t1['bpm']} BPM, Key: {t1['harmonic_key']})")
-    print(f"Track B: {t2['filename']} ({t2['bpm']} BPM, Key: {t2['harmonic_key']})")
-    print("-" * 35)
-    print(f"BPM Match:      {scores['bpm_score']}%")
-    print(f"Harmonic Match: {scores['harmonic_score']}%")
-    print(f"OVERALL SCORE:  {scores['total']}%")
+    print("\n=== Advanced Mixing & Layering Test ===")
+    print(f"Track A: {t1['filename']} ({t1['bpm']} BPM)")
+    print(f"Track B: {t2['filename']} ({t2['bpm']} BPM)")
     print("-" * 35)
     
     if scores['total'] > 75:
-        print("Result: EXCELLENT MATCH")
         print(f"Action: Stretching {t2['filename']} to {t1['bpm']} BPM...")
-        out_path = "preview_sync.wav"
-        proc.stretch_to_bpm(t2['file_path'], t2['bpm'], t1['bpm'], out_path)
-        print(f"Success: Preview file created at {os.path.abspath(out_path)}")
+        stretched_path = "temp_stretched.wav"
+        proc.stretch_to_bpm(t2['file_path'], t2['bpm'], t1['bpm'], stretched_path)
+        
+        print(f"Action: Layering Track A + Stretched Track B...")
+        final_mix = "final_layered_mix.wav"
+        rend.mix_tracks(t1['file_path'], stretched_path, final_mix)
+        
+        # Cleanup temp
+        if os.path.exists(stretched_path):
+            os.remove(stretched_path)
+            
+        print(f"SUCCESS: Listen to {os.path.abspath(final_mix)}")
     else:
-        print("Result: MEDIOCRE MATCH")
+        print("Result: Compatibility too low for a good mix.")
     print("-" * 35 + "\n")
 
 if __name__ == "__main__":
