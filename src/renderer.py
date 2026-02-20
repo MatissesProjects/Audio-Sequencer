@@ -2,11 +2,11 @@ from pydub import AudioSegment, effects
 import os
 import numpy as np
 import pedalboard
-from pedalboard import Pedalboard, HighpassFilter, LowpassFilter, Limiter
+from pedalboard import Pedalboard, HighpassFilter, LowpassFilter, Limiter, Compressor
 from tqdm import tqdm
 
 class FlowRenderer:
-    """Handles mixing, layering, and crossfading multiple tracks with pro gain staging."""
+    """Handles mixing, layering, and crossfading multiple tracks with creative modulation."""
     
     def __init__(self, sample_rate=44100):
         self.sr = sample_rate
@@ -23,7 +23,6 @@ class FlowRenderer:
 
     def numpy_to_segment(self, samples, sr):
         """Helper to convert numpy float32 back to pydub segment."""
-        # Ensure no clipping before conversion
         peak = np.max(np.abs(samples))
         if peak > 1.0:
             samples /= peak
@@ -35,52 +34,73 @@ class FlowRenderer:
         else:
             return AudioSegment(samples.tobytes(), frame_rate=sr, sample_width=2, channels=1)
 
-    def dj_stitch(self, track_paths, output_path, overlay_ms=8000):
+    def apply_dynamic_ducking(self, samples, curve, filter_type='highpass'):
         """
-        Creates a 'DJ Mix' style sequence with 'Bass Swap' and Limiter protection.
+        Applies a changing filter/volume curve over time.
+        curve: numpy array of values from 0.0 to 1.0.
+        """
+        num_samples = samples.shape[1]
+        chunk_size = 4410 # 100ms
+        processed = np.zeros_like(samples)
+        
+        for start in range(0, num_samples, chunk_size):
+            end = min(start + chunk_size, num_samples)
+            intensity = curve[start]
+            chunk = samples[:, start:end]
+            
+            if filter_type == 'highpass':
+                cutoff = 20 + (intensity * 400)
+                board = Pedalboard([HighpassFilter(cutoff_frequency_hz=cutoff)])
+            else:
+                cutoff = 20000 - (intensity * 15000)
+                board = Pedalboard([LowpassFilter(cutoff_frequency_hz=cutoff)])
+                
+            processed[:, start:end] = board(chunk, self.sr)
+        return processed
+
+    def dj_stitch(self, track_paths, output_path, overlay_ms=12000):
+        """
+        Creates a 'Professional DJ Mix' with dynamic ducking automation.
         """
         if not track_paths:
             return None
             
-        # 1. Load and Normalize first track
         combined = AudioSegment.from_file(track_paths[0])
         combined = combined.set_frame_rate(self.sr).set_channels(2)
-        combined = effects.normalize(combined, headroom=1.0)
+        combined = effects.normalize(combined, headroom=0.5)
         
-        for next_track_path in tqdm(track_paths[1:], desc="Stitching tracks"):
+        for next_track_path in tqdm(track_paths[1:], desc="Professional Stitching"):
             next_seg = AudioSegment.from_file(next_track_path)
             next_seg = next_seg.set_frame_rate(self.sr).set_channels(2)
-            # Normalize incoming track to match
-            next_seg = effects.normalize(next_seg, headroom=1.0)
+            next_seg = effects.normalize(next_seg, headroom=0.5)
             
-            # Prepare segments for transition
+            # 1. Segments for transition
             out_seg = combined[-overlay_ms:]
             in_seg = next_seg[:overlay_ms]
             
-            # Convert to numpy for filtering and limiting
             out_np = self.segment_to_numpy(out_seg)
             in_np = self.segment_to_numpy(in_seg)
             
-            # 2. Apply Filters (The Bass Swap)
-            hp_board = Pedalboard([HighpassFilter(cutoff_frequency_hz=300)])
-            out_filtered = hp_board(out_np, self.sr)
+            # 2. Dynamic Curves (Automation)
+            out_curve = np.linspace(0, 1, out_np.shape[1])
+            in_curve = np.linspace(1, 0, in_np.shape[1])
             
-            lp_board = Pedalboard([LowpassFilter(cutoff_frequency_hz=300)])
-            in_filtered = lp_board(in_np, self.sr)
+            # Outgoing: High-pass (remove bass)
+            out_filtered = self.apply_dynamic_ducking(out_np, out_curve, 'highpass')
+            # Incoming: Low-pass (keep only bass then fade in highs)
+            in_filtered = self.apply_dynamic_ducking(in_np, in_curve, 'lowpass')
             
-            # 3. Layer and Apply Limiter to transition
-            # This prevents the sum of two tracks from exceeding 0dB
-            summed_np = out_filtered + in_filtered
-            limiter = Pedalboard([Limiter(threshold_db=-0.5, release_ms=100)])
-            transition_np = limiter(summed_np, self.sr)
+            # 3. Sum and Master Bus
+            summed_np = (out_filtered * (1.0 - out_curve)) + (in_filtered * (1.0 - in_curve))
+            master_bus = Pedalboard([
+                Compressor(threshold_db=-10, ratio=2.0),
+                Limiter(threshold_db=-0.1)
+            ])
+            transition_np = master_bus(summed_np, self.sr)
             
-            # Convert back
             transition_seg = self.numpy_to_segment(transition_np, self.sr)
-            
-            # Reconstruct with fades for smooth transition
             combined = combined[:-overlay_ms] + transition_seg + next_seg[overlay_ms:]
             
-        # Final pass normalization to ensure perfect levels
         combined = effects.normalize(combined, headroom=0.1)
         combined.export(output_path, format="mp3", bitrate="320k")
         return output_path
