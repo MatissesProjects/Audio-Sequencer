@@ -205,14 +205,20 @@ class TimelineWidget(QWidget):
             m = QMenu(self)
             if ts:
                 pa = m.addAction("⭐ Unmark Primary" if ts.is_primary else "⭐ Set as Primary"); sa = m.addAction("✂ Split at Cursor"); qa = m.addAction("🪄 Quantize to Grid")
+                da_dup = m.addAction("👯 Duplicate Track")
+                m.addSeparator()
                 pm = m.addMenu("🎵 Shift Pitch")
                 for i in range(-6, 7): t = f"{i:+} st" if i != 0 else "Original"; p_act = pm.addAction(t); p_act.setData(i)
-                m.addSeparator(); da = m.addAction("🗑 Remove Track"); act = m.exec(self.mapToGlobal(event.pos()))
+                m.addSeparator()
+                sl = m.addAction("💾 Capture as New Loop")
+                da_rem = m.addAction("🗑 Remove Track"); act = m.exec(self.mapToGlobal(event.pos()))
                 if act == pa: self.window().push_undo(); ts.is_primary = not ts.is_primary
                 elif act == sa: self.window().push_undo(); self.split_segment(ts, event.pos().x())
                 elif act == qa: self.window().push_undo(); self.quantize_segment(ts)
+                elif act == da_dup: self.window().push_undo(); self.window().duplicate_segment(ts)
+                elif act == sl: self.window().capture_segment_to_library(ts)
                 elif act in pm.actions(): self.window().push_undo(); ts.pitch_shift = act.data()
-                elif act == da: self.window().push_undo(); self.segments.remove(ts)
+                elif act == da_rem: self.window().push_undo(); self.segments.remove(ts)
                 if self.selected_segment == ts: self.selected_segment = None
                 self.update_geometry(); self.timelineChanged.emit()
             else:
@@ -405,6 +411,38 @@ class AudioSequencerApp(QMainWindow):
     def on_prop_changed(self):
         sel = self.timeline_widget.selected_segment
         if sel: self.push_undo(); sel.volume = self.vol_slider.value() / 100.0; sel.pitch_shift = self.pitch_combo.currentData(); sel.is_primary = self.prim_check.isChecked(); self.timeline_widget.update(); self.update_status()
+
+    def duplicate_segment(self, ts):
+        td = {'id': ts.id, 'filename': ts.filename, 'file_path': ts.file_path, 'bpm': ts.bpm, 'harmonic_key': ts.key, 'onsets_json': ",".join([str(x/1000.0) for x in ts.onsets])}
+        ns = self.timeline_widget.add_track(td, start_ms=ts.start_ms + ts.duration_ms, lane=ts.lane)
+        ns.duration_ms = ts.duration_ms; ns.offset_ms = ts.offset_ms; ns.volume = ts.volume; ns.pitch_shift = ts.pitch_shift; ns.is_primary = ts.is_primary; ns.fade_in_ms = ts.fade_in_ms; ns.fade_out_ms = ts.fade_out_ms; ns.waveform = ts.waveform
+        self.timeline_widget.update_geometry(); self.timeline_widget.update()
+
+    def capture_segment_to_library(self, ts):
+        self.loading_overlay.show_loading("Capturing Processed Loop...")
+        try:
+            # 1. Render just this clip
+            out_name = f"captured_{int(ts.start_ms)}_{ts.filename}.mp3"
+            os.makedirs("captured_loops", exist_ok=True)
+            out_path = os.path.abspath(os.path.join("captured_loops", out_name))
+            
+            # Use current target bpm for capture
+            tb = float(self.tbe.text()) if self.tbe.text() else 124.0
+            
+            # Wrap segment in a list for renderer
+            self.renderer.render_timeline([ts.to_dict()], out_path, target_bpm=tb)
+            
+            # 2. Ingest back to library
+            from src.ingestion import IngestionEngine
+            ie = IngestionEngine(db_path=self.dm.db_path)
+            ie.scan_directory(os.path.dirname(out_path)) # Just scan the folder
+            
+            self.load_library()
+            self.loading_overlay.hide_loading()
+            QMessageBox.information(self, "Captured", f"Clip captured and added to library:\n{out_name}")
+        except Exception as e:
+            self.loading_overlay.hide_loading()
+            show_error(self, "Capture Error", "Failed to capture loop.", e)
 
     def on_cursor_jump(self, ms):
         if self.is_playing: self.player.setPosition(int(ms))
