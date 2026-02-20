@@ -667,6 +667,15 @@ class AudioSequencerApp(QMainWindow):
         elif event.key() == Qt.Key.Key_S:
             sel = self.timeline_widget.selected_segment
             if sel: self.timeline_widget.solos[sel.lane] = not self.timeline_widget.solos[sel.lane]; self.timeline_widget.update(); self.preview_dirty = True
+        elif event.key() == Qt.Key.Key_Delete or event.key() == Qt.Key.Key_Backspace:
+            sel = self.timeline_widget.selected_segment
+            if sel:
+                self.push_undo()
+                self.timeline_widget.segments.remove(sel)
+                self.timeline_widget.selected_segment = None
+                self.on_segment_selected(None)
+                self.timeline_widget.update_geometry()
+                self.update_status()
         elif event.modifiers() & Qt.KeyboardModifier.ControlModifier:
             if event.key() == Qt.Key.Key_Z: self.undo()
             elif event.key() == Qt.Key.Key_Y: self.redo()
