@@ -270,6 +270,7 @@ class LoadingOverlay(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.message = "Processing Journey..."
         self.hide()
 
     def paintEvent(self, event):
@@ -277,9 +278,10 @@ class LoadingOverlay(QWidget):
         painter.fillRect(self.rect(), QColor(0, 0, 0, 180))
         painter.setPen(Qt.GlobalColor.white)
         painter.setFont(QFont("Segoe UI", 20, QFont.Weight.Bold))
-        painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "Processing Journey...")
+        painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, self.message)
 
-    def show_loading(self):
+    def show_loading(self, message="Processing..."):
+        self.message = message
         self.setGeometry(self.parent().rect())
         self.raise_()
         self.show()
@@ -319,19 +321,27 @@ class AudioSequencerApp(QMainWindow):
         
         lib_actions = QHBoxLayout()
         self.scan_btn = QPushButton("📂 Scan Folder")
+        self.scan_btn.setToolTip("Select a folder to import audio loops into your library.")
         self.scan_btn.clicked.connect(self.scan_folder)
+        
         self.embed_btn = QPushButton("🧠 AI Index")
+        self.embed_btn.setToolTip("Run AI analysis on new tracks to enable 'vibe-based' recommendations.")
         self.embed_btn.clicked.connect(self.run_embedding)
+        
         lib_actions.addWidget(self.scan_btn)
         lib_actions.addWidget(self.embed_btn)
         lib_layout.addLayout(lib_actions)
 
         self.search_bar = QLineEdit()
         self.search_bar.setPlaceholderText("🔍 Semantic Search (e.g. 'lofi beat', 'cinematic')")
+        self.search_bar.setToolTip("Search your library by 'vibe' using AI semantic matching.")
         lib_layout.addWidget(self.search_bar)
         
         self.library_table = DraggableTable(0, 3)
         self.library_table.setHorizontalHeaderLabels(["Track Name", "BPM", "Key"])
+        self.library_table.setColumnWidth(0, 250)
+        self.library_table.setColumnWidth(1, 60)
+        self.library_table.setColumnWidth(2, 60)
         self.library_table.itemSelectionChanged.connect(self.on_library_track_selected)
         lib_layout.addWidget(self.library_table)
         top_panels.addWidget(library_panel)
@@ -342,14 +352,26 @@ class AudioSequencerApp(QMainWindow):
         actions_layout.addWidget(QLabel("<h3>⚡ Actions</h3>"))
         
         self.add_to_timeline_btn = QPushButton("➕ Add to Timeline")
+        self.add_to_timeline_btn.setToolTip("Place the selected track at the end of your timeline.")
         self.add_to_timeline_btn.setStyleSheet("background-color: #2e7d32; color: white;")
         self.add_to_timeline_btn.clicked.connect(self.add_selected_to_timeline)
         actions_layout.addWidget(self.add_to_timeline_btn)
         
         self.play_btn = QPushButton("▶ Preview")
+        self.play_btn.setToolTip("Play the raw audio file.")
         self.play_btn.clicked.connect(self.play_selected)
         actions_layout.addWidget(self.play_btn)
+        
+        # Add a help section
         actions_layout.addStretch()
+        help_box = QLabel("<b>💡 Pro Tips:</b><br><br>"
+                          "• <b>Drag</b> tracks from tables to timeline.<br>"
+                          "• <b>Shift + Drag</b> clips vertically for volume.<br>"
+                          "• <b>Drag edges</b> to change duration.<br>"
+                          "• <b>Right-Click</b> to delete clips.")
+        help_box.setWordWrap(True)
+        help_box.setStyleSheet("color: #888; font-size: 11px; background: #1a1a1a; padding: 10px; border-radius: 5px;")
+        actions_layout.addWidget(help_box)
         top_panels.addWidget(actions_panel)
 
         rec_panel = QFrame()
@@ -359,6 +381,8 @@ class AudioSequencerApp(QMainWindow):
         
         self.rec_list = DraggableTable(0, 2)
         self.rec_list.setHorizontalHeaderLabels(["Match %", "Track"])
+        self.rec_list.setColumnWidth(0, 80)
+        self.rec_list.setColumnWidth(1, 300)
         self.rec_list.itemDoubleClicked.connect(self.on_rec_double_clicked)
         rec_layout.addWidget(self.rec_list)
         top_panels.addWidget(rec_panel)
@@ -369,6 +393,7 @@ class AudioSequencerApp(QMainWindow):
         timeline_header.addWidget(QLabel("<h2>🎞 Timeline Journey</h2>"))
         
         self.auto_gen_btn = QPushButton("🪄 Auto-Generate Path")
+        self.auto_gen_btn.setToolTip("Let AI build a 6-track journey based on your currently selected track.")
         self.auto_gen_btn.clicked.connect(self.auto_populate_timeline)
         timeline_header.addWidget(self.auto_gen_btn)
         
@@ -378,6 +403,7 @@ class AudioSequencerApp(QMainWindow):
         timeline_header.addWidget(self.target_bpm_edit)
         
         self.render_btn = QPushButton("🚀 RENDER FINAL MIX")
+        self.render_btn.setToolTip("Stitch and synchronize all tracks into a high-quality MP3.")
         self.render_btn.setStyleSheet("background-color: #007acc; padding: 12px 25px; font-size: 16px; color: white; font-weight: bold;")
         self.render_btn.clicked.connect(self.render_timeline)
         timeline_header.addWidget(self.render_btn)
