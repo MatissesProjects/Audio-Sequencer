@@ -9,6 +9,14 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
 from PyQt6.QtCore import Qt, QSize, QRect, pyqtSignal, QPoint, QMimeData
 from PyQt6.QtGui import QPainter, QColor, QBrush, QPen, QFont, QDrag
 
+# Project Imports
+from src.database import DataManager
+from src.scoring import CompatibilityScorer
+from src.processor import AudioProcessor
+from src.renderer import FlowRenderer
+from src.generator import TransitionGenerator
+from src.orchestrator import FullMixOrchestrator
+
 class DetailedErrorDialog(QDialog):
     def __init__(self, title, message, details, parent=None):
         super().__init__(parent)
