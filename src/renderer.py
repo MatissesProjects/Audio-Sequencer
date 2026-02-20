@@ -144,7 +144,6 @@ class FlowRenderer:
             proc = AudioProcessor()
             
             # 1. Loop/Trim to duration + offset
-            # We loop long enough to cover duration + offset, then trim
             required_raw_dur = (s['duration_ms'] + s['offset_ms']) / 1000.0
             onsets = [] 
             tmp_loop = f"temp_render_{i}_loop.wav"
@@ -152,6 +151,13 @@ class FlowRenderer:
             
             # 2. Stretch to target BPM
             y_sync = proc.stretch_to_bpm(tmp_loop, s['bpm'], target_bpm)
+            
+            # NEW: 2.5 Pitch Shift if needed
+            ps = s.get('pitch_shift', 0)
+            if ps != 0:
+                import librosa
+                y_sync = librosa.effects.pitch_shift(y_sync, sr=self.sr, n_steps=ps)
+
             seg_audio = self.numpy_to_segment(y_sync, self.sr)
             if os.path.exists(tmp_loop): os.remove(tmp_loop)
 

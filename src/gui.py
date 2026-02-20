@@ -107,9 +107,10 @@ class TrackSegment:
         self.volume = 1.0 
         self.lane = lane
         self.is_primary = False
-        self.waveform = []
+        self.waveform = [] 
         self.fade_in_ms = 2000
         self.fade_out_ms = 2000
+        self.pitch_shift = 0 # Semitones
         self.color = QColor(70, 130, 180, 200) # SteelBlue
 
     def to_dict(self):
@@ -118,9 +119,31 @@ class TrackSegment:
             'bpm': self.bpm, 'key': self.key, 'start_ms': self.start_ms,
             'duration_ms': self.duration_ms, 'offset_ms': self.offset_ms,
             'volume': self.volume, 'lane': self.lane, 'is_primary': self.is_primary,
-            'fade_in_ms': self.fade_in_ms, 'fade_out_ms': self.fade_out_ms
+            'fade_in_ms': self.fade_in_ms, 'fade_out_ms': self.fade_out_ms,
+            'pitch_shift': self.pitch_shift
         }
 
+class UndoManager:
+    def __init__(self):
+        self.undo_stack = []
+        self.redo_stack = []
+
+    def push_state(self, segments):
+        # Save a deep copy of segments state
+        state = [json.dumps(s.to_dict()) for s in segments]
+        self.undo_stack.append(state)
+        self.redo_stack.clear()
+        if len(self.undo_stack) > 50: self.undo_stack.pop(0)
+
+    def undo(self, current_segments):
+        if not self.undo_stack: return None
+        self.redo_stack.append([json.dumps(s.to_dict()) for s in current_segments])
+        return self.undo_stack.pop()
+
+    def redo(self, current_segments):
+        if not self.redo_stack: return None
+        self.undo_stack.append([json.dumps(s.to_dict()) for s in current_segments])
+        return self.redo_stack.pop()
 class DraggableTable(QTableWidget):
     """A table that allows dragging its rows as track data."""
     def mousePressEvent(self, event):
@@ -284,6 +307,16 @@ class TimelineWidget(QWidget):
                     painter.setPen(Qt.GlobalColor.black)
                     painter.setFont(QFont("Segoe UI", 7, QFont.Weight.Bold))
                     painter.drawText(badge_rect, Qt.AlignmentFlag.AlignCenter, f"{int(seg.volume*100)}%")
+                    badge_x += 45
+
+                if seg.pitch_shift != 0:
+                    painter.setBrush(QBrush(QColor(200, 100, 255))) # Purple
+                    painter.setPen(Qt.PenStyle.NoPen)
+                    badge_rect = QRect(badge_x, badge_y, 40, 16)
+                    painter.drawRoundedRect(badge_rect, 4, 4)
+                    painter.setPen(Qt.GlobalColor.black)
+                    painter.setFont(QFont("Segoe UI", 7, QFont.Weight.Bold))
+                    painter.drawText(badge_rect, Qt.AlignmentFlag.AlignCenter, f"{seg.pitch_shift:+}st")
 
         cursor_x = int(self.cursor_pos_ms * self.pixels_per_ms)
         painter.setPen(QPen(QColor(255, 50, 50), 2))
@@ -345,12 +378,28 @@ class TimelineWidget(QWidget):
                 primary_text = "⭐ Unmark Primary" if target_seg.is_primary else "⭐ Set as Primary"
                 primary_action = menu.addAction(primary_text)
                 split_action = menu.addAction("✂ Split at Cursor")
+                
+                pitch_menu = menu.addMenu("🎵 Shift Pitch")
+                for i in range(-6, 7):
+                    text = f"{i:+} Semitones" if i != 0 else "Original Pitch"
+                    pa = pitch_menu.addAction(text)
+                    pa.setData(i)
+                
                 menu.addSeparator()
                 del_action = menu.addAction("🗑 Remove Track")
                 action = menu.exec(self.mapToGlobal(event.pos()))
-                if action == primary_action: target_seg.is_primary = not target_seg.is_primary
-                elif action == split_action: self.split_segment(target_seg, event.pos().x())
+                
+                if action == primary_action:
+                    self.window().push_undo()
+                    target_seg.is_primary = not target_seg.is_primary
+                elif action == split_action:
+                    self.window().push_undo()
+                    self.split_segment(target_seg, event.pos().x())
+                elif action in pitch_menu.actions():
+                    self.window().push_undo()
+                    target_seg.pitch_shift = action.data()
                 elif action == del_action:
+                    self.window().push_undo()
                     self.segments.remove(target_seg)
                     if self.selected_segment == target_seg: self.selected_segment = None
                 self.update_geometry(); self.timelineChanged.emit()
@@ -458,10 +507,34 @@ class AudioSequencerApp(QMainWindow):
         self.renderer = FlowRenderer()
         self.generator = TransitionGenerator()
         self.orchestrator = FullMixOrchestrator()
+        self.undo_manager = UndoManager()
         self.selected_library_track = None
         self.init_ui()
         self.load_library()
         self.loading_overlay = LoadingOverlay(self.centralWidget())
+
+    def push_undo(self):
+        self.undo_manager.push_state(self.timeline_widget.segments)
+
+    def undo(self):
+        new_state = self.undo_manager.undo(self.timeline_widget.segments)
+        if new_state: self.apply_state(new_state)
+
+    def redo(self):
+        new_state = self.undo_manager.redo(self.timeline_widget.segments)
+        if new_state: self.apply_state(new_state)
+
+    def apply_state(self, state_list):
+        self.timeline_widget.segments = []
+        for s_json in state_list:
+            s = json.loads(s_json)
+            seg = TrackSegment(s, start_ms=s['start_ms'], duration_ms=s['duration_ms'], lane=s['lane'], offset_ms=s['offset_ms'])
+            seg.volume = s['volume']; seg.is_primary = s['is_primary']; seg.fade_in_ms = s['fade_in_ms']; seg.fade_out_ms = s['fade_out_ms']
+            seg.pitch_shift = s.get('pitch_shift', 0)
+            seg.waveform = self.processor.get_waveform_envelope(seg.file_path)
+            self.timeline_widget.segments.append(seg)
+        self.timeline_widget.update_geometry()
+        self.update_status()
 
     def init_ui(self):
         self.setWindowTitle("AudioSequencer AI - The Pro Flow")
@@ -494,6 +567,13 @@ class AudioSequencerApp(QMainWindow):
         ag = QFrame(); ag.setStyleSheet("background-color: #1a1a1a; border: 1px solid #333; border-radius: 8px; padding: 5px;"); al = QVBoxLayout(ag)
         al.addWidget(QLabel("<h3>📊 Analytics Board</h3>"))
         self.mod_toggle = QPushButton("🔍 Hide Markers"); self.mod_toggle.setCheckable(True); self.mod_toggle.clicked.connect(self.toggle_analytics); al.addWidget(self.mod_toggle)
+        
+        # Undo/Redo
+        ur_layout = QHBoxLayout()
+        self.undo_btn = QPushButton("↶ Undo"); self.undo_btn.clicked.connect(self.undo); ur_layout.addWidget(self.undo_btn)
+        self.redo_btn = QPushButton("↷ Redo"); self.redo_btn.clicked.connect(self.redo); ur_layout.addWidget(self.redo_btn)
+        al.addLayout(ur_layout)
+        
         self.stats_label = QLabel("Timeline empty"); self.stats_label.setStyleSheet("color: #aaa; font-size: 11px;"); al.addWidget(self.stats_label)
         save_btn = QPushButton("💾 Save Journey"); save_btn.clicked.connect(self.save_project); al.addWidget(save_btn)
         load_btn = QPushButton("📂 Load Journey"); load_btn.clicked.connect(self.load_project); al.addWidget(load_btn)
