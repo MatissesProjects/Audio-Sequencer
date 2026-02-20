@@ -1,5 +1,5 @@
 from PyQt6.QtWidgets import QWidget, QTableWidget, QFrame, QLabel, QVBoxLayout, QMenu, QApplication
-from PyQt6.QtCore import Qt, QRect, pyqtSignal, QPoint, QMimeData, QDrag
+from PyQt6.QtCore import Qt, QRect, pyqtSignal, QPoint, QMimeData
 from PyQt6.QtGui import QPainter, QColor, QBrush, QPen, QFont, QDrag
 
 from src.scoring import CompatibilityScorer
