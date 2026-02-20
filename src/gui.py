@@ -90,25 +90,29 @@ class TimelineWidget(QWidget):
     segmentSelected = pyqtSignal(object); timelineChanged = pyqtSignal()
     def __init__(self):
         super().__init__(); self.segments = []; self.setMinimumHeight(550); self.setAcceptDrops(True); self.pixels_per_ms = 0.05
-        self.selected_segment = None; self.dragging = self.resizing = self.vol_dragging = self.fade_in_dragging = self.fade_out_dragging = False
-        self.drag_start_pos = None; self.drag_start_ms = self.drag_start_dur = self.drag_start_fade = 0; self.drag_start_vol = 1.0; self.drag_start_lane = 0
+        self.selected_segment = None; self.dragging = self.resizing = self.vol_dragging = self.fade_in_dragging = self.fade_out_dragging = self.slipping = False
+        self.drag_start_pos = None; self.drag_start_ms = self.drag_start_dur = self.drag_start_fade = self.drag_start_offset = 0; self.drag_start_vol = 1.0; self.drag_start_lane = 0
         self.lane_height = 120; self.lane_spacing = 10; self.snap_threshold_ms = 2000; self.target_bpm = 124.0
         self.show_modifications = True; self.cursor_pos_ms = 0; self.show_waveforms = True; self.snap_to_grid = True; self.update_geometry()
+    
     def update_geometry(self):
         max_ms = 600000
         if self.segments: max_ms = max(max_ms, max(s.start_ms + s.duration_ms for s in self.segments) + 60000)
         self.setMinimumWidth(int(max_ms * self.pixels_per_ms)); self.update()
+    
     def get_ms_per_beat(self): return (60.0 / self.target_bpm) * 1000.0
     def get_seg_rect(self, seg):
-        x = int(seg.start_ms * self.pixels_per_ms); w = int(seg.duration_ms * self.pixels_per_ms); h = int((self.lane_height - 20) * seg.volume)
+        x = int(seg.start_ms * self.pixels_per_ms); w = int(seg.duration_ms * self.pixels_per_ms); h = 100
         y_center = (seg.lane * (self.lane_height + self.lane_spacing)) + (self.lane_height // 2) + 40
         return QRect(x, y_center - (h // 2), w, h)
+
     def paintEvent(self, event):
         painter = QPainter(self); painter.setRenderHint(QPainter.RenderHint.Antialiasing); painter.fillRect(self.rect(), QColor(25, 25, 25))
         painter.setPen(QPen(QColor(45, 45, 45), 1))
         for i in range(5): 
             y = i * (self.lane_height + self.lane_spacing) + 40; painter.fillRect(0, y, self.width(), self.lane_height, QColor(32, 32, 32))
             painter.setPen(QColor(100, 100, 100)); painter.drawText(5, y + 15, f"LANE {i+1}")
+        
         mpb = self.get_ms_per_beat(); mpbar = mpb * 4
         for i in range(0, 3600000, int(mpb)):
             x = int(i * self.pixels_per_ms); 
@@ -117,8 +121,16 @@ class TimelineWidget(QWidget):
                 painter.setPen(QPen(QColor(80, 80, 80), 1)); painter.drawLine(x, 0, x, self.height())
                 painter.setPen(QColor(150, 150, 150)); painter.drawText(x + 5, 25, f"BAR {int(i // mpbar) + 1}")
             else: painter.setPen(QPen(QColor(50, 50, 50), 1, Qt.PenStyle.DotLine)); painter.drawLine(x, 40, x, self.height())
+
         for seg in self.segments:
-            rect = self.get_seg_rect(seg); color = QColor(seg.color); color.setAlpha(int(120 + 135 * (min(seg.volume, 1.5) / 1.5)))
+            rect = self.get_seg_rect(seg); color = QColor(seg.color)
+            
+            is_ducked = False
+            if not seg.is_primary:
+                for o in self.segments:
+                    if o != seg and o.is_primary:
+                        if max(seg.start_ms, o.start_ms) < min(seg.start_ms + seg.duration_ms, o.start_ms + o.duration_ms):
+                            is_ducked = True; break
             
             hc = False
             for o in self.segments:
@@ -126,21 +138,34 @@ class TimelineWidget(QWidget):
                 if max(seg.start_ms, o.start_ms) < min(seg.start_ms + seg.duration_ms, o.start_ms + o.duration_ms):
                     if CompatibilityScorer().calculate_harmonic_score(seg.key, o.key) < 60: hc = True; break
 
+            dvol = seg.volume * 0.63 if is_ducked else seg.volume
+            color.setAlpha(int(120 + 135 * (min(dvol, 1.5) / 1.5)))
+            
             if seg == self.selected_segment: painter.setBrush(QBrush(color.lighter(130))); painter.setPen(QPen(Qt.GlobalColor.white, 3))
             elif seg.is_primary: painter.setBrush(QBrush(color)); painter.setPen(QPen(QColor(255, 215, 0), 3))
             elif hc: painter.setBrush(QBrush(color)); painter.setPen(QPen(QColor(255, 50, 50), 3))
             else: painter.setBrush(QBrush(color)); painter.setPen(QPen(QColor(200, 200, 200), 1))
             painter.drawRoundedRect(rect, 6, 6)
+            
             if self.show_waveforms and seg.waveform:
                 painter.setPen(QPen(QColor(255, 255, 255, 80), 1)); pts = len(seg.waveform); mid_y = rect.center().y(); max_h = rect.height() // 2
                 for i in range(0, rect.width(), 2):
-                    idx = int((i / rect.width()) * pts); 
-                    if idx < pts: val = seg.waveform[idx] * max_h; painter.drawLine(rect.left() + i, int(mid_y - val), rect.left() + i, int(mid_y + val))
+                    rel_idx = (i / rect.width()) * (seg.duration_ms / 30000.0)
+                    idx = int((rel_idx + (seg.offset_ms / 30000.0)) * pts) % pts
+                    val = seg.waveform[idx] * max_h
+                    painter.drawLine(rect.left() + i, int(mid_y - val), rect.left() + i, int(mid_y + val))
+            
+            # Volume Envelope
+            painter.setPen(QPen(QColor(255, 255, 255, 180), 2))
+            vol_y = rect.bottom() - int(rect.height() * (dvol / 1.5))
+            painter.drawLine(rect.left(), vol_y, rect.right(), vol_y)
+
             if seg.onsets:
                 painter.setPen(QPen(QColor(255, 255, 255, 120), 1)); stretch = self.target_bpm / seg.bpm
                 for o_ms in seg.onsets:
                     adj_ms = (o_ms - seg.offset_ms) * stretch
                     if 0 <= adj_ms <= seg.duration_ms: tx = rect.left() + int(adj_ms * self.pixels_per_ms); painter.drawLine(tx, rect.top() + 5, tx, rect.bottom() - 5)
+            
             fi_w = int(seg.fade_in_ms * self.pixels_per_ms); fo_w = int(seg.fade_out_ms * self.pixels_per_ms)
             painter.setPen(QPen(QColor(255, 255, 255, 150), 1, Qt.PenStyle.DashLine)); painter.drawLine(rect.left(), rect.bottom(), rect.left() + fi_w, rect.top()); painter.drawLine(rect.right() - fo_w, rect.top(), rect.right(), rect.bottom())
             painter.setBrush(QBrush(Qt.GlobalColor.white)); painter.setPen(Qt.PenStyle.NoPen); painter.drawEllipse(rect.left() + fi_w - 4, rect.top() - 4, 8, 8); painter.drawEllipse(rect.right() - fo_w - 4, rect.top() - 4, 8, 8)
@@ -167,9 +192,10 @@ class TimelineWidget(QWidget):
                 if rect.contains(event.pos()): clicked_seg = seg; break
             self.selected_segment = clicked_seg; self.segmentSelected.emit(clicked_seg)
             if self.selected_segment:
-                self.drag_start_pos = event.pos(); self.drag_start_ms = self.selected_segment.start_ms; self.drag_start_dur = self.selected_segment.duration_ms; self.drag_start_vol = self.selected_segment.volume; self.drag_start_lane = self.selected_segment.lane
+                self.drag_start_pos = event.pos(); self.drag_start_ms = self.selected_segment.start_ms; self.drag_start_dur = self.selected_segment.duration_ms; self.drag_start_vol = self.selected_segment.volume; self.drag_start_lane = self.selected_segment.lane; self.drag_start_offset = self.selected_segment.offset_ms
                 rect = self.get_seg_rect(self.selected_segment); 
-                if event.pos().x() > (rect.right() - 20): self.resizing = True
+                if event.modifiers() & Qt.KeyboardModifier.AltModifier: self.slipping = True
+                elif event.pos().x() > (rect.right() - 20): self.resizing = True
                 elif event.modifiers() & Qt.KeyboardModifier.ShiftModifier: self.vol_dragging = True
                 else: self.dragging = True
             else: self.cursor_pos_ms = event.pos().x() / self.pixels_per_ms
@@ -198,7 +224,9 @@ class TimelineWidget(QWidget):
     def mouseMoveEvent(self, event):
         if not self.selected_segment: return
         dx = event.pos().x() - self.drag_start_pos.x(); dy = event.pos().y() - self.drag_start_pos.y(); mpb = self.get_ms_per_beat()
-        if self.fade_in_dragging:
+        if self.slipping:
+            self.selected_segment.offset_ms = max(0, self.drag_start_offset - dx/self.pixels_per_ms)
+        elif self.fade_in_dragging:
             rf = self.drag_start_fade + dx/self.pixels_per_ms; 
             if self.snap_to_grid: rf = round(rf / mpb) * mpb
             self.selected_segment.fade_in_ms = max(0, min(self.selected_segment.duration_ms/2, rf))
@@ -210,7 +238,8 @@ class TimelineWidget(QWidget):
             rd = self.drag_start_dur + dx/self.pixels_per_ms; 
             if self.snap_to_grid: rd = round(rd / mpb) * mpb
             self.selected_segment.duration_ms = max(1000, rd)
-        elif self.vol_dragging: self.selected_segment.volume = max(0.0, min(1.5, self.drag_start_vol - dy/150.0))
+        elif self.vol_dragging:
+            self.selected_segment.volume = max(0.0, min(1.5, self.drag_start_vol - dy/150.0))
         elif self.dragging:
             ns = max(0, self.drag_start_ms + dx/self.pixels_per_ms)
             if self.snap_to_grid: ns = round(ns / mpb) * mpb
@@ -223,7 +252,7 @@ class TimelineWidget(QWidget):
             self.selected_segment.lane = nl
         self.update_geometry(); self.timelineChanged.emit()
 
-    def mouseReleaseEvent(self, event): self.dragging = self.resizing = self.vol_dragging = self.fade_in_dragging = self.fade_out_dragging = False; self.update_geometry()
+    def mouseReleaseEvent(self, event): self.dragging = self.resizing = self.vol_dragging = self.fade_in_dragging = self.fade_out_dragging = self.slipping = False; self.update_geometry()
     def wheelEvent(self, event):
         if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
             nv = max(10, min(200, int(self.pixels_per_ms * 1000) + (event.angleDelta().y() // 120 * 10)))
@@ -448,6 +477,7 @@ class AudioSequencerApp(QMainWindow):
                 d = 20000 if i % 2 == 0 else 30000; seg = self.timeline_widget.add_track(t, start_ms=cm); seg.waveform = self.processor.get_waveform_envelope(t['file_path']); cm += d - 8000 
             self.timeline_widget.update_geometry()
         self.loading_overlay.hide_loading()
+    def on_segment_selected(self, s): self.update_status()
     def render_timeline(self):
         if not self.timeline_widget.segments: return
         ss = sorted(self.timeline_widget.segments, key=lambda s: s.start_ms)
@@ -482,7 +512,7 @@ class AudioSequencerApp(QMainWindow):
             for sc, ot in results[:15]:
                 ri = self.rec_list.rowCount(); self.rec_list.insertRow(ri); si = QTableWidgetItem(f"{sc['total']}%"); si.setData(Qt.ItemDataRole.UserRole, ot['id']); si.setToolTip(f"BPM: {sc['bpm_score']}% | Har: {sc['harmonic_score']}% | Sem: {sc['semantic_score']}%"); self.rec_list.setItem(ri, 0, si); ni = QTableWidgetItem(ot['filename'])
                 if sc['harmonic_score'] >= 100: ni.setForeground(QBrush(QColor(0, 255, 100)))
-                elif sc['harmonic_score'] >= 80: ni.setForeground(QBrush(QColor(200, 200, 200)))
+                elif sc['harmonic_score'] >= 80: ni.setForeground(QBrush(QColor(200, 255, 0)))
                 self.rec_list.setItem(ri, 1, ni)
             conn.close()
         except Exception as e: print(f"Rec Engine Error: {e}")
