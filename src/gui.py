@@ -72,7 +72,7 @@ def show_error(parent, title, message, exception):
     dialog.exec()
 
 class TrackSegment:
-    def __init__(self, track_data, start_ms=0, duration_ms=20000, lane=0):
+    def __init__(self, track_data, start_ms=0, duration_ms=20000, lane=0, offset_ms=0):
         self.id = track_data['id']
         self.filename = track_data['filename']
         self.file_path = track_data['file_path']
@@ -80,6 +80,7 @@ class TrackSegment:
         self.key = track_data['harmonic_key']
         self.start_ms = start_ms
         self.duration_ms = duration_ms
+        self.offset_ms = offset_ms
         self.volume = 1.0 
         self.lane = lane
         self.is_primary = False
@@ -129,7 +130,7 @@ class TimelineWidget(QWidget):
         self.update_geometry()
 
     def update_geometry(self):
-        max_ms = 600000 # 10 mins default
+        max_ms = 600000 
         if self.segments:
             last_end = max(s.start_ms + s.duration_ms for s in self.segments)
             max_ms = max(max_ms, last_end + 60000)
@@ -150,7 +151,6 @@ class TimelineWidget(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.fillRect(self.rect(), QColor(25, 25, 25))
         
-        # Draw lane backgrounds
         painter.setPen(QPen(QColor(45, 45, 45), 1))
         for i in range(5): 
             y = i * (self.lane_height + self.lane_spacing) + 40
@@ -158,9 +158,8 @@ class TimelineWidget(QWidget):
             painter.setPen(QColor(100, 100, 100))
             painter.drawText(5, y + 15, f"LANE {i+1}")
 
-        # Time markings
         painter.setPen(QColor(70, 70, 70))
-        for i in range(0, 3600000, 10000): # Up to 1 hour
+        for i in range(0, 3600000, 10000): 
             x = int(i * self.pixels_per_ms)
             if x > self.width(): break
             painter.drawLine(x, 0, x, self.height())
@@ -177,7 +176,7 @@ class TimelineWidget(QWidget):
                 painter.setPen(QPen(Qt.GlobalColor.white, 3))
             elif seg.is_primary:
                 painter.setBrush(QBrush(color))
-                painter.setPen(QPen(QColor(255, 215, 0), 3)) # Gold for primary
+                painter.setPen(QPen(QColor(255, 215, 0), 3)) 
             else:
                 painter.setBrush(QBrush(color))
                 painter.setPen(QPen(QColor(200, 200, 200), 1))
@@ -187,12 +186,11 @@ class TimelineWidget(QWidget):
             painter.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
             painter.drawText(rect.adjusted(8, 8, -8, -8), Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft, seg.filename)
             
-            # Badges
             badge_y = rect.bottom() - 22
             badge_x = rect.left() + 8
             
             if seg.is_primary:
-                painter.setBrush(QBrush(QColor(255, 215, 0))) # Gold
+                painter.setBrush(QBrush(QColor(255, 215, 0))) 
                 painter.setPen(Qt.PenStyle.NoPen)
                 badge_rect = QRect(badge_x, badge_y, 60, 16)
                 painter.drawRoundedRect(badge_rect, 4, 4)
@@ -278,24 +276,26 @@ class TimelineWidget(QWidget):
 
     def split_segment(self, seg, x_pos):
         split_ms = x_pos / self.pixels_per_ms
-        relative_split = split_ms - seg.start_ms
+        relative_split_pos = split_ms - seg.start_ms
         
-        if relative_split < 500 or relative_split > (seg.duration_ms - 500):
+        if relative_split_pos < 500 or relative_split_pos > (seg.duration_ms - 500):
             return 
             
-        new_dur = seg.duration_ms - relative_split
-        seg.duration_ms = relative_split 
+        new_dur = seg.duration_ms - relative_split_pos
+        new_offset = seg.offset_ms + relative_split_pos
+        seg.duration_ms = relative_split_pos 
         
         track_data = {
             'id': seg.id, 'filename': seg.filename, 'file_path': seg.file_path,
             'bpm': seg.bpm, 'harmonic_key': seg.key
         }
-        new_seg = TrackSegment(track_data, start_ms=split_ms, duration_ms=new_dur, lane=seg.lane)
+        new_seg = TrackSegment(track_data, start_ms=split_ms, duration_ms=new_dur, lane=seg.lane, offset_ms=new_offset)
         new_seg.volume = seg.volume
         new_seg.is_primary = seg.is_primary
         
         self.segments.append(new_seg)
         self.update_geometry()
+        self.timelineChanged.emit()
 
     def mouseMoveEvent(self, event):
         if not self.selected_segment: return
@@ -616,7 +616,6 @@ class AudioSequencerApp(QMainWindow):
             track = dict(cursor.fetchone())
             conn.close()
             if not only_update_recs:
-                # Calculate correct offset from scroll area if needed
                 start_ms = x_pos / self.timeline_widget.pixels_per_ms if x_pos is not None else None
                 seg = self.timeline_widget.add_track(track, start_ms=start_ms)
                 if x_pos is not None: seg.lane = lane
@@ -658,7 +657,7 @@ class AudioSequencerApp(QMainWindow):
         self.loading_overlay.show_loading("Rendering your journey...")
         try:
             output_file = "timeline_mix.mp3"
-            render_data = [{'file_path': s.file_path, 'start_ms': int(s.start_ms), 'duration_ms': int(s.duration_ms), 'bpm': s.bpm, 'volume': s.volume} for s in sorted_segs]
+            render_data = [{'file_path': s.file_path, 'start_ms': int(s.start_ms), 'duration_ms': int(s.duration_ms), 'bpm': s.bpm, 'volume': s.volume, 'offset_ms': int(s.offset_ms), 'is_primary': s.is_primary} for s in sorted_segs]
             self.renderer.render_timeline(render_data, output_file, target_bpm=target_bpm)
             self.loading_overlay.hide_loading()
             QMessageBox.information(self, "Success", f"Mix rendered: {output_file}")

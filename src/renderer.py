@@ -125,47 +125,79 @@ class FlowRenderer:
     def render_timeline(self, segments, output_path, target_bpm=124):
         """
         Renders a full mix from a list of timeline segments.
-        Each segment should have: file_path, start_ms, duration_ms, bpm
+        Each segment should have: file_path, start_ms, duration_ms, bpm, offset_ms, is_primary
         """
         if not segments:
             return None
             
-        # 1. Create a master segment (empty silence)
-        total_duration = max(s['start_ms'] + s['duration_ms'] for s in segments) + 2000 # padding
+        total_duration = max(s['start_ms'] + s['duration_ms'] for s in segments) + 2000 
         master = AudioSegment.silent(duration=total_duration, frame_rate=self.sr)
         master = master.set_channels(2)
 
         print(f"Rendering timeline: {len(segments)} segments, {total_duration/1000:.1f}s total.")
 
+        processed_audios = []
+        
+        # Phase 1: Process each segment individually
         for i, s in enumerate(tqdm(segments, desc="Processing Segments")):
-            # Load and Sync
             from src.processor import AudioProcessor
             proc = AudioProcessor()
             
-            # 1. Loop and Stretch
-            # We need to loop it to the required duration first
-            onsets = [] # Simplified for now, or fetch from DB if available
+            # 1. Loop/Trim to duration + offset
+            # We loop long enough to cover duration + offset, then trim
+            required_raw_dur = (s['duration_ms'] + s['offset_ms']) / 1000.0
+            onsets = [] 
             tmp_loop = f"temp_render_{i}_loop.wav"
-            proc.loop_track(s['file_path'], s['duration_ms']/1000.0, onsets, tmp_loop)
+            proc.loop_track(s['file_path'], required_raw_dur + 2.0, onsets, tmp_loop)
             
             # 2. Stretch to target BPM
             y_sync = proc.stretch_to_bpm(tmp_loop, s['bpm'], target_bpm)
             seg_audio = self.numpy_to_segment(y_sync, self.sr)
-            
             if os.path.exists(tmp_loop): os.remove(tmp_loop)
 
-            # 3. Apply Fades and Volume
-            fade_ms = 4000
-            seg_audio = seg_audio.fade_in(fade_ms).fade_out(fade_ms)
+            # 3. Apply Offset Trim
+            # Start at offset_ms and take duration_ms
+            seg_audio = seg_audio[s['offset_ms'] : s['offset_ms'] + s['duration_ms']]
             
-            # Apply volume gain
+            # 4. Initial Gain & Fades
             vol_db = 20 * np.log10(s.get('volume', 1.0) + 1e-9)
             seg_audio = seg_audio + vol_db
             
-            # 4. Overlay onto Master
-            master = master.overlay(seg_audio, position=s['start_ms'])
+            fade_ms = min(4000, len(seg_audio) // 4)
+            seg_audio = seg_audio.fade_in(fade_ms).fade_out(fade_ms)
+            
+            processed_audios.append({
+                'audio': seg_audio,
+                'start_ms': s['start_ms'],
+                'is_primary': s.get('is_primary', False)
+            })
+
+        # Phase 2: Overlay with Lead Focus Ducking
+        for i, current in enumerate(processed_audios):
+            audio_to_overlay = current['audio']
+            
+            # Check for ducking: if I am NOT primary, but someone else overlapping IS primary
+            if not current['is_primary']:
+                curr_end = current['start_ms'] + len(audio_to_overlay)
+                for other in processed_audios:
+                    if other == current: continue
+                    if other['is_primary']:
+                        other_end = other['start_ms'] + len(other['audio'])
+                        # Check overlap
+                        overlap_start = max(current['start_ms'], other['start_ms'])
+                        overlap_end = min(curr_end, other_end)
+                        
+                        if overlap_start < overlap_end:
+                            # Duck this segment during the overlap
+                            # For simplicity, we duck the WHOLE segment if it overlaps a primary
+                            # In a pro version, we'd use automation curves
+                            audio_to_overlay = audio_to_overlay - 4.0 # Duck 4dB
+                            break
+
+            master = master.overlay(audio_to_overlay, position=current['start_ms'])
 
         # Final Polish
         master = effects.normalize(master, headroom=0.1)
         master.export(output_path, format="mp3", bitrate="320k")
         return output_path
+
