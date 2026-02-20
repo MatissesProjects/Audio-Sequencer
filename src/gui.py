@@ -315,14 +315,23 @@ class AudioSequencerApp(QMainWindow):
         except Exception as e: show_error(self, "Preview Error", "Failed to build audio.", e)
         finally: self.loading_overlay.hide_loading()
 
-    def jump_to_start(self): self.timeline_widget.cursor_pos_ms = 0; 
+    def jump_to_start(self):
+        self.timeline_widget.cursor_pos_ms = 0
         if self.is_playing: self.player.setPosition(0)
         self.timeline_widget.update()
-    def push_undo(self): self.preview_dirty = True; self.undo_manager.push_state(self.timeline_widget.segments)
-    def undo(self): ns = self.undo_manager.undo(self.timeline_widget.segments); 
+
+    def push_undo(self): 
+        self.preview_dirty = True
+        self.undo_manager.push_state(self.timeline_widget.segments)
+
+    def undo(self): 
+        ns = self.undo_manager.undo(self.timeline_widget.segments)
         if ns: self.apply_state(ns)
-    def redo(self): ns = self.undo_manager.redo(self.timeline_widget.segments); 
+
+    def redo(self): 
+        ns = self.undo_manager.redo(self.timeline_widget.segments)
         if ns: self.apply_state(ns)
+
     def apply_state(self, sl):
         self.timeline_widget.segments = []
         for sj in sl:
@@ -362,10 +371,24 @@ class AudioSequencerApp(QMainWindow):
         th.addWidget(QLabel("Target BPM:")); self.tbe = QLineEdit("124"); self.tbe.setFixedWidth(60); self.tbe.textChanged.connect(self.on_bpm_changed); th.addWidget(self.tbe)
         self.render_btn = QPushButton("🚀 RENDER FINAL MIX"); self.render_btn.setStyleSheet("background-color: #007acc; padding: 12px 25px; color: white; font-weight: bold;"); self.render_btn.clicked.connect(self.render_timeline); th.addWidget(self.render_btn)
         self.stems_btn = QPushButton("📦 EXPORT STEMS"); self.stems_btn.setStyleSheet("background-color: #444; padding: 12px 15px; color: white; font-weight: bold;"); self.stems_btn.clicked.connect(self.export_stems); th.addWidget(self.stems_btn); ml.addLayout(th)
-        t_s = QScrollArea(); t_s.setWidgetResizable(True); t_s.setStyleSheet("background-color: #1a1a1a; border: 1px solid #333;"); self.timeline_widget = TimelineWidget(); t_s.setWidget(self.timeline_widget); ml.addWidget(t_s, stretch=1)
+        t_s = QScrollArea(); t_s.setWidgetResizable(True); t_s.setStyleSheet("QScrollArea { background-color: #1a1a1a; border: 1px solid #333; } QScrollBar:horizontal { height: 12px; background: #222; } QScrollBar::handle:horizontal { background: #444; border-radius: 6px; }"); self.timeline_widget = TimelineWidget(); t_s.setWidget(self.timeline_widget); ml.addWidget(t_s, stretch=1)
         self.status_bar = QStatusBar(); self.setStatusBar(self.status_bar); self.status_bar.showMessage("Ready.")
         self.timeline_widget.segmentSelected.connect(self.on_segment_selected); self.timeline_widget.timelineChanged.connect(self.update_status)
-        self.setStyleSheet("QMainWindow { background-color: #121212; color: #e0e0e0; font-family: 'Segoe UI'; } QLabel { color: #ffffff; } QTableWidget { background-color: #1e1e1e; gridline-color: #333; color: white; } QHeaderView::section { background-color: #333; color: white; border: 1px solid #444; } QPushButton { background-color: #333; color: #fff; padding: 8px; border-radius: 4px; border: 1px solid #444; } QPushButton:hover { background-color: #444; }")
+        
+        # Comprehensive App Styling
+        self.setStyleSheet("""
+            QMainWindow { background-color: #121212; color: #e0e0e0; font-family: 'Segoe UI'; }
+            QLabel { color: #ffffff; }
+            QTableWidget { background-color: #1e1e1e; gridline-color: #333; color: white; border: 1px solid #333; }
+            QHeaderView::section { background-color: #333; color: white; border: 1px solid #444; padding: 5px; font-weight: bold; }
+            QPushButton { background-color: #333; color: #fff; padding: 8px; border-radius: 4px; border: 1px solid #444; }
+            QPushButton:hover { background-color: #444; border: 1px solid #666; }
+            QLineEdit { background-color: #222; color: white; border: 1px solid #444; padding: 5px; border-radius: 4px; }
+            QComboBox { background-color: #333; color: white; border: 1px solid #444; padding: 5px; border-radius: 4px; }
+            QCheckBox { color: white; spacing: 10px; }
+            QScrollBar:vertical { width: 12px; background: #222; }
+            QScrollBar::handle:vertical { background: #444; border-radius: 6px; }
+        """)
 
     def on_segment_selected(self, s):
         if s:
