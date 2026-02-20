@@ -1,5 +1,6 @@
 import sqlite3
 import os
+import soundfile as sf
 from src.database import DataManager
 from src.scoring import CompatibilityScorer
 from src.processor import AudioProcessor
@@ -53,7 +54,7 @@ class FullMixOrchestrator:
             
         return sequence
 
-    def generate_full_mix(self, output_path="full_continuous_mix.wav", target_bpm=120):
+    def generate_full_mix(self, output_path="full_continuous_mix.mp3", target_bpm=120):
         """Processes all tracks to match a target BPM and stitches them."""
         sequence = self.sequence_all_tracks()
         if not sequence:
@@ -61,19 +62,47 @@ class FullMixOrchestrator:
             return
 
         processed_paths = []
-        print("\nProcessing and Synchronizing tracks...")
+        print("\nProcessing, Synchronizing, and Harmonic-Syncing tracks...")
         
         tmp_dir = "temp_segments"
         os.makedirs(tmp_dir, exist_ok=True)
 
+        prev_key = None
         for i, track in enumerate(tqdm(sequence)):
             segment_path = os.path.join(tmp_dir, f"seg_{i}_{track['filename']}.wav")
-            # Convert to wav if needed and stretch
-            self.processor.stretch_to_bpm(track['file_path'], track['bpm'], target_bpm, segment_path)
-            processed_paths.append(segment_path)
+            
+            # 1. Harmonic Sync (Shift to match previous track if possible)
+            pitch_steps = 0
+            if prev_key and track['harmonic_key'] in self.scorer.CIRCLE_OF_FIFTHS:
+                curr_pos = self.scorer.CIRCLE_OF_FIFTHS[track['harmonic_key']]
+                prev_pos = self.scorer.CIRCLE_OF_FIFTHS[prev_key]
+                # Calculate shortest distance on circle of fifths
+                pitch_steps = prev_pos - curr_pos
+                if pitch_steps > 6: pitch_steps -= 12
+                if pitch_steps < -6: pitch_steps += 12
+                # Limit pitch shift to +/- 2 semitones to avoid artifacts
+                pitch_steps = max(-2, min(2, pitch_steps))
 
-        print(f"\nStitching {len(processed_paths)} tracks into final mix...")
-        self.renderer.stitch_tracks(processed_paths, output_path, crossfade_ms=3000)
+            # 2. Process: Time Stretch + Pitch Shift
+            # For now, we do them sequentially
+            temp_y = self.processor.stretch_to_bpm(track['file_path'], track['bpm'], target_bpm)
+            
+            if pitch_steps != 0:
+                # Need a middle-man for now or update processor
+                y_shifted = self.processor.shift_pitch(track['file_path'], pitch_steps) # Simplified
+                # Actually, let's just use the stretched one
+                # Refined: stretch then shift
+                import librosa
+                y_shifted = librosa.effects.pitch_shift(temp_y, sr=self.processor.sr, n_steps=pitch_steps)
+                sf.write(segment_path, y_shifted, self.processor.sr)
+            else:
+                sf.write(segment_path, temp_y, self.processor.sr)
+                
+            processed_paths.append(segment_path)
+            prev_key = track['harmonic_key']
+
+        print(f"\nStitching {len(processed_paths)} tracks using DJ-style long overlays...")
+        self.renderer.dj_stitch(processed_paths, output_path, overlay_ms=10000)
 
         # Cleanup
         for p in processed_paths:
@@ -82,5 +111,5 @@ class FullMixOrchestrator:
             try: os.rmdir(tmp_dir)
             except: pass
 
-        print(f"SUCCESS: Final mix created at {os.path.abspath(output_path)}")
+        print(f"SUCCESS: Professional mix created at {os.path.abspath(output_path)}")
         return output_path
