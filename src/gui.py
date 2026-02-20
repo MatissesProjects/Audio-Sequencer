@@ -8,8 +8,9 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QLineEdit, QLabel, QPushButton, QFrame, QMessageBox,
                              QScrollArea, QMenu, QDialog, QTextEdit, QStatusBar, QFileDialog,
                              QSlider, QComboBox, QCheckBox)
-from PyQt6.QtCore import Qt, QSize, QRect, pyqtSignal, QPoint, QMimeData, QThread, QTimer
+from PyQt6.QtCore import Qt, QSize, QRect, pyqtSignal, QPoint, QMimeData, QThread, QTimer, QUrl
 from PyQt6.QtGui import QPainter, QColor, QBrush, QPen, QFont, QDrag
+from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
 
 # Project Imports
 from src.database import DataManager
@@ -198,8 +199,11 @@ class TimelineWidget(QWidget):
                 elif event.pos().x() > (rect.right() - 20): self.resizing = True
                 elif event.modifiers() & Qt.KeyboardModifier.ShiftModifier: self.vol_dragging = True
                 else: self.dragging = True
-            else: self.cursor_pos_ms = event.pos().x() / self.pixels_per_ms
-            self.update()
+                        else:
+                            self.cursor_pos_ms = event.pos().x() / self.pixels_per_ms
+                            self.window().on_cursor_jump(self.cursor_pos_ms)
+                        self.update()
+            
         elif event.button() == Qt.MouseButton.RightButton:
             target_seg = None
             for seg in reversed(self.segments):
@@ -299,14 +303,83 @@ class LoadingOverlay(QWidget):
 class AudioSequencerApp(QMainWindow):
     def __init__(self):
         super().__init__(); self.dm = DataManager(); self.scorer = CompatibilityScorer(); self.processor = AudioProcessor(); self.renderer = FlowRenderer(); self.generator = TransitionGenerator(); self.orchestrator = FullMixOrchestrator(); self.undo_manager = UndoManager(); self.selected_library_track = None; 
+        
+        # Audio Engine
+        self.player = QMediaPlayer()
+        self.audio_output = QAudioOutput()
+        self.player.setAudioOutput(self.audio_output)
+        self.audio_output.setVolume(0.8)
+        self.preview_path = "temp_preview.wav"
+        self.preview_dirty = True
+        
         self.play_timer = QTimer(); self.play_timer.setInterval(20); self.play_timer.timeout.connect(self.update_playback_cursor); self.is_playing = False
         self.init_ui(); self.load_library(); self.loading_overlay = LoadingOverlay(self.centralWidget())
-    def update_playback_cursor(self): self.timeline_widget.cursor_pos_ms += 20; self.timeline_widget.update()
+    
+    def update_playback_cursor(self):
+        if self.is_playing:
+            pos = self.player.position()
+            self.timeline_widget.cursor_pos_ms = pos
+            self.timeline_widget.update()
+            
+            # Auto-stop at end of file (allow 500ms buffer)
+            if pos >= self.player.duration() and self.player.duration() > 0:
+                self.stop_playback()
+
+    def stop_playback(self):
+        self.player.stop()
+        self.play_timer.stop()
+        self.is_playing = False
+        self.ptb.setText("▶ Play Journey")
+        self.status_bar.showMessage("Playback reached end.")
+
     def toggle_playback(self):
-        self.is_playing = not self.is_playing
-        if self.is_playing: self.play_timer.start(); self.ptb.setText("⏹ Stop Preview")
-        else: self.play_timer.stop(); self.ptb.setText("▶ Play Journey")
-    def push_undo(self): self.undo_manager.push_state(self.timeline_widget.segments)
+        if not self.timeline_widget.segments:
+            self.status_bar.showMessage("Timeline is empty.")
+            return
+
+        if self.is_playing:
+            self.player.pause()
+            self.play_timer.stop()
+            self.is_playing = False
+            self.ptb.setText("▶ Play Journey")
+            self.status_bar.showMessage("Playback paused.")
+        else:
+            if self.preview_dirty:
+                self.render_preview_for_playback()
+            
+            self.player.setPosition(int(self.timeline_widget.cursor_pos_ms))
+            self.player.play()
+            self.play_timer.start()
+            self.is_playing = True
+            self.ptb.setText("⏸ Pause Preview")
+            self.status_bar.showMessage("Previewing arrangement audio...")
+
+    def render_preview_for_playback(self):
+        self.loading_overlay.show_loading("Building Audio Preview...")
+        try:
+            ss = sorted(self.timeline_widget.segments, key=lambda s: s.start_ms)
+            try: tbpm = float(self.tbe.text())
+            except: tbpm = 124.0
+            
+            # Render to temp WAV for fast seeking
+            rd = [s.to_dict() for s in ss]
+            self.renderer.render_timeline(rd, self.preview_path, target_bpm=tbpm)
+            self.player.setSource(QUrl.fromLocalFile(os.path.abspath(self.preview_path)))
+            self.preview_dirty = False
+        except Exception as e:
+            show_error(self, "Preview Error", "Failed to build preview audio.", e)
+        finally:
+            self.loading_overlay.hide_loading()
+
+    def jump_to_start(self):
+        self.timeline_widget.cursor_pos_ms = 0
+        if self.is_playing:
+            self.player.setPosition(0)
+        self.timeline_widget.update()
+
+    def push_undo(self): 
+        self.preview_dirty = True
+        self.undo_manager.push_state(self.timeline_widget.segments)
     def undo(self): 
         ns = self.undo_manager.undo(self.timeline_widget.segments)
         if ns: self.apply_state(ns)
@@ -348,7 +421,15 @@ class AudioSequencerApp(QMainWindow):
         tp.addWidget(mp)
         rp = QFrame(); rp.setFixedWidth(450); rl = QVBoxLayout(rp); rl.addWidget(QLabel("<h3>✨ Smart Suggestions</h3>")); self.rec_list = DraggableTable(0, 2); self.rec_list.setHorizontalHeaderLabels(["Match %", "Track"]); self.rec_list.itemDoubleClicked.connect(self.on_rec_double_clicked); rl.addWidget(self.rec_list); tp.addWidget(rp); ml.addLayout(tp, stretch=1)
         th = QHBoxLayout(); th.addWidget(QLabel("<h2>🎞 Timeline Journey</h2>"))
+        
+        # Transport Controls
+        self.stop_btn = QPushButton("⏹")
+        self.stop_btn.setFixedWidth(40)
+        self.stop_btn.clicked.connect(self.jump_to_start)
+        th.addWidget(self.stop_btn)
+        
         self.ptb = QPushButton("▶ Play Journey"); self.ptb.setFixedWidth(120); self.ptb.clicked.connect(self.toggle_playback); th.addWidget(self.ptb)
+        
         th.addSpacing(20); th.addWidget(QLabel("Zoom:")); self.zs = QSlider(Qt.Orientation.Horizontal); self.zs.setRange(10, 200); self.zs.setValue(50); self.zs.setFixedWidth(150); self.zs.valueChanged.connect(self.on_zoom_changed); th.addWidget(self.zs); th.addStretch()
         self.agb = QPushButton("🪄 Auto-Generate Path"); self.agb.clicked.connect(self.auto_populate_timeline); th.addWidget(self.agb); self.cb = QPushButton("🗑 Clear"); self.cb.clicked.connect(self.clear_timeline); th.addWidget(self.cb)
         th.addWidget(QLabel("Target BPM:")); self.tbe = QLineEdit("124"); self.tbe.setFixedWidth(60); self.tbe.textChanged.connect(self.on_bpm_changed); th.addWidget(self.tbe)
@@ -370,6 +451,11 @@ class AudioSequencerApp(QMainWindow):
         sel = self.timeline_widget.selected_segment
         if sel:
             self.push_undo(); sel.volume = self.vol_slider.value() / 100.0; sel.pitch_shift = self.pitch_combo.currentData(); sel.is_primary = self.prim_check.isChecked(); self.timeline_widget.update(); self.update_status()
+
+    def on_cursor_jump(self, pos_ms):
+        if self.is_playing:
+            self.player.setPosition(int(pos_ms))
+        self.update_status()
 
     def find_bridge_for_gap(self, x_pos):
         gap_ms = x_pos / self.timeline_widget.pixels_per_ms; prev_seg = next_seg = None; sorted_segs = sorted(self.timeline_widget.segments, key=lambda s: s.start_ms)
@@ -429,7 +515,11 @@ class AudioSequencerApp(QMainWindow):
                 seg.volume = s['volume']; seg.is_primary = s['is_primary']; seg.fade_in_ms = s['fade_in_ms']; seg.fade_out_ms = s['fade_out_ms']; seg.pitch_shift = s.get('pitch_shift', 0); seg.waveform = self.processor.get_waveform_envelope(seg.file_path); self.timeline_widget.segments.append(seg)
             self.timeline_widget.update_geometry(); self.update_status()
     def on_bpm_changed(self, t):
-        try: self.timeline_widget.target_bpm = float(t); self.timeline_widget.update(); self.update_status()
+        try: 
+            self.timeline_widget.target_bpm = float(t)
+            self.preview_dirty = True
+            self.timeline_widget.update()
+            self.update_status()
         except: pass
     def toggle_analytics(self): self.timeline_widget.show_modifications = not self.mod_toggle.isChecked(); self.mod_toggle.setText("🔍 Show Markers" if self.mod_toggle.isChecked() else "🔍 Hide Markers"); self.timeline_widget.update()
     def toggle_grid(self): self.timeline_widget.snap_to_grid = self.grid_toggle.isChecked(); self.grid_toggle.setText(f"📏 Grid Snap: {'ON' if self.timeline_widget.snap_to_grid else 'OFF'}"); self.timeline_widget.update()

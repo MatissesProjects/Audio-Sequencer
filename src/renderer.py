@@ -142,5 +142,9 @@ class FlowRenderer:
         
         # Export
         final_seg = self.numpy_to_segment(final_y, self.sr)
-        final_seg.export(output_path, format="mp3", bitrate="320k")
+        fmt = "wav" if output_path.lower().endswith(".wav") else "mp3"
+        if fmt == "wav":
+            final_seg.export(output_path, format="wav")
+        else:
+            final_seg.export(output_path, format="mp3", bitrate="320k")
         return output_path
