@@ -76,22 +76,20 @@ class FullMixOrchestrator:
             if prev_key and track['harmonic_key'] in self.scorer.CIRCLE_OF_FIFTHS:
                 curr_pos = self.scorer.CIRCLE_OF_FIFTHS[track['harmonic_key']]
                 prev_pos = self.scorer.CIRCLE_OF_FIFTHS[prev_key]
-                # Calculate shortest distance on circle of fifths
                 pitch_steps = prev_pos - curr_pos
                 if pitch_steps > 6: pitch_steps -= 12
                 if pitch_steps < -6: pitch_steps += 12
-                # Limit pitch shift to +/- 2 semitones to avoid artifacts
                 pitch_steps = max(-2, min(2, pitch_steps))
 
-            # 2. Process: Time Stretch + Pitch Shift
-            # For now, we do them sequentially
-            temp_y = self.processor.stretch_to_bpm(track['file_path'], track['bpm'], target_bpm)
+            # 2. Rhythmic Looping (Extend each track to at least 60s for long transitions)
+            onsets = [float(x) for x in track['onsets_json'].split(',')] if track['onsets_json'] else []
+            loop_path = os.path.join(tmp_dir, f"loop_{i}.wav")
+            self.processor.loop_track(track['file_path'], 60.0, onsets, loop_path)
+
+            # 3. Process: Time Stretch + Pitch Shift
+            temp_y = self.processor.stretch_to_bpm(loop_path, track['bpm'], target_bpm)
             
             if pitch_steps != 0:
-                # Need a middle-man for now or update processor
-                y_shifted = self.processor.shift_pitch(track['file_path'], pitch_steps) # Simplified
-                # Actually, let's just use the stretched one
-                # Refined: stretch then shift
                 import librosa
                 y_shifted = librosa.effects.pitch_shift(temp_y, sr=self.processor.sr, n_steps=pitch_steps)
                 sf.write(segment_path, y_shifted, self.processor.sr)
@@ -99,6 +97,8 @@ class FullMixOrchestrator:
                 sf.write(segment_path, temp_y, self.processor.sr)
                 
             processed_paths.append(segment_path)
+            # Cleanup intermediate loop
+            if os.path.exists(loop_path): os.remove(loop_path)
             prev_key = track['harmonic_key']
 
         print(f"\nStitching {len(processed_paths)} tracks using DJ-style long overlays...")
