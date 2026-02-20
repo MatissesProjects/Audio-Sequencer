@@ -7,23 +7,24 @@ class FlowRenderer:
     def __init__(self, sample_rate=44100):
         self.sr = sample_rate
 
-    def mix_tracks(self, track1_path, track2_path, output_path, gain2=-3.0, position_ms=0):
+    def stitch_tracks(self, track_paths, output_path, crossfade_ms=2000):
         """
-        Layers track2 on top of track1 at a specific millisecond offset.
+        Sequences multiple tracks horizontally with crossfades.
         """
-        s1 = AudioSegment.from_file(track1_path)
-        s2 = AudioSegment.from_file(track2_path)
+        if not track_paths:
+            return None
+            
+        combined = AudioSegment.from_file(track_paths[0])
+        combined = combined.set_frame_rate(self.sr).set_channels(2)
         
-        s1 = s1.set_frame_rate(self.sr).set_channels(2)
-        s2 = s2.set_frame_rate(self.sr).set_channels(2)
-
-        s1 = s1 - 3.0
-        s2 = s2 + gain2
-
-        # Overlay at specific position
-        mixed = s1.overlay(s2, position=position_ms)
-        
-        mixed.export(output_path, format="wav")
+        for next_track_path in track_paths[1:]:
+            next_seg = AudioSegment.from_file(next_track_path)
+            next_seg = next_seg.set_frame_rate(self.sr).set_channels(2)
+            
+            # Append with crossfade
+            combined = combined.append(next_seg, crossfade=crossfade_ms)
+            
+        combined.export(output_path, format="wav")
         return output_path
 
 if __name__ == "__main__":
