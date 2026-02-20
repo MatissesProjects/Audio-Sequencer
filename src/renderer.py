@@ -23,7 +23,6 @@ class FlowRenderer:
 
     def numpy_to_segment(self, samples, sr):
         """Helper to convert numpy float32 back to pydub segment."""
-        # Safety normalization
         peak = np.max(np.abs(samples))
         if peak > 1.0:
             samples /= peak
@@ -35,9 +34,39 @@ class FlowRenderer:
         else:
             return AudioSegment(samples.tobytes(), frame_rate=sr, sample_width=2, channels=1)
 
-    def dj_stitch(self, track_paths, output_path, overlay_ms=12000):
+    def generate_curve(self, type, num_samples, intro_samples):
+        """Generates precisely sized automation curves using S-curve easing."""
+        swap_samples = num_samples - intro_samples
+        if swap_samples < 0:
+            intro_samples = num_samples
+            swap_samples = 0
+            
+        # S-Curve for the swap phase
+        if swap_samples > 0:
+            t = np.linspace(0, 1, swap_samples)
+            s_curve = 0.5 * (1 - np.cos(np.pi * t))
+        else:
+            s_curve = np.array([])
+
+        if type == 'out_filter': # 0 -> 1
+            res = np.concatenate([np.zeros(intro_samples), s_curve])
+        elif type == 'in_filter': # 1 -> 0
+            res = np.concatenate([np.ones(intro_samples), 1.0 - s_curve])
+        elif type == 'out_vol': # 1 -> 0
+            vol_curve = np.cos(0.5 * np.pi * t) if swap_samples > 0 else np.array([])
+            res = np.concatenate([np.ones(intro_samples), vol_curve])
+        elif type == 'in_vol': # 0 -> 0.7 -> 1
+            vol_intro = np.linspace(0, 0.7, intro_samples)
+            vol_swap = 0.7 + (0.3 * np.sin(0.5 * np.pi * t)) if swap_samples > 0 else np.array([])
+            res = np.concatenate([vol_intro, vol_swap])
+        else:
+            res = np.ones(num_samples)
+            
+        return res[:num_samples]
+
+    def dj_stitch(self, track_paths, output_path, overlay_ms=20000):
         """
-        Creates a 'Professional DJ Mix' with Parallel Filter Blending and S-curve easing.
+        Creates a 'Professional DJ Mix' with precise shape matching.
         """
         if not track_paths:
             return None
@@ -51,56 +80,54 @@ class FlowRenderer:
             next_seg = next_seg.set_frame_rate(self.sr).set_channels(2)
             next_seg = effects.normalize(next_seg, headroom=0.5)
             
-            # Prepare segments
-            out_seg = combined[-overlay_ms:]
-            in_seg = next_seg[:overlay_ms]
+            safe_overlay = min(overlay_ms, int(len(combined) * 0.4), int(len(next_seg) * 0.4))
+            
+            out_seg = combined[-safe_overlay:]
+            in_seg = next_seg[:safe_overlay]
             
             out_np = self.segment_to_numpy(out_seg)
             in_np = self.segment_to_numpy(in_seg)
             
-            # S-Curve for blending
+            # THE MASTER SIZE
             num_samples = out_np.shape[1]
-            t = np.linspace(0, 1, num_samples)
-            s_curve = 0.5 * (1 - np.cos(np.pi * t))
+            in_np = in_np[:, :num_samples]
             
-            # 1. OUTGOING: Blend from Unfiltered to High-passed (remove bass)
-            hp_board = Pedalboard([HighpassFilter(cutoff_frequency_hz=400)])
-            out_hp = hp_board(out_np, self.sr)
-            out_final_np = (out_np * (1.0 - s_curve)) + (out_hp * s_curve)
-            out_final_np *= (1.0 - s_curve)
+            intro_samples = int(self.sr * (safe_overlay * 0.4) / 1000)
+            
+            # Generate curves directly at target size - reshape to (1, N) for broadcasting
+            out_f = self.generate_curve('out_filter', num_samples, intro_samples).reshape(1, -1)
+            in_f = self.generate_curve('in_filter', num_samples, intro_samples).reshape(1, -1)
+            out_v = self.generate_curve('out_vol', num_samples, intro_samples).reshape(1, -1)
+            in_v = self.generate_curve('in_vol', num_samples, intro_samples).reshape(1, -1)
 
-            # 2. INCOMING: Blend from Low-passed to Unfiltered (add highs)
-            lp_board = Pedalboard([LowpassFilter(cutoff_frequency_hz=400)])
-            in_lp = lp_board(in_np, self.sr)
-            in_final_np = (in_lp * (1.0 - s_curve)) + (in_np * s_curve)
-            in_final_np *= s_curve
+            # Processing
+            hp_board = Pedalboard([HighpassFilter(cutoff_frequency_hz=400)])
+            out_hp = hp_board(out_np, self.sr)[:, :num_samples]
+            in_hp = hp_board(in_np, self.sr)[:, :num_samples]
             
-            # 3. Sum and Glue
-            summed_np = out_final_np + in_final_np
+            out_final = ((out_np * (1.0 - out_f)) + (out_hp * out_f)) * out_v
+            in_final = ((in_hp * in_f) + (in_np * (1.0 - in_f))) * in_v
+            
+            summed_np = out_final + in_final
             master_bus = Pedalboard([
-                Compressor(threshold_db=-12, ratio=2.5, attack_ms=10, release_ms=200),
+                Compressor(threshold_db=-12, ratio=2.5),
                 Limiter(threshold_db=-0.1)
             ])
             transition_np = master_bus(summed_np, self.sr)
             
             transition_seg = self.numpy_to_segment(transition_np, self.sr)
-            combined = combined[:-overlay_ms] + transition_seg + next_seg[overlay_ms:]
+            combined = combined[:-safe_overlay] + transition_seg + next_seg[safe_overlay:]
             
         combined = effects.normalize(combined, headroom=0.1)
         combined.export(output_path, format="mp3", bitrate="320k")
         return output_path
 
     def layered_mix(self, foundation_path, layer_configs, output_path):
-        """
-        Layers multiple tracks over a foundation with smooth S-curve frequency ducking.
-        """
         foundation = AudioSegment.from_file(foundation_path)
         foundation = foundation.set_frame_rate(self.sr).set_channels(2)
         foundation = effects.normalize(foundation, headroom=0.5)
-        
         final = foundation
         
-        # We process the foundation in chunks to allow for smooth automation
         for config in tqdm(layer_configs, desc="Layering tracks"):
             layer = AudioSegment.from_file(config['path'])
             layer = layer.set_frame_rate(self.sr).set_channels(2)
@@ -108,41 +135,32 @@ class FlowRenderer:
             
             duration_ms = len(layer)
             start_ms = config['start_ms']
-            fade_ms = 4000 # 4-second smooth transition for ducking
+            fade_ms = 4000
             
-            if start_ms + duration_ms > len(final):
-                continue
+            if start_ms + duration_ms > len(final): continue
 
-            # 1. Extract the foundation part that needs ducking
-            # We take extra room for the fades
             duck_seg = final[start_ms : start_ms + duration_ms]
             duck_np = self.segment_to_numpy(duck_seg)
             num_samples = duck_np.shape[1]
             
-            # 2. Create the Ducking Envelope (S-Curve)
-            # 0.0 = no ducking, 1.0 = full ducking
             t = np.linspace(0, 1, int(self.sr * fade_ms / 1000))
-            s_fade_in = 0.5 * (1 - np.cos(np.pi * t))
-            s_fade_out = 1.0 - s_fade_in
+            s_fade = (0.5 * (1 - np.cos(np.pi * t))).astype(np.float32)
             
-            envelope = np.ones(num_samples)
-            # Apply fade in at start
-            envelope[:len(s_fade_in)] = s_fade_in
-            # Apply fade out at end
-            envelope[-len(s_fade_out):] = s_fade_out
+            envelope = np.ones(num_samples, dtype=np.float32)
+            f_s = len(s_fade)
+            if num_samples >= f_s * 2:
+                envelope[:f_s] = s_fade
+                envelope[-f_s:] = 1.0 - s_fade
             
-            # 3. Apply Progressive Filtering to Foundation
-            # Blend between clean and high-passed based on envelope
+            env_b = envelope.reshape(1, -1)
+            
             hp_board = Pedalboard([HighpassFilter(cutoff_frequency_hz=600)])
-            duck_hp = hp_board(duck_np, self.sr)
+            duck_hp = hp_board(duck_np, self.sr)[:, :num_samples]
             
-            # Foundation becomes filtered and quieter as layer swells in
-            ducked_np = (duck_np * (1.0 - envelope * 0.5)) + (duck_hp * (envelope * 0.5))
-            ducked_np *= (1.0 - envelope * 0.4) # Overall gain reduction
+            ducked_np = (duck_np * (1.0 - env_b * 0.5)) + (duck_hp * (env_b * 0.5))
+            ducked_np *= (1.0 - env_b * 0.4)
             
             ducked_seg = self.numpy_to_segment(ducked_np, self.sr)
-            
-            # 4. Prepare layer with matching crossfades
             layer_processed = layer + config.get('gain', -2.0)
             layer_processed = layer_processed.fade_in(fade_ms).fade_out(fade_ms)
             

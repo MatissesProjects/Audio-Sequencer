@@ -113,7 +113,7 @@ class FullMixOrchestrator:
             prev_key = track['harmonic_key']
 
         print(f"\nStitching {len(processed_paths)} curated tracks into final journey...")
-        self.renderer.dj_stitch(processed_paths, output_path, overlay_ms=8000)
+        self.renderer.dj_stitch(processed_paths, output_path, overlay_ms=20000)
 
         for p in processed_paths:
             if os.path.exists(p): os.remove(p)
