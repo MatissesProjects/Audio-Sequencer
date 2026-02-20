@@ -68,6 +68,41 @@ class FlowRenderer:
             
         return stem_paths
 
+    def _apply_sidechain(self, target_samples, source_samples, amount=0.8):
+        """Applies volume ducking to target based on source envelope (Fake Sidechain)."""
+        # Calculate RMS envelope of source
+        frame_len = 1024
+        hop_len = 512
+        rms = np.array([np.sqrt(np.mean(source_samples[:, i:i+frame_len]**2)) 
+                        for i in range(0, source_samples.shape[1], hop_len)])
+        
+        # Upsample envelope to match sample rate
+        envelope = np.repeat(rms, hop_len)[:source_samples.shape[1]]
+        if len(envelope) < source_samples.shape[1]:
+            envelope = np.pad(envelope, (0, source_samples.shape[1] - len(envelope)))
+            
+        # Invert envelope for ducking
+        # Normalize envelope 0-1
+        if np.max(envelope) > 0:
+            envelope /= np.max(envelope)
+            
+        # Apply ducking curve: 1.0 - (env * amount)
+        ducking_curve = 1.0 - (envelope * amount)
+        ducking_curve = np.clip(ducking_curve, 0.2, 1.0) # Floor at -14dB
+        
+        # Match lengths if target is different
+        min_len = min(target_samples.shape[1], len(ducking_curve))
+        target_samples[:, :min_len] *= ducking_curve[:min_len]
+        return target_samples
+
+    def _apply_spectral_ducking(self, target_samples, sr):
+        """Applies a high-pass filter to clear mud from background tracks."""
+        board = Pedalboard([
+            HighpassFilter(cutoff_frequency_hz=300), # Clear Bass
+            LowpassFilter(cutoff_frequency_hz=12000) # Soften Air
+        ])
+        return board(target_samples, sr)
+
     def _render_internal(self, segments, output_path, target_bpm=124, mutes=None, solos=None):
         """
         Internal rendering logic shared by full mix and stems.
@@ -173,9 +208,32 @@ class FlowRenderer:
                     o_end = o_start + other['samples'].shape[1]
                     
                     # Detect overlap
-                    if max(start, o_start) < min(end, o_end):
-                        # Apply subtle -4dB ducking for the whole overlapping clip
-                        samples *= 0.63 # approx -4dB
+                    overlap_start = max(start, o_start)
+                    overlap_end = min(end, o_end)
+                    
+                    if overlap_start < overlap_end:
+                        # 1. Apply Spectral Ducking (EQ)
+                        # We process the WHOLE clip to avoid filter clicks at boundaries
+                        samples = self._apply_spectral_ducking(samples, self.sr)
+                        
+                        # 2. Apply Dynamic Sidechain Compression
+                        # Extract the overlapping segment from the PRIMARY (Source)
+                        rel_start_o = overlap_start - o_start
+                        rel_end_o = overlap_end - o_start
+                        source_segment = other['samples'][:, rel_start_o:rel_end_o]
+                        
+                        # Extract overlapping segment from TARGET (Background)
+                        rel_start_c = overlap_start - start
+                        rel_end_c = overlap_end - start
+                        target_segment = samples[:, rel_start_c:rel_end_c]
+                        
+                        # Apply Sidechain
+                        ducked_segment = self._apply_sidechain(target_segment, source_segment, amount=0.7)
+                        
+                        # Write back
+                        samples[:, rel_start_c:rel_end_c] = ducked_segment
+                        
+                        # Only duck for one primary to avoid double-processing
                         break
             
             # Add to master buffer

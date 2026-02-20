@@ -31,12 +31,26 @@ class DataManager:
                 harmonic_key TEXT,
                 loudness_lufs REAL,
                 energy REAL,
+                onset_density REAL, -- New: Rhythmic activity measure
+                loop_start REAL, -- New: Smart loop start point
+                loop_duration REAL, -- New: Smart loop duration
                 onsets_json TEXT, -- JSON string of beat timestamps
                 date_added DATETIME DEFAULT CURRENT_TIMESTAMP,
                 last_analyzed DATETIME,
                 clp_embedding_id TEXT -- Link to vector database ID
             )
         ''')
+        
+        # Migration for existing databases
+        try:
+            cursor.execute("ALTER TABLE tracks ADD COLUMN onset_density REAL")
+        except sqlite3.OperationalError: pass
+        try:
+            cursor.execute("ALTER TABLE tracks ADD COLUMN loop_start REAL")
+        except sqlite3.OperationalError: pass
+        try:
+            cursor.execute("ALTER TABLE tracks ADD COLUMN loop_duration REAL")
+        except sqlite3.OperationalError: pass
         
         conn.commit()
         conn.close()

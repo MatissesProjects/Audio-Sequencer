@@ -41,12 +41,15 @@ class IngestionEngine:
                 cursor.execute('''
                     INSERT INTO tracks (
                         file_path, filename, duration, sample_rate, 
-                        bpm, harmonic_key, energy, onsets_json
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        bpm, harmonic_key, energy, onset_density,
+                        loop_start, loop_duration, onsets_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     features['file_path'], features['filename'], features['duration'],
                     features['sample_rate'], features['bpm'], features['harmonic_key'],
-                    features['energy'], features['onsets_json']
+                    features['energy'], features.get('onset_density', 0),
+                    features.get('loop_start', 0), features.get('loop_duration', 0),
+                    features['onsets_json']
                 ))
                 conn.commit()
             except Exception as e:

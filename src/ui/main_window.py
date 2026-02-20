@@ -835,6 +835,12 @@ class AudioSequencerApp(QMainWindow):
                 self.push_undo()
                 sm = x / self.timeline_widget.pixels_per_ms if x is not None else None
                 seg = self.timeline_widget.add_track(track, start_ms=sm)
+                
+                # Apply Smart Loop if available
+                if track.get('loop_duration', 0) > 0:
+                    seg.offset_ms = track['loop_start'] * 1000.0
+                    seg.duration_ms = track['loop_duration'] * 1000.0
+                
                 if x is not None:
                     seg.lane = lane
                 self.load_waveform_async(seg)
@@ -991,7 +997,12 @@ class AudioSequencerApp(QMainWindow):
                 self.rec_list.insertRow(ri)
                 si = QTableWidgetItem(f"{sc['total']}%")
                 si.setData(Qt.ItemDataRole.UserRole, ot['id'])
-                si.setToolTip(f"BPM: {sc['bpm_score']}% | Har: {sc['harmonic_score']}% | Sem: {sc['semantic_score']}%")
+                
+                # Enhanced Tooltip with Groove and Energy
+                tooltip = (f"BPM: {sc['bpm_score']}% | Har: {sc['harmonic_score']}% | Sem: {sc['semantic_score']}%\n"
+                           f"Groove: {sc.get('groove_score', 0)}% | Energy: {sc.get('energy_score', 0)}%")
+                si.setToolTip(tooltip)
+                
                 self.rec_list.setItem(ri, 0, si)
                 ni = QTableWidgetItem(ot['filename'])
                 if sc['harmonic_score'] >= 100:

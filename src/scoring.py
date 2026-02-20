@@ -9,10 +9,12 @@ class CompatibilityScorer:
         'C#': 7, 'G#': 8, 'D#': 9, 'A#': 10, 'F': 11
     }
 
-    def __init__(self, bpm_weight=0.3, harmonic_weight=0.3, semantic_weight=0.4):
+    def __init__(self, bpm_weight=0.25, harmonic_weight=0.25, semantic_weight=0.3, groove_weight=0.1, energy_weight=0.1):
         self.bpm_weight = bpm_weight
         self.harmonic_weight = harmonic_weight
         self.semantic_weight = semantic_weight
+        self.groove_weight = groove_weight
+        self.energy_weight = energy_weight
 
     def calculate_bpm_score(self, bpm1, bpm2):
         diff_percent = (abs(bpm1 - bpm2) / bpm1) * 100
@@ -29,6 +31,21 @@ class CompatibilityScorer:
         if distance == 0: return 100
         if distance == 1: return 80
         return max(0, 60 - (distance * 10))
+
+    def calculate_groove_score(self, d1, d2):
+        """Compares rhythmic density (onsets per second)."""
+        # Similarity score: 100 if identical, drops off as ratio diverges
+        if d1 == 0 or d2 == 0: return 50
+        ratio = min(d1, d2) / max(d1, d2)
+        return ratio * 100
+
+    def calculate_energy_score(self, e1, e2):
+        """Compares RMS energy levels."""
+        # Simple similarity
+        diff = abs(e1 - e2)
+        # Assuming energy is roughly 0.0 to 0.5 usually
+        score = max(0, 100 - (diff * 200)) 
+        return score
 
     def calculate_semantic_score(self, emb1, emb2):
         """Calculates cosine similarity between two embeddings."""
@@ -50,12 +67,23 @@ class CompatibilityScorer:
         har_s = self.calculate_harmonic_score(track1['harmonic_key'], track2['harmonic_key'])
         sem_s = self.calculate_semantic_score(emb1, emb2)
         
-        total = (bpm_s * self.bpm_weight) + (har_s * self.harmonic_weight) + (sem_s * self.semantic_weight)
+        # Safe access to new fields with defaults
+        grv_s = self.calculate_groove_score(track1.get('onset_density', 0), track2.get('onset_density', 0))
+        nrg_s = self.calculate_energy_score(track1.get('energy', 0), track2.get('energy', 0))
+        
+        total = (bpm_s * self.bpm_weight) + \
+                (har_s * self.harmonic_weight) + \
+                (sem_s * self.semantic_weight) + \
+                (grv_s * self.groove_weight) + \
+                (nrg_s * self.energy_weight)
+                
         return {
             "total": round(total, 2),
             "bpm_score": round(bpm_s, 2),
             "harmonic_score": round(har_s, 2),
-            "semantic_score": round(sem_s, 2)
+            "semantic_score": round(sem_s, 2),
+            "groove_score": round(grv_s, 2),
+            "energy_score": round(nrg_s, 2)
         }
 
     def calculate_bridge_score(self, prev_track, next_track, candidate, p_emb=None, n_emb=None, c_emb=None):
