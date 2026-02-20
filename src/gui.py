@@ -560,14 +560,58 @@ class AudioSequencerApp(QMainWindow):
         if self.selected_library_track: self.add_track_by_id(self.selected_library_track['id'])
     def on_rec_double_clicked(self, i): self.add_track_by_id(self.rec_list.item(i.row(), 0).data(Qt.ItemDataRole.UserRole))
     def auto_populate_timeline(self):
-        if not self.selected_library_track: return
-        self.push_undo(); self.loading_overlay.show_loading(); seq = self.orchestrator.find_curated_sequence(max_tracks=6, seed_track=self.selected_library_track)
-        if seq:
-            self.timeline_widget.segments = []; cm = 0
-            for i, t in enumerate(seq):
-                seg = self.timeline_widget.add_track(t, start_ms=cm); seg.waveform = self.processor.get_waveform_envelope(t['file_path']); cm += (20000 if i % 2 == 0 else 30000) - 8000 
-            self.timeline_widget.update_geometry()
-        self.loading_overlay.hide_loading()
+        if not self.selected_library_track:
+            self.status_bar.showMessage("Select a track in the library to use as a seed.")
+            return
+            
+        self.push_undo(); self.loading_overlay.show_loading("AI: Orchestrating Layered Journey...")
+        
+        # 1. Clear current (optional, but better for a fresh start)
+        self.timeline_widget.segments = []
+        
+        try:
+            # 2. Get a high-compatibility sequence
+            seq = self.orchestrator.find_curated_sequence(max_tracks=8, seed_track=self.selected_library_track)
+            
+            if seq:
+                # We'll create a structured mix:
+                # - Tracks 0, 2, 4, 6 are 'Foundation' (Lane 1)
+                # - Tracks 1, 3, 5, 7 are 'Interludes' (Lane 2 or 3)
+                
+                current_ms = 0
+                for i, track in enumerate(seq):
+                    is_foundation = (i % 2 == 0)
+                    lane = 0 if is_foundation else (1 if i % 4 == 1 else 2)
+                    
+                    # Duration: Foundations are long, Interludes are shorter
+                    duration = 30000 if is_foundation else 15000
+                    
+                    # Overlap: Foundation tracks overlap each other by 8s
+                    # Interludes start 5s into a foundation
+                    if is_foundation:
+                        start_ms = current_ms
+                        if i > 0: start_ms -= 8000 # crossfade overlap
+                        current_ms = start_ms + duration
+                    else:
+                        # Interludes sit 'inside' the foundation
+                        start_ms = current_ms - 25000 
+                    
+                    seg = self.timeline_widget.add_track(track, start_ms=max(0, start_ms), lane=lane)
+                    seg.duration_ms = duration
+                    seg.is_primary = is_foundation
+                    seg.waveform = self.processor.get_waveform_envelope(track['file_path'])
+                    
+                    # Set default fades
+                    seg.fade_in_ms = 4000
+                    seg.fade_out_ms = 4000
+                
+                self.timeline_widget.update_geometry()
+                self.status_bar.showMessage(f"AI: Orchestrated {len(seq)} tracks into a multi-lane journey.")
+            
+            self.loading_overlay.hide_loading()
+        except Exception as e:
+            self.loading_overlay.hide_loading()
+            show_error(self, "Orchestration Error", "Failed to auto-generate path.", e)
     def render_timeline(self):
         if not self.timeline_widget.segments: return
         ss = sorted(self.timeline_widget.segments, key=lambda s: s.start_ms); tb = float(self.tbe.text()) if self.tbe.text() else 124.0
