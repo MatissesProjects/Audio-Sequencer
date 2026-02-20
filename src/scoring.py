@@ -57,3 +57,17 @@ class CompatibilityScorer:
             "harmonic_score": round(har_s, 2),
             "semantic_score": round(sem_s, 2)
         }
+
+    def calculate_bridge_score(self, prev_track, next_track, candidate, p_emb=None, n_emb=None, c_emb=None):
+        """Evaluates how well a candidate track acts as a bridge between two others."""
+        # Score A -> Candidate
+        score_in = self.get_total_score(prev_track, candidate, p_emb, c_emb)
+        # Score Candidate -> B
+        score_out = self.get_total_score(candidate, next_track, c_emb, n_emb)
+        
+        # We want a candidate that is compatible with BOTH
+        # Harmonic continuity is especially important for bridges
+        avg_total = (score_in['total'] + score_out['total']) / 2
+        harmonic_bonus = (score_in['harmonic_score'] + score_out['harmonic_score']) / 4 # up to 50pts bonus
+        
+        return round(min(100, avg_total + harmonic_bonus), 2)

@@ -354,6 +354,12 @@ class TimelineWidget(QWidget):
                     self.segments.remove(target_seg)
                     if self.selected_segment == target_seg: self.selected_segment = None
                 self.update_geometry(); self.timelineChanged.emit()
+            else:
+                # Clicked empty space
+                bridge_action = menu.addAction("🪄 Find Bridge Track here")
+                action = menu.exec(self.mapToGlobal(event.pos()))
+                if action == bridge_action:
+                    self.window().find_bridge_for_gap(event.pos().x())
 
     def split_segment(self, seg, x_pos):
         split_ms = x_pos / self.pixels_per_ms
@@ -618,6 +624,62 @@ class AudioSequencerApp(QMainWindow):
                 seg.waveform = self.processor.get_waveform_envelope(seg.file_path)
                 self.timeline_widget.segments.append(seg)
             self.timeline_widget.update_geometry(); self.update_status()
+
+    def find_bridge_for_gap(self, x_pos):
+        gap_ms = x_pos / self.timeline_widget.pixels_per_ms
+        
+        # Find track before and after gap_ms
+        prev_seg = None
+        next_seg = None
+        
+        sorted_segs = sorted(self.timeline_widget.segments, key=lambda s: s.start_ms)
+        for s in sorted_segs:
+            if s.start_ms + s.duration_ms <= gap_ms:
+                prev_seg = s
+            elif s.start_ms >= gap_ms:
+                if next_seg is None: next_seg = s
+        
+        if not prev_seg or not next_seg:
+            self.status_bar.showMessage("Need a track before AND after the gap to find a bridge.")
+            return
+
+        self.loading_overlay.show_loading(f"AI: Finding bridge between '{prev_seg.filename[:15]}' and '{next_seg.filename[:15]}'...")
+        
+        try:
+            conn = self.dm.get_conn()
+            conn.row_factory = sqlite3_factory
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM tracks WHERE id NOT IN (?, ?)", (prev_seg.id, next_seg.id))
+            candidates = cursor.fetchall()
+            
+            p_emb = self.dm.get_embedding(prev_seg.id) # Placeholder, might need real embedding logic
+            n_emb = self.dm.get_embedding(next_seg.id)
+            
+            results = []
+            for c in candidates:
+                c_dict = dict(c)
+                c_emb = self.dm.get_embedding(c_dict['clp_embedding_id']) if c_dict['clp_embedding_id'] else None
+                score = self.scorer.calculate_bridge_score(prev_seg.__dict__, next_seg.__dict__, c_dict, c_emb=c_emb)
+                results.append((score, c_dict))
+            
+            results.sort(key=lambda x: x[0], reverse=True)
+            
+            # Show bridge results in the Recommendation list
+            self.rec_list.setRowCount(0)
+            for score, o_track in results[:15]:
+                ri = self.rec_list.rowCount(); self.rec_list.insertRow(ri)
+                si = QTableWidgetItem(f"{score}% (BRIDGE)")
+                si.setData(Qt.ItemDataRole.UserRole, o_track['id'])
+                si.setToolTip(f"This track has high compatibility with BOTH surrounding segments.")
+                self.rec_list.setItem(ri, 0, si)
+                self.rec_list.setItem(ri, 1, QTableWidgetItem(o_track['filename']))
+            
+            self.loading_overlay.hide_loading()
+            self.status_bar.showMessage(f"AI found {len(results)} potential bridges.")
+            conn.close()
+        except Exception as e:
+            self.loading_overlay.hide_loading()
+            show_error(self, "Bridge Error", "AI Bridge search failed.", e)
 
     def on_bpm_changed(self, text):
         try: self.timeline_widget.target_bpm = float(text); self.timeline_widget.update(); self.update_status()
