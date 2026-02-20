@@ -5,7 +5,8 @@ import json
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                              QTableWidgetItem, QLineEdit, QLabel, QPushButton, 
                              QFrame, QMessageBox, QScrollArea, QFileDialog,
-                             QSlider, QComboBox, QCheckBox, QStatusBar, QApplication)
+                             QSlider, QComboBox, QCheckBox, QStatusBar, QApplication,
+                             QSplitter)
 from PyQt6.QtCore import Qt, QSize, QTimer, QUrl
 from PyQt6.QtGui import QBrush, QColor
 from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
@@ -78,9 +79,18 @@ class AudioSequencerApp(QMainWindow):
         
         cw = QWidget()
         self.setCentralWidget(cw)
-        ml = QVBoxLayout(cw)
+        main_layout = QVBoxLayout(cw)
         
-        # Top Panel
+        # Create a Vertical Splitter for the whole app
+        self.main_splitter = QSplitter(Qt.Orientation.Vertical)
+        self.main_splitter.setHandleWidth(10)
+        self.main_splitter.setStyleSheet("QSplitter::handle { background-color: #333; border: 1px solid #444; } QSplitter::handle:hover { background-color: #555; }")
+        
+        # --- Top Widget (Library + Actions + Suggestions) ---
+        top_widget = QWidget()
+        top_layout = QVBoxLayout(top_widget)
+        top_layout.setContentsMargins(0, 0, 0, 0)
+        
         tp = QHBoxLayout()
         
         # 1. Library Panel
@@ -131,7 +141,7 @@ class AudioSequencerApp(QMainWindow):
         
         tp.addWidget(lp)
         
-        # 2. Middle/Right Panel (Controls & Recs)
+        # 2. Middle Panel (Analytics & Action)
         mp = QFrame()
         mp.setFixedWidth(250)
         mlayout = QVBoxLayout(mp)
@@ -217,7 +227,7 @@ class AudioSequencerApp(QMainWindow):
         
         tp.addWidget(mp)
         
-        # 3. Recommendations
+        # 3. Recommendations Panel
         rp = QFrame()
         rp.setFixedWidth(450)
         rl = QVBoxLayout(rp)
@@ -228,9 +238,14 @@ class AudioSequencerApp(QMainWindow):
         rl.addWidget(self.rec_list)
         tp.addWidget(rp)
         
-        ml.addLayout(tp, stretch=1)
+        top_layout.addLayout(tp)
+        self.main_splitter.addWidget(top_widget)
         
-        # Timeline Section
+        # --- Bottom Widget (Timeline Section) ---
+        bottom_widget = QWidget()
+        bottom_layout = QVBoxLayout(bottom_widget)
+        bottom_layout.setContentsMargins(0, 0, 0, 0)
+        
         th = QHBoxLayout()
         th.addWidget(QLabel("<h2>🎞 Timeline Journey</h2>"))
         
@@ -301,15 +316,23 @@ class AudioSequencerApp(QMainWindow):
         self.stems_btn.clicked.connect(self.export_stems)
         th.addWidget(self.stems_btn)
         
-        ml.addLayout(th)
+        bottom_layout.addLayout(th)
         
         t_s = QScrollArea()
         t_s.setWidgetResizable(True)
         t_s.setStyleSheet("QScrollArea { background-color: #1a1a1a; border: 1px solid #333; } QScrollBar:horizontal { height: 12px; background: #222; } QScrollBar::handle:horizontal { background: #444; border-radius: 6px; }")
+        t_s.setMinimumHeight(350) # Ensure timeline is never too small
         
         self.timeline_widget = TimelineWidget()
         t_s.setWidget(self.timeline_widget)
-        ml.addWidget(t_s, stretch=1)
+        bottom_layout.addWidget(t_s)
+        
+        self.main_splitter.addWidget(bottom_widget)
+        
+        # Set initial sizes (60% top, 40% bottom)
+        self.main_splitter.setSizes([600, 400])
+        
+        main_layout.addWidget(self.main_splitter)
         
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
