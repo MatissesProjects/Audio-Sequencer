@@ -837,9 +837,11 @@ class AudioSequencerApp(QMainWindow):
                 seg = self.timeline_widget.add_track(track, start_ms=sm)
                 
                 # Apply Smart Loop if available
-                if track.get('loop_duration', 0) > 0:
-                    seg.offset_ms = track['loop_start'] * 1000.0
-                    seg.duration_ms = track['loop_duration'] * 1000.0
+                loop_dur = track.get('loop_duration') or 0
+                loop_start = track.get('loop_start') or 0
+                if loop_dur > 0:
+                    seg.offset_ms = loop_start * 1000.0
+                    seg.duration_ms = loop_dur * 1000.0
                 
                 if x is not None:
                     seg.lane = lane

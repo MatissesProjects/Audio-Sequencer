@@ -67,9 +67,9 @@ class CompatibilityScorer:
         har_s = self.calculate_harmonic_score(track1['harmonic_key'], track2['harmonic_key'])
         sem_s = self.calculate_semantic_score(emb1, emb2)
         
-        # Safe access to new fields with defaults
-        grv_s = self.calculate_groove_score(track1.get('onset_density', 0), track2.get('onset_density', 0))
-        nrg_s = self.calculate_energy_score(track1.get('energy', 0), track2.get('energy', 0))
+        # Safe access to new fields with defaults (handling None values)
+        grv_s = self.calculate_groove_score(track1.get('onset_density') or 0, track2.get('onset_density') or 0)
+        nrg_s = self.calculate_energy_score(track1.get('energy') or 0, track2.get('energy') or 0)
         
         total = (bpm_s * self.bpm_weight) + \
                 (har_s * self.harmonic_weight) + \
