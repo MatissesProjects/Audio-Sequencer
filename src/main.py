@@ -59,7 +59,7 @@ def main():
 
     if args.gui:
         from PyQt6.QtWidgets import QApplication
-        from src.gui import AudioSequencerApp
+        from src.ui.main_window import AudioSequencerApp
         app = QApplication(sys.argv)
         window = AudioSequencerApp()
         window.show()
