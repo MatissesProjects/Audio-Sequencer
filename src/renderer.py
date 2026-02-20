@@ -46,8 +46,33 @@ class FlowRenderer:
         return output_path
 
     def render_timeline(self, segments, output_path, target_bpm=124):
+        return self._render_internal(segments, output_path, target_bpm)
+
+    def render_stems(self, segments, output_folder, target_bpm=124):
         """
-        Renders a professional-grade mix with Master Limiting and S-Curve blending.
+        Exports each lane to a separate audio file.
+        """
+        if not os.path.exists(output_folder):
+            os.makedirs(output_folder)
+            
+        lanes = {}
+        for s in segments:
+            l = s.get('lane', 0)
+            if l not in lanes: lanes[l] = []
+            lanes[l].append(s)
+            
+        stem_paths = []
+        for lane_id, lane_segs in lanes.items():
+            path = os.path.join(output_folder, f"lane_{lane_id+1}.mp3")
+            print(f"Exporting Stem: Lane {lane_id+1}...")
+            self._render_internal(lane_segs, path, target_bpm)
+            stem_paths.append(path)
+            
+        return stem_paths
+
+    def _render_internal(self, segments, output_path, target_bpm=124):
+        """
+        Internal rendering logic shared by full mix and stems.
         """
         if not segments:
             return None

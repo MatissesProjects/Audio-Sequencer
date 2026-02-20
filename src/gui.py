@@ -433,7 +433,14 @@ class AudioSequencerApp(QMainWindow):
         th.addSpacing(20); th.addWidget(QLabel("Zoom:")); self.zs = QSlider(Qt.Orientation.Horizontal); self.zs.setRange(10, 200); self.zs.setValue(50); self.zs.setFixedWidth(150); self.zs.valueChanged.connect(self.on_zoom_changed); th.addWidget(self.zs); th.addStretch()
         self.agb = QPushButton("🪄 Auto-Generate Path"); self.agb.clicked.connect(self.auto_populate_timeline); th.addWidget(self.agb); self.cb = QPushButton("🗑 Clear"); self.cb.clicked.connect(self.clear_timeline); th.addWidget(self.cb)
         th.addWidget(QLabel("Target BPM:")); self.tbe = QLineEdit("124"); self.tbe.setFixedWidth(60); self.tbe.textChanged.connect(self.on_bpm_changed); th.addWidget(self.tbe)
-        self.render_btn = QPushButton("🚀 RENDER FINAL MIX"); self.render_btn.setStyleSheet("background-color: #007acc; padding: 12px 25px; color: white; font-weight: bold;"); self.render_btn.clicked.connect(self.render_timeline); th.addWidget(self.render_btn); ml.addLayout(th)
+        self.render_btn = QPushButton("🚀 RENDER FINAL MIX"); self.render_btn.setStyleSheet("background-color: #007acc; padding: 12px 25px; color: white; font-weight: bold;"); self.render_btn.clicked.connect(self.render_timeline); th.addWidget(self.render_btn)
+        
+        self.stems_btn = QPushButton("📦 EXPORT STEMS")
+        self.stems_btn.setStyleSheet("background-color: #444; padding: 12px 15px; color: white; font-weight: bold;")
+        self.stems_btn.clicked.connect(self.export_stems)
+        th.addWidget(self.stems_btn)
+        
+        ml.addLayout(th)
         t_scroll = QScrollArea(); t_scroll.setWidgetResizable(True); self.timeline_widget = TimelineWidget(); t_scroll.setWidget(self.timeline_widget); ml.addWidget(t_scroll, stretch=1)
         self.status_bar = QStatusBar(); self.setStatusBar(self.status_bar); self.status_bar.showMessage("Ready.")
         self.timeline_widget.segmentSelected.connect(self.on_segment_selected); self.timeline_widget.timelineChanged.connect(self.update_status)
@@ -573,11 +580,32 @@ class AudioSequencerApp(QMainWindow):
         ss = sorted(self.timeline_widget.segments, key=lambda s: s.start_ms)
         try: tbpm = float(self.tbe.text())
         except: tbpm = 124.0
-        self.loading_overlay.show_loading("Rendering..."); 
+        self.loading_overlay.show_loading("Rendering Final Mix..."); 
         try:
             out = "timeline_mix.mp3"; rd = [s.to_dict() for s in ss]
             self.renderer.render_timeline(rd, out, target_bpm=tbpm); self.loading_overlay.hide_loading(); QMessageBox.information(self, "Success", f"Mix rendered: {out}"); os.startfile(out)
         except Exception as e: self.loading_overlay.hide_loading(); show_error(self, "Render Error", "Failed to render.", e)
+
+    def export_stems(self):
+        if not self.timeline_widget.segments: return
+        
+        folder = QFileDialog.getExistingDirectory(self, "Select Export Folder")
+        if not folder: return
+        
+        try: tbpm = float(self.tbe.text())
+        except: tbpm = 124.0
+        
+        self.loading_overlay.show_loading("Exporting Individual Stems...")
+        try:
+            rd = [s.to_dict() for s in self.timeline_widget.segments]
+            paths = self.renderer.render_stems(rd, folder, target_bpm=tbpm)
+            self.loading_overlay.hide_loading()
+            QMessageBox.information(self, "Stems Exported", f"Successfully exported {len(paths)} stems to:\n{folder}")
+            os.startfile(folder)
+        except Exception as e:
+            self.loading_overlay.hide_loading()
+            show_error(self, "Stem Export Error", "Failed to export stems.", e)
+
     def scan_folder(self):
         f = QFileDialog.getExistingDirectory(self, "Select Folder")
         if f:
