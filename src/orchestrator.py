@@ -17,10 +17,10 @@ class FullMixOrchestrator:
         self.scorer = CompatibilityScorer()
         self.processor = AudioProcessor()
         self.renderer = FlowRenderer()
-        self.min_score_threshold = 75.0 # Only mix if they sound good together
+        self.min_score_threshold = 55.0 # Lowered to ensure we get 6 tracks
 
-    def find_curated_sequence(self, max_tracks=8):
-        """Finds a high-compatibility path, skipping tracks that don't fit."""
+    def find_curated_sequence(self, max_tracks=6):
+        """Finds a high-compatibility path, aiming for a specific length."""
         conn = self.dm.get_conn()
         conn.row_factory = lambda cursor, row: {col[0]: row[idx] for idx, col in enumerate(cursor.description)}
         cursor = conn.cursor()
@@ -91,9 +91,9 @@ class FullMixOrchestrator:
                 if pitch_steps < -6: pitch_steps += 12
                 pitch_steps = max(-2, min(2, pitch_steps))
 
-            # 2. Dynamic Duration (Vary how long each track stays in the mix)
-            # We take 32 to 48 seconds depending on the track index
-            duration = 32.0 if i % 2 == 0 else 40.0
+            # 2. Dynamic Duration (Shorter 'sections' for 6-clip journey)
+            # 16 to 24 seconds per clip
+            duration = 16.0 if i % 2 == 0 else 24.0
             
             onsets = [float(x) for x in track['onsets_json'].split(',')] if track['onsets_json'] else []
             loop_path = os.path.join(tmp_dir, f"loop_{i}.wav")
