@@ -213,10 +213,10 @@ class TimelineWidget(QWidget):
                 elif event.pos().x() > (rect.right() - 20): self.resizing = True
                 elif event.modifiers() & Qt.KeyboardModifier.ShiftModifier: self.vol_dragging = True
                 else: self.dragging = True
-                        else:
-                            self.cursor_pos_ms = event.pos().x() / self.pixels_per_ms
-                            self.window().on_cursor_jump(self.cursor_pos_ms)
-                        self.update()
+            else:
+                self.cursor_pos_ms = event.pos().x() / self.pixels_per_ms
+                self.window().on_cursor_jump(self.cursor_pos_ms)
+            self.update()
             
         elif event.button() == Qt.MouseButton.RightButton:
             target_seg = None
@@ -602,7 +602,7 @@ class AudioSequencerApp(QMainWindow):
     def auto_populate_timeline(self):
         if not self.selected_library_track: return
         self.push_undo(); self.loading_overlay.show_loading(); seq = self.orchestrator.find_curated_sequence(max_tracks=6, seed_track=self.selected_library_track)
-        if sequence:
+        if seq:
             self.timeline_widget.segments = []; cm = 0
             for i, t in enumerate(seq):
                 d = 20000 if i % 2 == 0 else 30000; seg = self.timeline_widget.add_track(t, start_ms=cm); seg.waveform = self.processor.get_waveform_envelope(t['file_path']); cm += d - 8000 
