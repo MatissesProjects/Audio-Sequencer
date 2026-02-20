@@ -512,8 +512,24 @@ class AudioSequencerApp(QMainWindow):
             avg_bpm = sum(s.bpm for s in self.timeline_widget.segments) / count
             bpm_diff = abs(avg_bpm - self.timeline_widget.target_bpm)
             self.status_bar.showMessage(f"Timeline: {count} tracks | Total Duration: {total_dur/1000:.1f}s")
+            
             at = (f"<b>Tracks:</b> {count}<br><b>Duration:</b> {total_dur/1000:.1f}s<br><b>Avg Track BPM:</b> {avg_bpm:.1f}<br><b>BPM Variance:</b> {bpm_diff:.1f}<br>")
             if bpm_diff > 10: at += "<br><span style='color: #ffaa00;'>⚠️ Large BPM stretch active</span>"
+            
+            # Harmonic Compatibility Check for Selected
+            if self.timeline_widget.selected_segment:
+                sel = self.timeline_widget.selected_segment
+                at += f"<br><b>Selected Key:</b> {sel.key}"
+                # Find overlaps or neighbors
+                for other in self.timeline_widget.segments:
+                    if other == sel: continue
+                    # Simple check: if they are in different lanes but overlap
+                    overlap = max(sel.start_ms, other.start_ms) < min(sel.start_ms + sel.duration_ms, other.start_ms + other.duration_ms)
+                    if overlap:
+                        h_score = self.scorer.calculate_harmonic_score(sel.key, other.key)
+                        color = "#00ff66" if h_score >= 100 else "#ccff00" if h_score >= 80 else "#ff5555"
+                        at += f"<br>Overlap with '{other.filename[:10]}...': <span style='color: {color};'>{h_score}% Match</span>"
+            
             self.stats_label.setText(at)
         else: self.status_bar.showMessage("Ready."); self.stats_label.setText("Timeline empty")
     def load_library(self):
@@ -601,10 +617,29 @@ class AudioSequencerApp(QMainWindow):
             cursor.execute("SELECT * FROM tracks WHERE id != ?", (track_id,)); others = cursor.fetchall(); results = []
             for other in others:
                 other_dict = dict(other); other_emb = self.dm.get_embedding(other_dict['clp_embedding_id']) if other_dict['clp_embedding_id'] else None
-                score = self.scorer.get_total_score(target, other_dict, target_emb, other_emb); results.append((score['total'], other_dict['filename'], other_dict['id']))
-            results.sort(key=lambda x: x[0], reverse=True); self.rec_list.setRowCount(0)
-            for score, name, tid in results[:10]:
-                ri = self.rec_list.rowCount(); self.rec_list.insertRow(ri); si = QTableWidgetItem(f"{score}%"); si.setData(Qt.ItemDataRole.UserRole, tid); self.rec_list.setItem(ri, 0, si); self.rec_list.setItem(ri, 1, QTableWidgetItem(name))
+                score_data = self.scorer.get_total_score(target, other_dict, target_emb, other_emb)
+                results.append((score_data, other_dict))
+            
+            results.sort(key=lambda x: x[0]['total'], reverse=True); self.rec_list.setRowCount(0)
+            
+            for score, o_track in results[:15]:
+                ri = self.rec_list.rowCount(); self.rec_list.insertRow(ri)
+                
+                # Score Item with Tooltip
+                si = QTableWidgetItem(f"{score['total']}%")
+                si.setData(Qt.ItemDataRole.UserRole, o_track['id'])
+                tooltip = (f"Breakdown:\n"
+                           f"• BPM Match: {score['bpm_score']}%\n"
+                           f"• Harmonic Fit: {score['harmonic_score']}%\n"
+                           f"• Semantic Vibe: {score['semantic_score']}%")
+                si.setToolTip(tooltip)
+                self.rec_list.setItem(ri, 0, si)
+                
+                # Name Item with Harmonic Color
+                ni = QTableWidgetItem(o_track['filename'])
+                if score['harmonic_score'] >= 100: ni.setForeground(QBrush(QColor(0, 255, 100))) # Perfect Match
+                elif score['harmonic_score'] >= 80: ni.setForeground(QBrush(QColor(200, 255, 0))) # Adjacent
+                self.rec_list.setItem(ri, 1, ni)
             conn.close()
         except Exception as e: print(f"Rec Engine Error: {e}")
     def play_selected(self):
