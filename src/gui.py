@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QLineEdit, QLabel, QPushButton, QFrame, QMessageBox,
                              QScrollArea, QMenu, QDialog, QTextEdit, QStatusBar, QFileDialog,
                              QSlider)
-from PyQt6.QtCore import Qt, QSize, QRect, pyqtSignal, QPoint, QMimeData, QThread
+from PyQt6.QtCore import Qt, QSize, QRect, pyqtSignal, QPoint, QMimeData, QThread, QTimer
 from PyQt6.QtGui import QPainter, QColor, QBrush, QPen, QFont, QDrag
 
 # Project Imports
@@ -33,9 +33,9 @@ class DetailedErrorDialog(QDialog):
         self.details_box = QTextEdit(); self.details_box.setReadOnly(True); self.details_box.setText(details)
         self.details_box.setStyleSheet("background-color: #1a1a1a; color: #ff5555; font-family: Consolas, monospace;"); layout.addWidget(self.details_box)
         btn_layout = QHBoxLayout()
-        copy_btn = QPushButton("📋 Copy to Clipboard"); copy_btn.clicked.connect(self.copy_to_clipboard); btn_layout.addWidget(copy_btn)
-        close_btn = QPushButton("Close"); close_btn.clicked.connect(self.accept); close_btn.setDefault(True); btn_layout.addWidget(close_btn)
-        layout.addLayout(btn_layout)
+        copy_btn = QPushButton("📋 Copy to Clipboard"); copy_btn.clicked.connect(self.copy_to_clipboard)
+        btn_layout.addWidget(copy_btn); close_btn = QPushButton("Close"); close_btn.clicked.connect(self.accept); close_btn.setDefault(True)
+        btn_layout.addWidget(close_btn); layout.addLayout(btn_layout)
         self.setStyleSheet("QDialog { background-color: #252525; color: white; } QLabel { color: white; } QPushButton { background-color: #444; color: white; padding: 8px; border-radius: 4px; }")
     def copy_to_clipboard(self): QApplication.clipboard().setText(self.details_box.toPlainText()); QMessageBox.information(self, "Copied", "Error details copied to clipboard.")
 
@@ -103,7 +103,6 @@ class TimelineWidget(QWidget):
         self.setMinimumWidth(int(max_ms * self.pixels_per_ms)); self.update()
     
     def get_ms_per_beat(self): return (60.0 / self.target_bpm) * 1000.0
-    
     def get_seg_rect(self, seg):
         x = int(seg.start_ms * self.pixels_per_ms); w = int(seg.duration_ms * self.pixels_per_ms); h = int((self.lane_height - 20) * seg.volume)
         y_center = (seg.lane * (self.lane_height + self.lane_spacing)) + (self.lane_height // 2) + 40
@@ -123,8 +122,7 @@ class TimelineWidget(QWidget):
             if (i % int(mpbar)) < 10:
                 painter.setPen(QPen(QColor(80, 80, 80), 1)); painter.drawLine(x, 0, x, self.height())
                 painter.setPen(QColor(150, 150, 150)); painter.drawText(x + 5, 25, f"BAR {int(i // mpbar) + 1}")
-            else:
-                painter.setPen(QPen(QColor(50, 50, 50), 1, Qt.PenStyle.DotLine)); painter.drawLine(x, 40, x, self.height())
+            else: painter.setPen(QPen(QColor(50, 50, 50), 1, Qt.PenStyle.DotLine)); painter.drawLine(x, 40, x, self.height())
 
         for seg in self.segments:
             rect = self.get_seg_rect(seg); color = QColor(seg.color); color.setAlpha(int(120 + 135 * (min(seg.volume, 1.5) / 1.5)))
@@ -178,8 +176,7 @@ class TimelineWidget(QWidget):
             if target_seg:
                 primary_text = "⭐ Unmark Primary" if target_seg.is_primary else "⭐ Set as Primary"; primary_action = menu.addAction(primary_text); split_action = menu.addAction("✂ Split at Cursor")
                 pm = menu.addMenu("🎵 Shift Pitch")
-                for i in range(-6, 7): 
-                    t = f"{i:+} Semitones" if i != 0 else "Original Pitch"; pa = pm.addAction(t); pa.setData(i)
+                for i in range(-6, 7): t = f"{i:+} Semitones" if i != 0 else "Original Pitch"; pa = pm.addAction(t); pa.setData(i)
                 menu.addSeparator(); da = menu.addAction("🗑 Remove Track"); action = menu.exec(self.mapToGlobal(event.pos()))
                 if action == primary_action: self.window().push_undo(); target_seg.is_primary = not target_seg.is_primary
                 elif action == split_action: self.window().push_undo(); self.split_segment(target_seg, event.pos().x())
@@ -195,15 +192,15 @@ class TimelineWidget(QWidget):
         if not self.selected_segment: return
         dx = event.pos().x() - self.drag_start_pos.x(); dy = event.pos().y() - self.drag_start_pos.y(); mpb = self.get_ms_per_beat()
         if self.fade_in_dragging:
-            rf = self.drag_start_fade + dx/self.pixels_per_ms; 
+            rf = self.drag_start_fade + dx/self.pixels_per_ms
             if self.snap_to_grid: rf = round(rf / mpb) * mpb
             self.selected_segment.fade_in_ms = max(0, min(self.selected_segment.duration_ms/2, rf))
         elif self.fade_out_dragging:
-            rf = self.drag_start_fade - dx/self.pixels_per_ms; 
+            rf = self.drag_start_fade - dx/self.pixels_per_ms
             if self.snap_to_grid: rf = round(rf / mpb) * mpb
             self.selected_segment.fade_out_ms = max(0, min(self.selected_segment.duration_ms/2, rf))
         elif self.resizing:
-            rd = self.drag_start_dur + dx/self.pixels_per_ms; 
+            rd = self.drag_start_dur + dx/self.pixels_per_ms
             if self.snap_to_grid: rd = round(rd / mpb) * mpb
             self.selected_segment.duration_ms = max(1000, rd)
         elif self.vol_dragging: self.selected_segment.volume = max(0.0, min(1.5, self.drag_start_vol - dy/150.0))
@@ -254,7 +251,18 @@ class LoadingOverlay(QWidget):
 
 class AudioSequencerApp(QMainWindow):
     def __init__(self):
-        super().__init__(); self.dm = DataManager(); self.scorer = CompatibilityScorer(); self.processor = AudioProcessor(); self.renderer = FlowRenderer(); self.generator = TransitionGenerator(); self.orchestrator = FullMixOrchestrator(); self.undo_manager = UndoManager(); self.selected_library_track = None; self.init_ui(); self.load_library(); self.loading_overlay = LoadingOverlay(self.centralWidget())
+        super().__init__(); self.dm = DataManager(); self.scorer = CompatibilityScorer(); self.processor = AudioProcessor(); self.renderer = FlowRenderer(); self.generator = TransitionGenerator(); self.orchestrator = FullMixOrchestrator(); self.undo_manager = UndoManager(); self.selected_library_track = None; 
+        self.play_timer = QTimer(); self.play_timer.setInterval(20); self.play_timer.timeout.connect(self.update_playback_cursor); self.is_playing = False
+        self.init_ui(); self.load_library(); self.loading_overlay = LoadingOverlay(self.centralWidget())
+    
+    def update_playback_cursor(self):
+        self.timeline_widget.cursor_pos_ms += 20; self.timeline_widget.update()
+    
+    def toggle_playback(self):
+        self.is_playing = not self.is_playing
+        if self.is_playing: self.play_timer.start(); self.ptb.setText("⏹ Stop Preview")
+        else: self.play_timer.stop(); self.ptb.setText("▶ Play Journey")
+
     def push_undo(self): self.undo_manager.push_state(self.timeline_widget.segments)
     def undo(self): 
         ns = self.undo_manager.undo(self.timeline_widget.segments)
@@ -289,7 +297,9 @@ class AudioSequencerApp(QMainWindow):
         mlayout.addWidget(QLabel("<h3>⚡ Actions</h3>")); self.atb = QPushButton("➕ Add to Timeline"); self.atb.clicked.connect(self.add_selected_to_timeline); mlayout.addWidget(self.atb)
         self.pb = QPushButton("▶ Preview"); self.pb.clicked.connect(self.play_selected); mlayout.addWidget(self.pb); mlayout.addStretch(); hb = QLabel("<b>💡 Pro Tips:</b><br><br>• <b>Drag circles</b> at top to adjust Fades.<br>• <b>Shift + Drag</b> for Volume.<br>• <b>Right-Click</b> to Split."); hb.setStyleSheet("color: #888; font-size: 11px; background: #1a1a1a; padding: 10px;"); mlayout.addWidget(hb); tp.addWidget(mp)
         rp = QFrame(); rp.setFixedWidth(450); rl = QVBoxLayout(rp); rl.addWidget(QLabel("<h3>✨ Smart Suggestions</h3>")); self.rec_list = DraggableTable(0, 2); self.rec_list.setHorizontalHeaderLabels(["Match %", "Track"]); self.rec_list.itemDoubleClicked.connect(self.on_rec_double_clicked); rl.addWidget(self.rec_list); tp.addWidget(rp); ml.addLayout(tp, stretch=1)
-        th = QHBoxLayout(); th.addWidget(QLabel("<h2>🎞 Timeline Journey</h2>")); th.addSpacing(20); th.addWidget(QLabel("Zoom:")); self.zs = QSlider(Qt.Orientation.Horizontal); self.zs.setRange(10, 200); self.zs.setValue(50); self.zs.setFixedWidth(150); self.zs.valueChanged.connect(self.on_zoom_changed); th.addWidget(self.zs); th.addStretch()
+        th = QHBoxLayout(); th.addWidget(QLabel("<h2>🎞 Timeline Journey</h2>"))
+        self.ptb = QPushButton("▶ Play Journey"); self.ptb.setFixedWidth(120); self.ptb.clicked.connect(self.toggle_playback); th.addWidget(self.ptb)
+        th.addSpacing(20); th.addWidget(QLabel("Zoom:")); self.zs = QSlider(Qt.Orientation.Horizontal); self.zs.setRange(10, 200); self.zs.setValue(50); self.zs.setFixedWidth(150); self.zs.valueChanged.connect(self.on_zoom_changed); th.addWidget(self.zs); th.addStretch()
         self.agb = QPushButton("🪄 Auto-Generate Path"); self.agb.clicked.connect(self.auto_populate_timeline); th.addWidget(self.agb); self.cb = QPushButton("🗑 Clear"); self.cb.clicked.connect(self.clear_timeline); th.addWidget(self.cb)
         th.addWidget(QLabel("Target BPM:")); self.tbe = QLineEdit("124"); self.tbe.setFixedWidth(60); self.tbe.textChanged.connect(self.on_bpm_changed); th.addWidget(self.tbe)
         self.render_btn = QPushButton("🚀 RENDER FINAL MIX"); self.render_btn.setStyleSheet("background-color: #007acc; padding: 12px 25px; color: white; font-weight: bold;"); self.render_btn.clicked.connect(self.render_timeline); th.addWidget(self.render_btn); ml.addLayout(th)
@@ -377,7 +387,7 @@ class AudioSequencerApp(QMainWindow):
         try:
             conn = self.dm.get_conn(); cursor = conn.cursor(); cursor.execute("SELECT id, filename, bpm, harmonic_key FROM tracks"); rows = cursor.fetchall(); self.library_table.setRowCount(0)
             for r in rows:
-                ri = self.library_table.rowCount(); self.library_table.insertRow(ri); ni = QTableWidgetItem(r[1]); ni.setData(Qt.ItemDataRole.UserRole, r[0]); self.library_table.setItem(ri, 0, ni); self.library_table.setItem(ri, 1, QTableWidgetItem(f"{r[2]:.1f}")); self.library_table.setItem(ri, 2, QTableWidgetItem(r[3]))
+                ri = self.library_table.rowCount(); self.library_table.insertRow(ri); ni = QTableWidgetItem(r[1]); ni.setData(Qt.ItemDataRole.UserRole, row[0]); self.library_table.setItem(ri, 0, ni); self.library_table.setItem(ri, 1, QTableWidgetItem(f"{r[2]:.1f}")); self.library_table.setItem(ri, 2, QTableWidgetItem(r[3]))
             conn.close()
         except Exception as e: show_error(self, "Library Error", "Failed to load library.", e)
     def on_library_track_selected(self):
@@ -398,7 +408,7 @@ class AudioSequencerApp(QMainWindow):
     def auto_populate_timeline(self):
         if not self.selected_library_track: return
         self.push_undo(); self.loading_overlay.show_loading(); seq = self.orchestrator.find_curated_sequence(max_tracks=6, seed_track=self.selected_library_track)
-        if seq:
+        if sequence:
             self.timeline_widget.segments = []; cm = 0
             for i, t in enumerate(seq):
                 d = 20000 if i % 2 == 0 else 30000; seg = self.timeline_widget.add_track(t, start_ms=cm); seg.waveform = self.processor.get_waveform_envelope(t['file_path']); cm += d - 8000 
