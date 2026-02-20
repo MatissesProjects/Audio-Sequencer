@@ -168,7 +168,7 @@ class FlowRenderer:
             # Ducking check: if NOT primary, check if we overlap a primary
             if not current['is_primary']:
                 for other in processed_data:
-                    if other == current or not other['is_primary']: continue
+                    if (other is current) or not other['is_primary']: continue
                     o_start = other['start_idx']
                     o_end = o_start + other['samples'].shape[1]
                     
