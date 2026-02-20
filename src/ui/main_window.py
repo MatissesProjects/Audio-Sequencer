@@ -10,14 +10,10 @@ from PyQt6.QtCore import Qt, QSize, QTimer, QUrl
 from PyQt6.QtGui import QBrush, QColor
 from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
 
-# Project Imports
+# Project Imports (Lightweight)
 from src.database import DataManager
-from src.scoring import CompatibilityScorer
 from src.processor import AudioProcessor
 from src.renderer import FlowRenderer
-from src.generator import TransitionGenerator
-from src.orchestrator import FullMixOrchestrator
-from src.embeddings import EmbeddingEngine
 
 # Modular Imports
 from src.core.models import TrackSegment
@@ -36,12 +32,25 @@ class AudioSequencerApp(QMainWindow):
     def __init__(self):
         super().__init__()
         self.dm = DataManager()
-        self.scorer = CompatibilityScorer()
         self.processor = AudioProcessor()
         self.renderer = FlowRenderer()
-        self.generator = TransitionGenerator()
-        self.orchestrator = FullMixOrchestrator()
         self.undo_manager = UndoManager()
+        
+        # Lazy load heavy AI components
+        try:
+            from src.scoring import CompatibilityScorer
+            from src.generator import TransitionGenerator
+            from src.orchestrator import FullMixOrchestrator
+            self.scorer = CompatibilityScorer()
+            self.generator = TransitionGenerator()
+            self.orchestrator = FullMixOrchestrator()
+            self.ai_enabled = True
+        except Exception as e:
+            print(f"AI Loading Error (Check network/models): {e}")
+            self.scorer = None
+            self.generator = None
+            self.orchestrator = None
+            self.ai_enabled = False
         
         self.selected_library_track = None
         self.player = QMediaPlayer()
@@ -304,7 +313,10 @@ class AudioSequencerApp(QMainWindow):
         
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
-        self.status_bar.showMessage("Ready.")
+        if self.ai_enabled:
+            self.status_bar.showMessage("Ready. AI Engine Online.")
+        else:
+            self.status_bar.showMessage("Ready. AI Engine OFFLINE (Check model downloads).")
         
         # Connections
         self.timeline_widget.segmentSelected.connect(self.on_segment_selected)
@@ -534,6 +546,9 @@ class AudioSequencerApp(QMainWindow):
         self.update_status()
 
     def generate_ai_transition(self, x):
+        if not self.ai_enabled:
+            self.status_bar.showMessage("AI features disabled. Transition generation unavailable.")
+            return
         gm = x / self.timeline_widget.pixels_per_ms
         ps = ns = None
         ss = sorted(self.timeline_widget.segments, key=lambda s: s.start_ms)
@@ -573,6 +588,9 @@ class AudioSequencerApp(QMainWindow):
             show_error(self, "AI Generation Error", "Failed to generate transition.", e)
 
     def find_bridge_for_gap(self, x):
+        if not self.ai_enabled:
+            self.status_bar.showMessage("AI features disabled. Bridge search unavailable.")
+            return
         gm = x / self.timeline_widget.pixels_per_ms
         ps = ns = None
         ss = sorted(self.timeline_widget.segments, key=lambda s: s.start_ms)
@@ -655,6 +673,9 @@ class AudioSequencerApp(QMainWindow):
             self.library_table.setRowHidden(r, q not in self.library_table.item(r, 0).text().lower())
 
     def trigger_semantic_search(self):
+        if not self.ai_enabled:
+            QMessageBox.warning(self, "AI Disabled", "AI features are unavailable. This often happens if model assets could not be downloaded from HuggingFace.")
+            return
         q = self.search_bar.text()
         if len(q) < 3:
             return
@@ -747,17 +768,18 @@ class AudioSequencerApp(QMainWindow):
             for i in range(len(ss) - 1):
                 s1, s2 = ss[i], ss[i+1]
                 if s2.start_ms < (s1.start_ms + s1.duration_ms + 2000):
-                    if self.scorer.calculate_harmonic_score(s1.key, s2.key) < 60:
+                    if self.scorer and self.scorer.calculate_harmonic_score(s1.key, s2.key) < 60:
                         fs -= 10
             at += f"<b>Flow Health:</b> {max(0, fs)}%<br>"
             if self.timeline_widget.selected_segment:
                 sel = self.timeline_widget.selected_segment
                 at += f"<hr><b>Selected Clip:</b><br>{sel.filename[:20]}<br>Key: {sel.key}"
-                for o in self.timeline_widget.segments:
-                    if o != sel and max(sel.start_ms, o.start_ms) < min(sel.start_ms + sel.duration_ms, o.start_ms + o.duration_ms):
-                        hs = self.scorer.calculate_harmonic_score(sel.key, o.key)
-                        color = "#00ff66" if hs >= 100 else "#ccff00" if hs >= 80 else "#ff5555"
-                        at += f"<br>vs '{o.filename[:8]}...': <span style='color: {color};'>{hs}%</span>"
+                if self.scorer:
+                    for o in self.timeline_widget.segments:
+                        if o != sel and max(sel.start_ms, o.start_ms) < min(sel.start_ms + sel.duration_ms, o.start_ms + o.duration_ms):
+                            hs = self.scorer.calculate_harmonic_score(sel.key, o.key)
+                            color = "#00ff66" if hs >= 100 else "#ccff00" if hs >= 80 else "#ff5555"
+                            at += f"<br>vs '{o.filename[:8]}...': <span style='color: {color};'>{hs}%</span>"
             self.stats_label.setText(at)
         else:
             self.status_bar.showMessage("Ready.")
@@ -831,6 +853,9 @@ class AudioSequencerApp(QMainWindow):
         self.add_track_by_id(self.rec_list.item(i.row(), 0).data(Qt.ItemDataRole.UserRole))
 
     def auto_populate_timeline(self):
+        if not self.ai_enabled:
+            QMessageBox.warning(self, "AI Disabled", "AI orchestration requires the local model engine, which failed to load.")
+            return
         if not self.selected_library_track:
             self.status_bar.showMessage("Select seed track.")
             return

@@ -7,7 +7,6 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import argparse
 from src.database import DataManager
 from src.ingestion import IngestionEngine
-from src.embeddings import EmbeddingEngine
 from tqdm import tqdm
 
 def main():
@@ -28,6 +27,7 @@ def main():
         
     if args.embed:
         print("Initializing AI Embedding Engine...")
+        from src.embeddings import EmbeddingEngine
         embed_engine = EmbeddingEngine()
         conn = dm.get_conn()
         cursor = conn.cursor()
