@@ -6,7 +6,8 @@ import json
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QTableWidget, QTableWidgetItem, 
                              QLineEdit, QLabel, QPushButton, QFrame, QMessageBox,
-                             QScrollArea, QMenu, QDialog, QTextEdit, QStatusBar, QFileDialog)
+                             QScrollArea, QMenu, QDialog, QTextEdit, QStatusBar, QFileDialog,
+                             QSlider)
 from PyQt6.QtCore import Qt, QSize, QRect, pyqtSignal, QPoint, QMimeData
 from PyQt6.QtGui import QPainter, QColor, QBrush, QPen, QFont, QDrag
 
@@ -446,7 +447,7 @@ class AudioSequencerApp(QMainWindow):
         self.scan_btn = QPushButton("📂 Scan Folder"); self.scan_btn.clicked.connect(self.scan_folder); la.addWidget(self.scan_btn)
         self.embed_btn = QPushButton("🧠 AI Index"); self.embed_btn.clicked.connect(self.run_embedding); la.addWidget(self.embed_btn)
         ll.addLayout(la)
-        self.search_bar = QLineEdit(); self.search_bar.setPlaceholderText("🔍 Semantic Search..."); ll.addWidget(self.search_bar)
+        self.search_bar = QLineEdit(); self.search_bar.setPlaceholderText("🔍 Semantic Search..."); self.search_bar.textChanged.connect(self.on_search_text_changed); ll.addWidget(self.search_bar)
         self.library_table = DraggableTable(0, 3); self.library_table.setHorizontalHeaderLabels(["Track Name", "BPM", "Key"])
         self.library_table.setColumnWidth(0, 250); self.library_table.itemSelectionChanged.connect(self.on_library_track_selected); ll.addWidget(self.library_table)
         tp.addWidget(lp)
@@ -469,15 +470,48 @@ class AudioSequencerApp(QMainWindow):
         self.rec_list = DraggableTable(0, 2); self.rec_list.setHorizontalHeaderLabels(["Match %", "Track"]); self.rec_list.itemDoubleClicked.connect(self.on_rec_double_clicked); rl.addWidget(self.rec_list)
         tp.addWidget(rp); ml.addLayout(tp, stretch=1)
         th = QHBoxLayout(); th.addWidget(QLabel("<h2>🎞 Timeline Journey</h2>"))
+        
+        # Zoom Control
+        th.addSpacing(20)
+        th.addWidget(QLabel("Zoom:"))
+        self.zoom_slider = QSlider(Qt.Orientation.Horizontal)
+        self.zoom_slider.setRange(10, 200) # 0.01 to 0.2 pixels per ms
+        self.zoom_slider.setValue(50)
+        self.zoom_slider.setFixedWidth(150)
+        self.zoom_slider.valueChanged.connect(self.on_zoom_changed)
+        th.addWidget(self.zoom_slider)
+        
+        th.addStretch()
         self.auto_gen_btn = QPushButton("🪄 Auto-Generate Path"); self.auto_gen_btn.clicked.connect(self.auto_populate_timeline); th.addWidget(self.auto_gen_btn)
+        
+        self.clear_btn = QPushButton("🗑 Clear"); self.clear_btn.clicked.connect(self.clear_timeline); th.addWidget(self.clear_btn)
+        
         th.addWidget(QLabel("Target BPM:")); self.target_bpm_edit = QLineEdit("124"); self.target_bpm_edit.setFixedWidth(60); self.target_bpm_edit.textChanged.connect(self.on_bpm_changed); th.addWidget(self.target_bpm_edit)
         self.render_btn = QPushButton("🚀 RENDER FINAL MIX"); self.render_btn.setStyleSheet("background-color: #007acc; padding: 12px 25px; color: white; font-weight: bold;"); self.render_btn.clicked.connect(self.render_timeline); th.addWidget(self.render_btn)
-        th.addStretch(); ml.addLayout(th)
+        ml.addLayout(th)
         self.timeline_scroll = QScrollArea(); self.timeline_scroll.setWidgetResizable(True)
         self.timeline_widget = TimelineWidget(); self.timeline_scroll.setWidget(self.timeline_widget); ml.addWidget(self.timeline_scroll, stretch=1)
         self.status_bar = QStatusBar(); self.setStatusBar(self.status_bar); self.status_bar.showMessage("Ready.")
         self.timeline_widget.segmentSelected.connect(self.on_segment_selected); self.timeline_widget.timelineChanged.connect(self.update_status)
         self.setStyleSheet("QMainWindow { background-color: #121212; color: #e0e0e0; font-family: 'Segoe UI'; } QLabel { color: #ffffff; } QTableWidget { background-color: #1e1e1e; gridline-color: #333; } QPushButton { background-color: #333; color: #fff; padding: 8px; border-radius: 4px; }")
+
+    def on_zoom_changed(self, value):
+        # Scale zoom: 50 -> 0.05 px/ms
+        self.timeline_widget.pixels_per_ms = value / 1000.0
+        self.timeline_widget.update_geometry()
+
+    def clear_timeline(self):
+        if QMessageBox.question(self, "Clear", "Clear the entire journey?") == QMessageBox.StandardButton.Yes:
+            self.timeline_widget.segments = []
+            self.timeline_widget.update_geometry()
+            self.update_status()
+
+    def on_search_text_changed(self, text):
+        # Basic text filter for now, can be expanded to full semantic later
+        query = text.lower()
+        for row in range(self.library_table.rowCount()):
+            match = query in self.library_table.item(row, 0).text().lower()
+            self.library_table.setRowHidden(row, not match)
 
     def save_project(self):
         path, _ = QFileDialog.getSaveFileName(self, "Save Journey", "", "JSON Files (*.json)")
