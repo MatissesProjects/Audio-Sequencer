@@ -112,7 +112,7 @@ class TimelineWidget(QWidget):
     segmentSelected = pyqtSignal(object); timelineChanged = pyqtSignal()
     def __init__(self):
         super().__init__(); self.segments = []; self.setMinimumHeight(550); self.setAcceptDrops(True); self.pixels_per_ms = 0.05
-        self.selected_segment = None; self.dragging = self.resizing = self.vol_dragging = self.fade_in_dragging = self.fade_out_dragging = self.slipping = self.setting_loop = False
+        self.selected_segment = None; self.dragging = self.resizing = self.vol_dragging = self.fade_in_dragging = self.fade_out_dragging = self.slipping = self.setting_loop = self.resizing_timeline = False
         self.drag_start_pos = None; self.drag_start_ms = self.drag_start_dur = self.drag_start_fade = self.drag_start_offset = 0; self.drag_start_vol = 1.0; self.drag_start_lane = 0
         self.lane_height = 120; self.lane_spacing = 10; self.snap_threshold_ms = 2000; self.target_bpm = 124.0
         self.show_modifications = True; self.cursor_pos_ms = 0; self.show_waveforms = True; self.snap_to_grid = True
@@ -122,10 +122,15 @@ class TimelineWidget(QWidget):
     def update_geometry(self):
         max_ms = 600000
         if self.segments: max_ms = max(max_ms, max(s.start_ms + s.duration_ms for s in self.segments) + 60000)
-        self.setMinimumWidth(int(max_ms * self.pixels_per_ms)); self.update()
+        self.setMinimumWidth(int(max_ms * self.pixels_per_ms))
+        
+        # Prevent shrinking vertically: calculate total height needed
+        total_h = 5 * (self.lane_height + self.lane_spacing) + 100
+        self.setMinimumHeight(total_h)
+        self.update()
     def get_ms_per_beat(self): return (60.0 / self.target_bpm) * 1000.0
     def get_seg_rect(self, seg):
-        x = int(seg.start_ms * self.pixels_per_ms); w = int(seg.duration_ms * self.pixels_per_ms); h = 100
+        x = int(seg.start_ms * self.pixels_per_ms); w = int(seg.duration_ms * self.pixels_per_ms); h = self.lane_height - 20
         y_center = (seg.lane * (self.lane_height + self.lane_spacing)) + (self.lane_height // 2) + 40
         return QRect(x, y_center - (h // 2), w, h)
     def paintEvent(self, event):
@@ -186,7 +191,20 @@ class TimelineWidget(QWidget):
                 if seg.pitch_shift != 0: painter.setBrush(QBrush(QColor(200, 100, 255))); br = QRect(bx, by, 40, 16); painter.drawRoundedRect(br, 4, 4); painter.setPen(Qt.GlobalColor.black); painter.drawText(br, Qt.AlignmentFlag.AlignCenter, f"{seg.pitch_shift:+}st")
         cx = int(self.cursor_pos_ms * self.pixels_per_ms); painter.setPen(QPen(QColor(255, 50, 50), 2)); painter.drawLine(cx, 0, cx, self.height()); painter.setBrush(QBrush(QColor(255, 50, 50))); painter.drawPolygon(QPoint(cx - 8, 0), QPoint(cx + 8, 0), QPoint(cx, 12))
 
+        # Visual Resizer Handle at bottom
+        painter.fillRect(0, self.height() - 15, self.width(), 15, QColor(40, 40, 40))
+        painter.setPen(QPen(QColor(100, 100, 100), 1))
+        painter.drawLine(0, self.height() - 15, self.width(), self.height() - 15)
+        painter.setPen(QColor(120, 120, 120)); painter.setFont(QFont("Segoe UI", 7))
+        painter.drawText(self.rect().adjusted(0, 0, 0, -2), Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignHCenter, "↕ DRAG TO RESIZE TIMELINE VERTICALLY")
+
     def mousePressEvent(self, event):
+        # 0. Timeline Resizer Handle
+        if event.pos().y() > self.height() - 15:
+            self.resizing_timeline = True
+            self.drag_start_pos = event.pos()
+            self.drag_start_h = self.height(); return
+
         for i in range(5):
             y = i * (self.lane_height + self.lane_spacing) + 40
             m_r = QRect(5, y + 25, 20, 20); s_r = QRect(30, y + 25, 20, 20)
@@ -239,8 +257,17 @@ class TimelineWidget(QWidget):
                 if act == ba: self.window().find_bridge_for_gap(event.pos().x())
                 elif act == ta: self.window().generate_ai_transition(event.pos().x())
 
-    def mouseMoveEvent(self, event):
-        if self.setting_loop: self.loop_end_ms = max(self.loop_start_ms, event.pos().x() / self.pixels_per_ms); self.update(); return
+        def mouseMoveEvent(self, event):
+            if self.resizing_timeline:
+                dy = event.pos().y() - self.drag_start_pos.y()
+                # Adjust lane heights or just the container height?
+                # User suggested "hard to interact with", so we'll allow expanding the whole area
+                new_h = max(400, self.drag_start_h + dy)
+                self.setMinimumHeight(new_h)
+                self.update_geometry(); return
+    
+            if self.setting_loop:
+     self.loop_end_ms = max(self.loop_start_ms, event.pos().x() / self.pixels_per_ms); self.update(); return
         if not self.selected_segment: return
         dx = event.pos().x() - self.drag_start_pos.x(); dy = event.pos().y() - self.drag_start_pos.y(); mpb = self.get_ms_per_beat()
         if self.slipping: self.selected_segment.offset_ms = max(0, self.drag_start_offset - dx/self.pixels_per_ms)
@@ -268,7 +295,7 @@ class TimelineWidget(QWidget):
             self.selected_segment.start_ms = ns; nl = max(0, min(4, int((event.pos().y() - 40) // (self.lane_height + self.lane_spacing)))); self.selected_segment.lane = nl
         self.update_geometry(); self.timelineChanged.emit()
 
-    def mouseReleaseEvent(self, event): self.dragging = self.resizing = self.vol_dragging = self.fade_in_dragging = self.fade_out_dragging = self.slipping = self.setting_loop = False; self.update_geometry()
+    def mouseReleaseEvent(self, event): self.dragging = self.resizing = self.vol_dragging = self.fade_in_dragging = self.fade_out_dragging = self.slipping = self.setting_loop = self.resizing_timeline = False; self.update_geometry()
     def wheelEvent(self, event):
         if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
             nv = max(10, min(200, int(self.pixels_per_ms * 1000) + (event.angleDelta().y() // 120 * 10)))
@@ -405,7 +432,13 @@ class AudioSequencerApp(QMainWindow):
         th = QHBoxLayout(); th.addWidget(QLabel("<h2>🎞 Timeline Journey</h2>"))
         self.sb = QPushButton("⏹"); self.sb.setFixedWidth(40); self.sb.clicked.connect(self.jump_to_start); th.addWidget(self.sb)
         self.ptb = QPushButton("▶ Play Journey"); self.ptb.setFixedWidth(120); self.ptb.clicked.connect(self.toggle_playback); th.addWidget(self.ptb)
-        th.addSpacing(20); th.addWidget(QLabel("Zoom:")); self.zs = QSlider(Qt.Orientation.Horizontal); self.zs.setRange(10, 200); self.zs.setValue(50); self.zs.setFixedWidth(150); self.zs.valueChanged.connect(self.on_zoom_changed); th.addWidget(self.zs); th.addStretch()
+        # Zoom Controls
+        th.addSpacing(20); th.addWidget(QLabel("H-Zoom:")); self.zs = QSlider(Qt.Orientation.Horizontal); self.zs.setRange(10, 200); self.zs.setValue(50); self.zs.setFixedWidth(100); self.zs.valueChanged.connect(self.on_zoom_changed); th.addWidget(self.zs)
+        
+        th.addSpacing(10); th.addWidget(QLabel("V-Zoom:")); self.vs = QSlider(Qt.Orientation.Horizontal); self.vs.setRange(40, 250); self.vs.setValue(120); self.vs.setFixedWidth(100); self.vs.valueChanged.connect(self.on_vzoom_changed); th.addWidget(self.vs)
+        
+        th.addStretch()
+        self.new_btn = QPushButton("📄 New"); self.new_btn.clicked.connect(self.new_project); th.addWidget(self.new_btn)
         self.agb = QPushButton("🪄 Auto-Generate Path"); self.agb.clicked.connect(self.auto_populate_timeline); th.addWidget(self.agb); self.cb = QPushButton("🗑 Clear"); self.cb.clicked.connect(self.clear_timeline); th.addWidget(self.cb)
         th.addWidget(QLabel("Target BPM:")); self.tbe = QLineEdit("124"); self.tbe.setFixedWidth(60); self.tbe.textChanged.connect(self.on_bpm_changed); th.addWidget(self.tbe)
         
@@ -556,7 +589,22 @@ class AudioSequencerApp(QMainWindow):
             self.loading_overlay.hide_loading()
             show_error(self, "AI Generation Error", "Failed to generate transition.", e)
 
-    def on_zoom_changed(self, v): self.timeline_widget.pixels_per_ms = v / 1000.0; self.timeline_widget.update_geometry()
+        def new_project(self):
+            if QMessageBox.question(self, "New Project", "Discard current journey and start new?") == QMessageBox.StandardButton.Yes:
+                self.push_undo()
+                self.timeline_widget.segments = []
+                self.timeline_widget.cursor_pos_ms = 0
+                self.timeline_widget.loop_enabled = False
+                self.preview_dirty = True
+                self.timeline_widget.update_geometry()
+                self.update_status()
+    
+        def on_vzoom_changed(self, value):
+            self.timeline_widget.lane_height = value
+            self.timeline_widget.update_geometry()
+    
+        def on_zoom_changed(self, v):
+     self.timeline_widget.pixels_per_ms = v / 1000.0; self.timeline_widget.update_geometry()
     def clear_timeline(self):
         if QMessageBox.question(self, "Clear", "Clear journey?") == QMessageBox.StandardButton.Yes: self.push_undo(); self.timeline_widget.segments = []; self.timeline_widget.update_geometry(); self.update_status()
     def on_search_text_changed(self, t):
