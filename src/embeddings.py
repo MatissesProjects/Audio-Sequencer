@@ -33,6 +33,12 @@ class EmbeddingEngine:
             
         return audio_embed[0] # Return the first (only) embedding in batch
 
+    def get_text_embedding(self, text):
+        """Generates a 512-d embedding for the given text description."""
+        with torch.no_grad():
+            text_embed = self.model.get_text_embedding([text])
+        return text_embed[0]
+
 if __name__ == "__main__":
     # Test with one of the examples
     import sys

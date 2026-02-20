@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QLineEdit, QLabel, QPushButton, QFrame, QMessageBox,
                              QScrollArea, QMenu, QDialog, QTextEdit, QStatusBar, QFileDialog,
                              QSlider)
-from PyQt6.QtCore import Qt, QSize, QRect, pyqtSignal, QPoint, QMimeData
+from PyQt6.QtCore import Qt, QSize, QRect, pyqtSignal, QPoint, QMimeData, QThread
 from PyQt6.QtGui import QPainter, QColor, QBrush, QPen, QFont, QDrag
 
 # Project Imports
@@ -18,6 +18,27 @@ from src.processor import AudioProcessor
 from src.renderer import FlowRenderer
 from src.generator import TransitionGenerator
 from src.orchestrator import FullMixOrchestrator
+from src.embeddings import EmbeddingEngine
+
+class SearchThread(QThread):
+    resultsFound = pyqtSignal(list)
+    errorOccurred = pyqtSignal(str)
+
+    def __init__(self, query, dm):
+        super().__init__()
+        self.query = query
+        self.dm = dm
+
+    def run(self):
+        try:
+            # We initialize engine here to avoid thread safety issues with some torch versions
+            engine = EmbeddingEngine()
+            text_emb = engine.get_text_embedding(self.query)
+            # Query ChromaDB via DataManager
+            results = self.dm.search_embeddings(text_emb, n_results=20)
+            self.resultsFound.emit(results)
+        except Exception as e:
+            self.errorOccurred.emit(str(e))
 
 class DetailedErrorDialog(QDialog):
     def __init__(self, title, message, details, parent=None):
@@ -447,7 +468,19 @@ class AudioSequencerApp(QMainWindow):
         self.scan_btn = QPushButton("📂 Scan Folder"); self.scan_btn.clicked.connect(self.scan_folder); la.addWidget(self.scan_btn)
         self.embed_btn = QPushButton("🧠 AI Index"); self.embed_btn.clicked.connect(self.run_embedding); la.addWidget(self.embed_btn)
         ll.addLayout(la)
-        self.search_bar = QLineEdit(); self.search_bar.setPlaceholderText("🔍 Semantic Search..."); self.search_bar.textChanged.connect(self.on_search_text_changed); ll.addWidget(self.search_bar)
+        search_layout = QHBoxLayout()
+        self.search_bar = QLineEdit()
+        self.search_bar.setPlaceholderText("🔍 Semantic Search (Enter for AI vibe search)...")
+        self.search_bar.textChanged.connect(self.on_search_text_changed)
+        self.search_bar.returnPressed.connect(self.trigger_semantic_search)
+        search_layout.addWidget(self.search_bar)
+        
+        self.reset_search_btn = QPushButton("↺")
+        self.reset_search_btn.setFixedWidth(30)
+        self.reset_search_btn.setToolTip("Reset search and show full library.")
+        self.reset_search_btn.clicked.connect(self.load_library)
+        search_layout.addWidget(self.reset_search_btn)
+        ll.addLayout(search_layout)
         self.library_table = DraggableTable(0, 3); self.library_table.setHorizontalHeaderLabels(["Track Name", "BPM", "Key"])
         self.library_table.setColumnWidth(0, 250); self.library_table.itemSelectionChanged.connect(self.on_library_track_selected); ll.addWidget(self.library_table)
         tp.addWidget(lp)
@@ -507,11 +540,64 @@ class AudioSequencerApp(QMainWindow):
             self.update_status()
 
     def on_search_text_changed(self, text):
-        # Basic text filter for now, can be expanded to full semantic later
+        if not text:
+            # Show all
+            for row in range(self.library_table.rowCount()):
+                self.library_table.setRowHidden(row, False)
+            self.status_bar.showMessage("Showing all library tracks.")
+            return
+
         query = text.lower()
+        
+        # If text is long, suggest semantic search on enter
+        if len(text) > 3:
+            self.status_bar.showMessage(f"Searching for vibe: '{text}'... (Press Enter for AI Search)")
+        
+        # Local text filter
         for row in range(self.library_table.rowCount()):
             match = query in self.library_table.item(row, 0).text().lower()
             self.library_table.setRowHidden(row, not match)
+
+    def trigger_semantic_search(self):
+        query = self.search_bar.text()
+        if len(query) < 3: return
+        
+        self.loading_overlay.show_loading(f"AI: Searching for '{query}'...")
+        self.search_thread = SearchThread(query, self.dm)
+        self.search_thread.resultsFound.connect(self.on_semantic_results)
+        self.search_thread.errorOccurred.connect(self.on_search_error)
+        self.search_thread.start()
+
+    def on_semantic_results(self, results):
+        self.loading_overlay.hide_loading()
+        if not results:
+            self.status_bar.showMessage("No semantic matches found.")
+            return
+            
+        # We'll update the library table to show ONLY search results
+        self.library_table.setRowCount(0)
+        # Results format from DataManager.search_embeddings: list of dicts with track info + distance
+        for res in results:
+            ri = self.library_table.rowCount()
+            self.library_table.insertRow(ri)
+            
+            # Confidence/Match score based on distance
+            dist = res.get('distance', 1.0)
+            match_pct = int(max(0, 1.0 - dist) * 100)
+            
+            ni = QTableWidgetItem(res['filename'])
+            ni.setData(Qt.ItemDataRole.UserRole, res['id'])
+            if match_pct > 70: ni.setForeground(QBrush(QColor(0, 255, 200))) # High confidence
+            
+            self.library_table.setItem(ri, 0, ni)
+            self.library_table.setItem(ri, 1, QTableWidgetItem(f"{res['bpm']:.1f}"))
+            self.library_table.setItem(ri, 2, QTableWidgetItem(res['harmonic_key']))
+            
+        self.status_bar.showMessage(f"AI found {len(results)} matches for your description.")
+
+    def on_search_error(self, err):
+        self.loading_overlay.hide_loading()
+        QMessageBox.warning(self, "AI Search Error", f"Could not perform semantic search: {err}\n\nMake sure you have run 'AI Index' first.")
 
     def save_project(self):
         path, _ = QFileDialog.getSaveFileName(self, "Save Journey", "", "JSON Files (*.json)")
