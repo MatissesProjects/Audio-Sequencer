@@ -1,23 +1,31 @@
-# AudioSequencer AI: The Flow 🎧✨
+# AudioSequencer AI: The Pro Flow 🎧✨
 
-AudioSequencer AI is a professional-grade audio sequencing environment that leverages local AI models to automate the technical hurdles of music production. It enables seamless track discovery, tempo matching, and harmonic alignment, allowing creators to focus on the semantic context and "flow" of their sound.
+AudioSequencer AI is a professional-grade visual arrangement environment that leverages local AI models to automate the technical hurdles of music production. It enables seamless track discovery, tempo matching, and harmonic alignment, allowing creators to focus on the semantic context and "journey" of their sound.
 
 ## 🚀 Key Features
 
-*   **Semantic Discovery:** Find audio files based on "vibe," instrument, or emotional quality using local **CLAP** (Contrastive Language-Audio Pretraining) embeddings.
-*   **Intelligent Sequencing:** Automatically generate continuous mixes using a multi-dimensional "Compatibility Score" (BPM + Harmonic Key + Semantic Similarity).
-*   **Professional DJ Rendering:**
-    *   **Dynamic Cross-Ducking:** Progressively swap frequency bands (Bass/Highs) between tracks for seamless transitions.
-    *   **Harmonic Sync:** Automatic pitch-shifting using Circle of Fifths logic.
-    *   **Rhythmic Looping:** Automatically extend clips using detected beat onsets to ensure perfect transition "tails."
-*   **Local-First Privacy:** All AI analysis and audio manipulation run locally on your hardware.
-*   **Desktop GUI:** A modern PyQt6 interface for library browsing, real-time recommendations, and one-click mixing.
+*   **🎹 Multi-Lane Visual Timeline:** Arrange and layer up to 5 parallel audio lanes with high-resolution waveforms and detected beat markers.
+*   **🪄 AI Arrangement Intelligence:**
+    *   **Semantic Vibe Search:** Find tracks by describing a sound (e.g., "dark heavy bass") using local **CLAP** embeddings.
+    *   **Smart Bridge Search:** Instantly find the best musical "glue" to connect two existing segments.
+    *   **Auto-Orchestration:** Generate complex, multi-lane layered journeys from a single seed track.
+*   **✨ AI Generative Transitions:** Procedural risers and sweeps, orchestrated by **Gemini** to match the unique vibe of your arrangement.
+*   **📏 Professional Precision Tools:** 
+    *   **Beat-Grid & Bar Snapping:** Align loops perfectly to the project's rhythm.
+    *   **Visual Slip Tool:** `Alt + Drag` to slide audio within a clip for frame-perfect sync.
+    *   **Interactive Volume Envelopes:** Adjust clip gain and view lead-focus ducking in real-time.
+    *   **Undo/Redo System:** Full state-based history for all arrangement actions.
+*   **🔊 Pro-Grade DSP Engine:** 
+    *   **Master Bus Chain:** Integrated Compression and Limiting for a polished, radio-ready mix.
+    *   **S-Curve Fades:** Sinusoidal crossfades for natural, buttery-smooth transitions.
+    *   **RMS Balancing:** Automatic gain staging based on perceived loudness.
+*   **📦 DAW-Ready Export:** High-fidelity Master Mixdown or individual Stem export for all lanes.
 
 ## 🛠 Tech Stack
 
 *   **Analysis:** `librosa` (BPM, Key, Onsets)
 *   **DSP:** `pedalboard` (Spotify), `pyrubberband`
-*   **AI:** `laion-clap` (Embeddings), `google-genai` (Orchestration)
+*   **AI:** `laion-clap` (Local Embeddings), `google-genai` (Orchestration)
 *   **Database:** `SQLite` (Metadata), `ChromaDB` (Vectors)
 *   **UI:** `PyQt6`
 
@@ -51,39 +59,26 @@ AudioSequencer AI is a professional-grade audio sequencing environment that leve
 
 ## 🎮 Usage
 
-### Launch the GUI
-The primary way to use the application is through the desktop interface:
+### Launch the Pro Flow GUI
 ```bash
 python src/main.py --gui
 ```
 
-### CLI Commands
-You can also run the core engine directly from the command line:
-
-*   **Scan a directory for audio:**
-    ```bash
-    python src/main.py --scan "path/to/your/music"
-    ```
-*   **Generate AI embeddings:**
-    ```bash
-    python src/main.py --embed
-    ```
-*   **Generate a full continuous mix:**
-    ```bash
-    python src/main.py --full-mix
-    ```
-*   **View library statistics:**
-    ```bash
-    python src/main.py --stats
-    ```
+### Pro Navigation Tips:
+*   **`Ctrl + Mouse Wheel`**: Zoom timeline.
+*   **`Space`**: Play/Pause preview.
+*   **`Alt + Drag`**: Slip audio inside a clip.
+*   **`Shift + Vertical Drag`**: Adjust clip volume.
+*   **`Delete / Backspace`**: Remove selected clip.
+*   **`M / S`**: Mute/Solo selected lane.
 
 ## 🏗 Project Structure
 
-*   `src/analysis.py`: Core MIR (Music Information Retrieval) engine.
-*   `src/embeddings.py`: CLAP vector generation.
-*   `src/orchestrator.py`: Pathfinding and mix sequencing logic.
-*   `src/renderer.py`: Advanced DSP and audio stitching.
-*   `src/gui.py`: PyQt6 desktop application.
+*   `src/gui.py`: Main visual arrangement environment.
+*   `src/renderer.py`: Pro DSP engine and Master Bus.
+*   `src/generator.py`: AI-orchestrated procedural audio.
+*   `src/orchestrator.py`: AI pathfinding and layered sequencing.
+*   `src/analysis.py`: Core MIR extraction.
 
 ## 📜 License
 This project is licensed under the MIT License.
