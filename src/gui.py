@@ -50,6 +50,17 @@ class SearchThread(QThread):
             results = self.dm.search_embeddings(text_emb, n_results=20); self.resultsFound.emit(results)
         except Exception as e: self.errorOccurred.emit(str(e))
 
+class WaveformLoader(QThread):
+    waveformLoaded = pyqtSignal(object, list)
+    def __init__(self, segment, processor):
+        super().__init__()
+        self.segment = segment; self.processor = processor
+    def run(self):
+        try:
+            w = self.processor.get_waveform_envelope(self.segment.file_path)
+            self.waveformLoaded.emit(self.segment, w)
+        except: pass
+
 class TrackSegment:
     KEY_COLORS = {
         'C': QColor(255, 50, 50), 'C#': QColor(255, 100, 200),
@@ -294,7 +305,23 @@ class AudioSequencerApp(QMainWindow):
         super().__init__(); self.dm = DataManager(); self.scorer = CompatibilityScorer(); self.processor = AudioProcessor(); self.renderer = FlowRenderer(); self.generator = TransitionGenerator(); self.orchestrator = FullMixOrchestrator(); self.undo_manager = UndoManager(); self.selected_library_track = None
         self.player = QMediaPlayer(); self.audio_output = QAudioOutput(); self.player.setAudioOutput(self.audio_output); self.audio_output.setVolume(0.8); self.preview_path = "temp_preview.wav"; self.preview_dirty = True
         self.play_timer = QTimer(); self.play_timer.setInterval(20); self.play_timer.timeout.connect(self.update_playback_cursor); self.is_playing = False
+        
+        # Waveform Loaders
+        self.waveform_loaders = []
+        
         self.init_ui(); self.load_library(); self.loading_overlay = LoadingOverlay(self.centralWidget())
+    
+    def load_waveform_async(self, segment):
+        loader = WaveformLoader(segment, self.processor)
+        loader.waveformLoaded.connect(self.on_waveform_loaded)
+        self.waveform_loaders.append(loader)
+        loader.start()
+
+    def on_waveform_loaded(self, segment, waveform):
+        segment.waveform = waveform
+        self.timeline_widget.update()
+        # Clean up finished loaders
+        self.waveform_loaders = [l for l in self.waveform_loaders if l.isRunning()]
     
     def update_playback_cursor(self):
         if self.is_playing:
@@ -346,7 +373,9 @@ class AudioSequencerApp(QMainWindow):
         self.timeline_widget.segments = []
         for sj in sl:
             s = json.loads(sj); td = {'id': s['id'], 'filename': s['filename'], 'file_path': s['file_path'], 'bpm': s['bpm'], 'harmonic_key': s['key'], 'onsets_json': s.get('onsets_json', "")}
-            seg = TrackSegment(td, start_ms=s['start_ms'], duration_ms=s['duration_ms'], lane=s['lane'], offset_ms=s['offset_ms']); seg.volume = s['volume']; seg.is_primary = s['is_primary']; seg.fade_in_ms = s['fade_in_ms']; seg.fade_out_ms = s['fade_out_ms']; seg.pitch_shift = s.get('pitch_shift', 0); seg.waveform = self.processor.get_waveform_envelope(seg.file_path); self.timeline_widget.segments.append(seg)
+            seg = TrackSegment(td, start_ms=s['start_ms'], duration_ms=s['duration_ms'], lane=s['lane'], offset_ms=s['offset_ms']); seg.volume = s['volume']; seg.is_primary = s['is_primary']; seg.fade_in_ms = s['fade_in_ms']; seg.fade_out_ms = s['fade_out_ms']; seg.pitch_shift = s.get('pitch_shift', 0)
+            self.load_waveform_async(seg)
+            self.timeline_widget.segments.append(seg)
         self.timeline_widget.update_geometry(); self.update_status()
 
     def init_ui(self):
@@ -508,7 +537,7 @@ class AudioSequencerApp(QMainWindow):
             seg.duration_ms = 4000
             seg.fade_in_ms = 3500
             seg.fade_out_ms = 500
-            seg.waveform = self.processor.get_waveform_envelope(out_path)
+            self.load_waveform_async(seg)
             
             self.loading_overlay.hide_loading()
             self.status_bar.showMessage("AI Transition generated and placed.")
@@ -550,7 +579,9 @@ class AudioSequencerApp(QMainWindow):
             with open(p, 'r') as f: data = json.load(f)
             self.timeline_widget.segments = []; self.tbe.setText(str(data['target_bpm']))
             for s in data['segments']:
-                td = {'id': s['id'], 'filename': s['filename'], 'file_path': s['file_path'], 'bpm': s['bpm'], 'harmonic_key': s['key'], 'onsets_json': s.get('onsets_json', "")}; seg = TrackSegment(td, start_ms=s['start_ms'], duration_ms=s['duration_ms'], lane=s['lane'], offset_ms=s['offset_ms']); seg.volume = s['volume']; seg.is_primary = s['is_primary']; seg.fade_in_ms = s['fade_in_ms']; seg.fade_out_ms = s['fade_out_ms']; seg.pitch_shift = s.get('pitch_shift', 0); seg.waveform = self.processor.get_waveform_envelope(seg.file_path); self.timeline_widget.segments.append(seg)
+                seg = TrackSegment(td, start_ms=s['start_ms'], duration_ms=s['duration_ms'], lane=s['lane'], offset_ms=s['offset_ms']); seg.volume = s['volume']; seg.is_primary = s['is_primary']; seg.fade_in_ms = s['fade_in_ms']; seg.fade_out_ms = s['fade_out_ms']; seg.pitch_shift = s.get('pitch_shift', 0)
+                self.load_waveform_async(seg)
+                self.timeline_widget.segments.append(seg)
             self.timeline_widget.update_geometry(); self.update_status()
     def on_bpm_changed(self, t):
         try: self.timeline_widget.target_bpm = float(t); self.preview_dirty = True; self.timeline_widget.update(); self.update_status()
@@ -591,7 +622,8 @@ class AudioSequencerApp(QMainWindow):
             if not only_update_recs:
                 self.push_undo(); sm = x / self.timeline_widget.pixels_per_ms if x is not None else None; seg = self.timeline_widget.add_track(track, start_ms=sm); 
                 if x is not None: seg.lane = lane
-                seg.waveform = self.processor.get_waveform_envelope(track['file_path']); self.timeline_widget.update()
+                self.load_waveform_async(seg)
+                self.timeline_widget.update()
             self.selected_library_track = track; self.update_recommendations(tid)
         except Exception as e: show_error(self, "Data Error", "Failed to retrieve track.", e)
     def add_selected_to_timeline(self):
@@ -637,7 +669,7 @@ class AudioSequencerApp(QMainWindow):
                     seg = self.timeline_widget.add_track(track, start_ms=max(0, start_ms), lane=lane)
                     seg.duration_ms = duration
                     seg.is_primary = is_foundation
-                    seg.waveform = self.processor.get_waveform_envelope(track['file_path'])
+                    self.load_waveform_async(seg)
                     
                     # Set default fades
                     seg.fade_in_ms = 4000
