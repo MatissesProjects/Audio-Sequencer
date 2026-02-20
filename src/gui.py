@@ -108,7 +108,19 @@ class TimelineWidget(QWidget):
         self.selected_segment = None; self.dragging = self.resizing = self.vol_dragging = self.fade_in_dragging = self.fade_out_dragging = self.slipping = False
         self.drag_start_pos = None; self.drag_start_ms = self.drag_start_dur = self.drag_start_fade = self.drag_start_offset = 0; self.drag_start_vol = 1.0; self.drag_start_lane = 0
         self.lane_height = 120; self.lane_spacing = 10; self.snap_threshold_ms = 2000; self.target_bpm = 124.0
-        self.show_modifications = True; self.cursor_pos_ms = 0; self.show_waveforms = True; self.snap_to_grid = True; self.update_geometry()
+        self.show_modifications = True; self.cursor_pos_ms = 0; self.show_waveforms = True; self.snap_to_grid = True
+        
+        # Lane State: Mute/Solo
+        self.mutes = [False] * 5
+        self.solos = [False] * 5
+        
+        # Loop Region
+        self.loop_start_ms = 0
+        self.loop_end_ms = 30000 # 30s default
+        self.loop_enabled = False
+        self.setting_loop = False
+        
+        self.update_geometry()
     
     def update_geometry(self):
         max_ms = 600000
@@ -121,14 +133,46 @@ class TimelineWidget(QWidget):
         y_center = (seg.lane * (self.lane_height + self.lane_spacing)) + (self.lane_height // 2) + 40
         return QRect(x, y_center - (h // 2), w, h)
 
-    def paintEvent(self, event):
-        painter = QPainter(self); painter.setRenderHint(QPainter.RenderHint.Antialiasing); painter.fillRect(self.rect(), QColor(25, 25, 25))
-        painter.setPen(QPen(QColor(45, 45, 45), 1))
-        for i in range(5): 
-            y = i * (self.lane_height + self.lane_spacing) + 40; painter.fillRect(0, y, self.width(), self.lane_height, QColor(32, 32, 32))
-            painter.setPen(QColor(100, 100, 100)); painter.drawText(5, y + 15, f"LANE {i+1}")
-        
-        mpb = self.get_ms_per_beat(); mpbar = mpb * 4
+        def paintEvent(self, event):
+            painter = QPainter(self); painter.setRenderHint(QPainter.RenderHint.Antialiasing); painter.fillRect(self.rect(), QColor(25, 25, 25))
+            
+            # Draw Loop Region (at top)
+            if self.loop_enabled:
+                lx = int(self.loop_start_ms * self.pixels_per_ms)
+                lw = int((self.loop_end_ms - self.loop_start_ms) * self.pixels_per_ms)
+                painter.fillRect(lx, 0, lw, 40, QColor(0, 200, 255, 60))
+                painter.setPen(QPen(QColor(0, 200, 255, 150), 2))
+                painter.drawLine(lx, 0, lx, 40)
+                painter.drawLine(lx + lw, 0, lx + lw, 40)
+    
+            # Draw lane backgrounds
+            any_solo = any(self.solos)
+            for i in range(5): 
+                y = i * (self.lane_height + self.lane_spacing) + 40
+                bg_color = QColor(32, 32, 32)
+                if self.solos[i]: bg_color = QColor(45, 45, 32)
+                elif self.mutes[i] or (any_solo and not self.solos[i]): bg_color = QColor(20, 20, 20)
+                
+                painter.fillRect(0, y, self.width(), self.lane_height, bg_color)
+                
+                # Lane Controls (M/S)
+                painter.setPen(QColor(150, 150, 150))
+                painter.drawText(5, y + 15, f"LANE {i+1}")
+                
+                # Mute Button Rect
+                m_rect = QRect(5, y + 25, 20, 20)
+                painter.setBrush(QBrush(QColor(255, 50, 50) if self.mutes[i] else QColor(60, 60, 60)))
+                painter.setPen(Qt.PenStyle.NoPen); painter.drawRoundedRect(m_rect, 3, 3)
+                painter.setPen(Qt.GlobalColor.white); painter.drawText(m_rect, Qt.AlignmentFlag.AlignCenter, "M")
+                
+                # Solo Button Rect
+                s_rect = QRect(30, y + 25, 20, 20)
+                painter.setBrush(QBrush(QColor(255, 200, 0) if self.solos[i] else QColor(60, 60, 60)))
+                painter.setPen(Qt.PenStyle.NoPen); painter.drawRoundedRect(s_rect, 3, 3)
+                painter.setPen(Qt.GlobalColor.white); painter.drawText(s_rect, Qt.AlignmentFlag.AlignCenter, "S")
+    
+            mpb = self.get_ms_per_beat(); mpbar = mpb * 4
+    
         for i in range(0, 3600000, int(mpb)):
             x = int(i * self.pixels_per_ms); 
             if x > self.width(): break
@@ -198,6 +242,23 @@ class TimelineWidget(QWidget):
         cx = int(self.cursor_pos_ms * self.pixels_per_ms); painter.setPen(QPen(QColor(255, 50, 50), 2)); painter.drawLine(cx, 0, cx, self.height()); painter.setBrush(QBrush(QColor(255, 50, 50))); painter.drawPolygon(QPoint(cx - 8, 0), QPoint(cx + 8, 0), QPoint(cx, 12))
 
     def mousePressEvent(self, event):
+        # 1. Lane Controls (Mute/Solo)
+        for i in range(5):
+            y = i * (self.lane_height + self.lane_spacing) + 40
+            m_rect = QRect(5, y + 25, 20, 20)
+            s_rect = QRect(30, y + 25, 20, 20)
+            if m_rect.contains(event.pos()):
+                self.mutes[i] = not self.mutes[i]; self.update(); self.timelineChanged.emit(); return
+            if s_rect.contains(event.pos()):
+                self.solos[i] = not self.solos[i]; self.update(); self.timelineChanged.emit(); return
+
+        # 2. Loop Region Interaction
+        if event.pos().y() < 40:
+            self.setting_loop = True
+            self.loop_start_ms = event.pos().x() / self.pixels_per_ms
+            self.loop_end_ms = self.loop_start_ms
+            self.loop_enabled = True; self.update(); return
+
         if event.button() == Qt.MouseButton.LeftButton:
             clicked_seg = None
             for seg in reversed(self.segments):
@@ -240,6 +301,10 @@ class TimelineWidget(QWidget):
                 if action == ba: self.window().find_bridge_for_gap(event.pos().x())
 
     def mouseMoveEvent(self, event):
+        if self.setting_loop:
+            self.loop_end_ms = max(self.loop_start_ms, event.pos().x() / self.pixels_per_ms)
+            self.update(); return
+
         if not self.selected_segment: return
         dx = event.pos().x() - self.drag_start_pos.x(); dy = event.pos().y() - self.drag_start_pos.y(); mpb = self.get_ms_per_beat()
         if self.slipping:
@@ -270,7 +335,7 @@ class TimelineWidget(QWidget):
             self.selected_segment.lane = nl
         self.update_geometry(); self.timelineChanged.emit()
 
-    def mouseReleaseEvent(self, event): self.dragging = self.resizing = self.vol_dragging = self.fade_in_dragging = self.fade_out_dragging = self.slipping = False; self.update_geometry()
+    def mouseReleaseEvent(self, event): self.dragging = self.resizing = self.vol_dragging = self.fade_in_dragging = self.fade_out_dragging = self.slipping = self.setting_loop = False; self.update_geometry()
     def wheelEvent(self, event):
         if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
             nv = max(10, min(200, int(self.pixels_per_ms * 1000) + (event.angleDelta().y() // 120 * 10)))
@@ -332,19 +397,42 @@ class AudioSequencerApp(QMainWindow):
     def update_playback_cursor(self):
         if self.is_playing:
             pos = self.player.position()
+            
+            # Loop Region Logic
+            if self.timeline_widget.loop_enabled:
+                if pos >= self.timeline_widget.loop_end_ms:
+                    self.player.setPosition(int(self.timeline_widget.loop_start_ms))
+                    pos = self.timeline_widget.loop_start_ms
+            
             self.timeline_widget.cursor_pos_ms = pos
             self.timeline_widget.update()
             
-            # Auto-stop at end of file (allow 500ms buffer)
-            if pos >= self.player.duration() and self.player.duration() > 0:
-                self.stop_playback()
+            # Real-time Energy Meter (Visual only)
+            total_energy = 0
+            for s in self.timeline_widget.segments:
+                if s.start_ms <= pos <= s.start_ms + s.duration_ms:
+                    # check if lane is muted/soloed
+                    l = s.lane
+                    any_solo = any(self.timeline_widget.solos)
+                    is_active = (self.timeline_widget.solos[l] if any_solo else not self.timeline_widget.mutes[l])
+                    if is_active:
+                        total_energy += s.volume
+            
+            meter_width = int(min(1.0, total_energy / 3.0) * 20)
+            meter_str = "█" * meter_width + "░" * (20 - meter_width)
+            self.status_bar.showMessage(f"Playing | Energy: [{meter_str}] | {pos/1000:.1f}s")
+
+            # Auto-stop if NOT looping
+            if not self.timeline_widget.loop_enabled:
+                if pos >= self.player.duration() and self.player.duration() > 0:
+                    self.stop_playback()
 
     def stop_playback(self):
         self.player.stop()
         self.play_timer.stop()
         self.is_playing = False
         self.ptb.setText("▶ Play Journey")
-        self.status_bar.showMessage("Playback reached end.")
+        self.status_bar.showMessage("Playback stopped.")
 
     def toggle_playback(self):
         if not self.timeline_widget.segments:
@@ -377,7 +465,9 @@ class AudioSequencerApp(QMainWindow):
             
             # Render to temp WAV for fast seeking
             rd = [s.to_dict() for s in ss]
-            self.renderer.render_timeline(rd, self.preview_path, target_bpm=tbpm)
+            self.renderer.render_timeline(rd, self.preview_path, target_bpm=tbpm,
+                                          mutes=self.timeline_widget.mutes,
+                                          solos=self.timeline_widget.solos)
             self.player.setSource(QUrl.fromLocalFile(os.path.abspath(self.preview_path)))
             self.preview_dirty = False
         except Exception as e:

@@ -45,13 +45,11 @@ class FlowRenderer:
         combined.export(output_path, format="mp3", bitrate="320k")
         return output_path
 
-    def render_timeline(self, segments, output_path, target_bpm=124):
-        return self._render_internal(segments, output_path, target_bpm)
+    def render_timeline(self, segments, output_path, target_bpm=124, mutes=None, solos=None):
+        return self._render_internal(segments, output_path, target_bpm, mutes, solos)
 
     def render_stems(self, segments, output_folder, target_bpm=124):
-        """
-        Exports each lane to a separate audio file.
-        """
+        # ... (render_stems implementation)
         if not os.path.exists(output_folder):
             os.makedirs(output_folder)
             
@@ -70,23 +68,43 @@ class FlowRenderer:
             
         return stem_paths
 
-    def _render_internal(self, segments, output_path, target_bpm=124):
+    def _render_internal(self, segments, output_path, target_bpm=124, mutes=None, solos=None):
         """
         Internal rendering logic shared by full mix and stems.
         """
         if not segments:
             return None
             
+        # Filter segments based on Mute/Solo
+        active_segments = []
+        any_solo = any(solos) if solos else False
+        for s in segments:
+            l = s.get('lane', 0)
+            is_muted = mutes[l] if mutes and l < len(mutes) else False
+            is_soloed = solos[l] if solos and l < len(solos) else False
+            
+            if any_solo:
+                if is_soloed: active_segments.append(s)
+            elif not is_muted:
+                active_segments.append(s)
+        
+        if not active_segments:
+            # Return silent file?
+            dur = max(s['start_ms'] + s['duration_ms'] for s in segments) + 1000
+            silence = np.zeros((2, int(self.sr * dur / 1000.0)), dtype=np.float32)
+            self.numpy_to_segment(silence, self.sr).export(output_path, format="mp3")
+            return output_path
+
         # Calculate master buffer size
-        total_duration_ms = max(s['start_ms'] + s['duration_ms'] for s in segments) + 2000 
+        total_duration_ms = max(s['start_ms'] + s['duration_ms'] for s in active_segments) + 2000 
         master_samples = np.zeros((2, int(self.sr * total_duration_ms / 1000.0)), dtype=np.float32)
 
-        print(f"Sonic Rendering: {len(segments)} segments with Pro DSP...")
+        print(f"Sonic Rendering: {len(active_segments)} segments...")
 
         processed_data = []
 
         # Phase 1: Process each segment individually
-        for i, s in enumerate(tqdm(segments, desc="Processing Clips")):
+        for i, s in enumerate(tqdm(active_segments, desc="Processing Clips")):
             from src.processor import AudioProcessor
             proc = AudioProcessor()
             
