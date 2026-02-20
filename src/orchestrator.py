@@ -19,8 +19,8 @@ class FullMixOrchestrator:
         self.renderer = FlowRenderer()
         self.min_score_threshold = 55.0
 
-    def find_curated_sequence(self, max_tracks=6):
-        """Finds a high-compatibility path, aiming for a specific length."""
+    def find_curated_sequence(self, max_tracks=6, seed_track=None):
+        """Finds a high-compatibility path, starting from a seed if provided."""
         conn = self.dm.get_conn()
         conn.row_factory = lambda cursor, row: {col[0]: row[idx] for idx, col in enumerate(cursor.description)}
         cursor = conn.cursor()
@@ -32,7 +32,15 @@ class FullMixOrchestrator:
             return []
 
         unvisited = all_tracks.copy()
-        current = unvisited.pop(0)
+        
+        # 1. Selection logic for starting track
+        if seed_track:
+            # Find the seed in unvisited and move it to start
+            current = next((t for t in unvisited if t['id'] == seed_track['id']), unvisited[0])
+            unvisited.remove(current)
+        else:
+            current = unvisited.pop(0)
+            
         sequence = [current]
 
         print(f"Finding the best flow from {len(all_tracks)} available clips...")
@@ -61,9 +69,9 @@ class FullMixOrchestrator:
             
         return sequence
 
-    def generate_full_mix(self, output_path="full_continuous_mix.mp3", target_bpm=124):
+    def generate_full_mix(self, output_path="full_continuous_mix.mp3", target_bpm=124, seed_track=None):
         """Processes a curated selection with dynamic durations."""
-        sequence = self.find_curated_sequence()
+        sequence = self.find_curated_sequence(seed_track=seed_track)
         if not sequence:
             print("No tracks to mix.")
             return
@@ -116,7 +124,7 @@ class FullMixOrchestrator:
         print(f"SUCCESS: Curated journey created at {os.path.abspath(output_path)}")
         return output_path
 
-    def generate_layered_journey(self, output_path="layered_journey_mix.mp3", target_bpm=124):
+    def generate_layered_journey(self, output_path="layered_journey_mix.mp3", target_bpm=124, seed_track=None):
         """Creates a long foundation track with other clips layered as interludes."""
         conn = self.dm.get_conn()
         conn.row_factory = lambda cursor, row: {col[0]: row[idx] for idx, col in enumerate(cursor.description)}
@@ -129,7 +137,11 @@ class FullMixOrchestrator:
             print("Need at least 5 tracks for a layered journey.")
             return
 
-        foundation_track = all_tracks[0]
+        # 1. Foundation Selection
+        if seed_track:
+            foundation_track = next((t for t in all_tracks if t['id'] == seed_track['id']), all_tracks[0])
+        else:
+            foundation_track = all_tracks[0]
         found_emb = self.dm.get_embedding(foundation_track['clp_embedding_id'])
         
         candidates = all_tracks[1:]
