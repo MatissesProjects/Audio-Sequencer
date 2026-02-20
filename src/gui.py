@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QSlider, QComboBox, QCheckBox, QHeaderView)
 from PyQt6.QtCore import Qt, QSize, QRect, pyqtSignal, QPoint, QMimeData, QThread, QTimer, QUrl
 from PyQt6.QtGui import QPainter, QColor, QBrush, QPen, QFont, QDrag
+from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
 
 # Project Imports
 from src.database import DataManager
@@ -509,7 +510,7 @@ class AudioSequencerApp(QMainWindow):
         if seq:
             self.timeline_widget.segments = []; cm = 0
             for i, t in enumerate(seq):
-                seg = self.timeline_widget.add_track(t, start_ms=cm); seg.waveform = self.processor.get_waveform_envelope(t['file_path']); cm += 20000 if i % 2 == 0 else 30000 - 8000 
+                seg = self.timeline_widget.add_track(t, start_ms=cm); seg.waveform = self.processor.get_waveform_envelope(t['file_path']); cm += (20000 if i % 2 == 0 else 30000) - 8000 
             self.timeline_widget.update_geometry()
         self.loading_overlay.hide_loading()
     def render_timeline(self):
