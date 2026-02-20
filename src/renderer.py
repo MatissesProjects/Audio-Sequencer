@@ -163,8 +163,9 @@ class FlowRenderer:
             vol_db = 20 * np.log10(s.get('volume', 1.0) + 1e-9)
             seg_audio = seg_audio + vol_db
             
-            fade_ms = min(4000, len(seg_audio) // 4)
-            seg_audio = seg_audio.fade_in(fade_ms).fade_out(fade_ms)
+            fi = s.get('fade_in_ms', 2000)
+            fo = s.get('fade_out_ms', 2000)
+            seg_audio = seg_audio.fade_in(fi).fade_out(fo)
             
             processed_audios.append({
                 'audio': seg_audio,

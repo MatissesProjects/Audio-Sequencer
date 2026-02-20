@@ -2,10 +2,11 @@ import sys
 import os
 import sqlite3
 import traceback
+import json
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QTableWidget, QTableWidgetItem, 
                              QLineEdit, QLabel, QPushButton, QFrame, QMessageBox,
-                             QScrollArea, QMenu, QDialog, QTextEdit, QStatusBar)
+                             QScrollArea, QMenu, QDialog, QTextEdit, QStatusBar, QFileDialog)
 from PyQt6.QtCore import Qt, QSize, QRect, pyqtSignal, QPoint, QMimeData
 from PyQt6.QtGui import QPainter, QColor, QBrush, QPen, QFont, QDrag
 
@@ -85,7 +86,18 @@ class TrackSegment:
         self.lane = lane
         self.is_primary = False
         self.waveform = []
+        self.fade_in_ms = 2000
+        self.fade_out_ms = 2000
         self.color = QColor(70, 130, 180, 200) # SteelBlue
+
+    def to_dict(self):
+        return {
+            'id': self.id, 'filename': self.filename, 'file_path': self.file_path,
+            'bpm': self.bpm, 'key': self.key, 'start_ms': self.start_ms,
+            'duration_ms': self.duration_ms, 'offset_ms': self.offset_ms,
+            'volume': self.volume, 'lane': self.lane, 'is_primary': self.is_primary,
+            'fade_in_ms': self.fade_in_ms, 'fade_out_ms': self.fade_out_ms
+        }
 
 class DraggableTable(QTableWidget):
     """A table that allows dragging its rows as track data."""
@@ -117,11 +129,15 @@ class TimelineWidget(QWidget):
         self.dragging = False
         self.resizing = False
         self.vol_dragging = False
+        self.fade_in_dragging = False
+        self.fade_out_dragging = False
+        
         self.drag_start_pos = None
         self.drag_start_ms = 0
         self.drag_start_dur = 0
         self.drag_start_vol = 1.0
         self.drag_start_lane = 0
+        self.drag_start_fade = 0
         
         self.lane_height = 120
         self.lane_spacing = 10
@@ -154,6 +170,7 @@ class TimelineWidget(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.fillRect(self.rect(), QColor(25, 25, 25))
         
+        # Draw lane backgrounds
         painter.setPen(QPen(QColor(45, 45, 45), 1))
         for i in range(5): 
             y = i * (self.lane_height + self.lane_spacing) + 40
@@ -161,6 +178,7 @@ class TimelineWidget(QWidget):
             painter.setPen(QColor(100, 100, 100))
             painter.drawText(5, y + 15, f"LANE {i+1}")
 
+        # Time markings
         painter.setPen(QColor(70, 70, 70))
         for i in range(0, 3600000, 10000): 
             x = int(i * self.pixels_per_ms)
@@ -196,6 +214,17 @@ class TimelineWidget(QWidget):
                     if idx < pts:
                         val = seg.waveform[idx] * max_h
                         painter.drawLine(rect.left() + i, int(mid_y - val), rect.left() + i, int(mid_y + val))
+
+            # Draw Fades
+            fade_in_w = int(seg.fade_in_ms * self.pixels_per_ms)
+            fade_out_w = int(seg.fade_out_ms * self.pixels_per_ms)
+            painter.setPen(QPen(QColor(255, 255, 255, 150), 1, Qt.PenStyle.DashLine))
+            painter.drawLine(rect.left(), rect.bottom(), rect.left() + fade_in_w, rect.top())
+            painter.drawLine(rect.right() - fade_out_w, rect.top(), rect.right(), rect.bottom())
+            painter.setBrush(QBrush(Qt.GlobalColor.white))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawEllipse(rect.left() + fade_in_w - 4, rect.top() - 4, 8, 8)
+            painter.drawEllipse(rect.right() - fade_out_w - 4, rect.top() - 4, 8, 8)
 
             painter.setPen(Qt.GlobalColor.white)
             painter.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
@@ -244,7 +273,24 @@ class TimelineWidget(QWidget):
         if event.button() == Qt.MouseButton.LeftButton:
             clicked_seg = None
             for seg in reversed(self.segments):
-                if self.get_seg_rect(seg).contains(event.pos()):
+                rect = self.get_seg_rect(seg)
+                fi_x = rect.left() + int(seg.fade_in_ms * self.pixels_per_ms)
+                fo_x = rect.right() - int(seg.fade_out_ms * self.pixels_per_ms)
+                
+                if QRect(fi_x-10, rect.top()-10, 20, 20).contains(event.pos()):
+                    self.selected_segment = seg
+                    self.fade_in_dragging = True
+                    self.drag_start_pos = event.pos()
+                    self.drag_start_fade = seg.fade_in_ms
+                    self.update(); return
+                if QRect(fo_x-10, rect.top()-10, 20, 20).contains(event.pos()):
+                    self.selected_segment = seg
+                    self.fade_out_dragging = True
+                    self.drag_start_pos = event.pos()
+                    self.drag_start_fade = seg.fade_out_ms
+                    self.update(); return
+
+                if rect.contains(event.pos()):
                     clicked_seg = seg
                     break
             
@@ -257,18 +303,12 @@ class TimelineWidget(QWidget):
                 self.drag_start_dur = self.selected_segment.duration_ms
                 self.drag_start_vol = self.selected_segment.volume
                 self.drag_start_lane = self.selected_segment.lane
-                
                 rect = self.get_seg_rect(self.selected_segment)
-                if event.pos().x() > (rect.right() - 20):
-                    self.resizing = True
-                elif event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
-                    self.vol_dragging = True
-                else:
-                    self.dragging = True
+                if event.pos().x() > (rect.right() - 20): self.resizing = True
+                elif event.modifiers() & Qt.KeyboardModifier.ShiftModifier: self.vol_dragging = True
+                else: self.dragging = True
             else:
-                # Clicked empty space - move cursor
                 self.cursor_pos_ms = event.pos().x() / self.pixels_per_ms
-            
             self.update()
         
         elif event.button() == Qt.MouseButton.RightButton:
@@ -285,76 +325,53 @@ class TimelineWidget(QWidget):
                 split_action = menu.addAction("✂ Split at Cursor")
                 menu.addSeparator()
                 del_action = menu.addAction("🗑 Remove Track")
-                
                 action = menu.exec(self.mapToGlobal(event.pos()))
-                if action == primary_action:
-                    target_seg.is_primary = not target_seg.is_primary
-                elif action == split_action:
-                    self.split_segment(target_seg, event.pos().x())
+                if action == primary_action: target_seg.is_primary = not target_seg.is_primary
+                elif action == split_action: self.split_segment(target_seg, event.pos().x())
                 elif action == del_action:
                     self.segments.remove(target_seg)
                     if self.selected_segment == target_seg: self.selected_segment = None
-                
-                self.update_geometry()
-                self.timelineChanged.emit()
+                self.update_geometry(); self.timelineChanged.emit()
 
     def split_segment(self, seg, x_pos):
         split_ms = x_pos / self.pixels_per_ms
-        relative_split_pos = split_ms - seg.start_ms
-        
-        if relative_split_pos < 500 or relative_split_pos > (seg.duration_ms - 500):
-            return 
-            
-        new_dur = seg.duration_ms - relative_split_pos
-        new_offset = seg.offset_ms + relative_split_pos
-        seg.duration_ms = relative_split_pos 
-        
-        track_data = {
-            'id': seg.id, 'filename': seg.filename, 'file_path': seg.file_path,
-            'bpm': seg.bpm, 'harmonic_key': seg.key
-        }
+        rel_split = split_ms - seg.start_ms
+        if rel_split < 500 or rel_split > (seg.duration_ms - 500): return 
+        new_dur = seg.duration_ms - rel_split
+        new_offset = seg.offset_ms + rel_split
+        seg.duration_ms = rel_split 
+        track_data = {'id': seg.id, 'filename': seg.filename, 'file_path': seg.file_path, 'bpm': seg.bpm, 'harmonic_key': seg.key}
         new_seg = TrackSegment(track_data, start_ms=split_ms, duration_ms=new_dur, lane=seg.lane, offset_ms=new_offset)
-        new_seg.volume = seg.volume
-        new_seg.is_primary = seg.is_primary
-        new_seg.waveform = seg.waveform # Pass the waveform too
-        
-        self.segments.append(new_seg)
-        self.update_geometry()
-        self.timelineChanged.emit()
+        new_seg.volume = seg.volume; new_seg.is_primary = seg.is_primary; new_seg.waveform = seg.waveform
+        self.segments.append(new_seg); self.update_geometry(); self.timelineChanged.emit()
 
     def mouseMoveEvent(self, event):
         if not self.selected_segment: return
-            
-        delta_x = event.pos().x() - self.drag_start_pos.x()
-        delta_y = event.pos().y() - self.drag_start_pos.y()
+        dx = event.pos().x() - self.drag_start_pos.x()
+        dy = event.pos().y() - self.drag_start_pos.y()
         
-        if self.resizing:
-            delta_ms = delta_x / self.pixels_per_ms
-            self.selected_segment.duration_ms = max(1000, self.drag_start_dur + delta_ms)
+        if self.fade_in_dragging:
+            self.selected_segment.fade_in_ms = max(0, min(self.selected_segment.duration_ms/2, self.drag_start_fade + dx/self.pixels_per_ms))
+        elif self.fade_out_dragging:
+            self.selected_segment.fade_out_ms = max(0, min(self.selected_segment.duration_ms/2, self.drag_start_fade - dx/self.pixels_per_ms))
+        elif self.resizing:
+            self.selected_segment.duration_ms = max(1000, self.drag_start_dur + dx/self.pixels_per_ms)
         elif self.vol_dragging:
-            delta_vol = -delta_y / 150.0 
-            self.selected_segment.volume = max(0.0, min(1.5, self.drag_start_vol + delta_vol))
+            self.selected_segment.volume = max(0.0, min(1.5, self.drag_start_vol - dy/150.0))
         elif self.dragging:
-            delta_ms = delta_x / self.pixels_per_ms
-            new_start = max(0, self.drag_start_ms + delta_ms)
-            
+            new_start = max(0, self.drag_start_ms + dx/self.pixels_per_ms)
             for other in self.segments:
                 if other == self.selected_segment: continue
-                other_end = other.start_ms + other.duration_ms
-                if abs(new_start - other_end) < self.snap_threshold_ms: new_start = other_end
+                oe = other.start_ms + other.duration_ms
+                if abs(new_start - oe) < self.snap_threshold_ms: new_start = oe
                 elif abs(new_start - other.start_ms) < self.snap_threshold_ms: new_start = other.start_ms
-            
             self.selected_segment.start_ms = new_start
             new_lane = int((event.pos().y() - 40) // (self.lane_height + self.lane_spacing))
             self.selected_segment.lane = max(0, min(4, new_lane))
-            
-        self.update_geometry()
-        self.timelineChanged.emit()
+        self.update_geometry(); self.timelineChanged.emit()
 
     def mouseReleaseEvent(self, event):
-        self.dragging = False
-        self.resizing = False
-        self.vol_dragging = False
+        self.dragging = self.resizing = self.vol_dragging = self.fade_in_dragging = self.fade_out_dragging = False
         self.update_geometry()
 
     def add_track(self, track_data, start_ms=None):
@@ -364,14 +381,9 @@ class TimelineWidget(QWidget):
                 last_seg = max(self.segments, key=lambda s: s.start_ms + s.duration_ms)
                 start_ms = last_seg.start_ms + last_seg.duration_ms - 5000 
                 lane = last_seg.lane
-            else:
-                start_ms = 0
-        
+            else: start_ms = 0
         new_seg = TrackSegment(track_data, start_ms=start_ms, lane=lane)
-        self.segments.append(new_seg)
-        self.selected_segment = new_seg
-        self.update_geometry()
-        self.timelineChanged.emit()
+        self.segments.append(new_seg); self.update_geometry(); self.timelineChanged.emit()
         return new_seg
 
     def dragEnterEvent(self, event):
@@ -381,8 +393,7 @@ class TimelineWidget(QWidget):
         track_id = event.mimeData().text()
         if track_id:
             pos = event.position()
-            lane = int((pos.y() - 40) // (self.lane_height + self.lane_spacing))
-            lane = max(0, min(4, lane))
+            lane = max(0, min(4, int((pos.y() - 40) // (self.lane_height + self.lane_spacing))))
             self.window().add_track_by_id(int(track_id), pos.x(), lane=lane)
             event.acceptProposedAction()
 
@@ -427,238 +438,113 @@ class AudioSequencerApp(QMainWindow):
     def init_ui(self):
         self.setWindowTitle("AudioSequencer AI - The Pro Flow")
         self.setMinimumSize(QSize(1400, 950))
-        
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
-        main_layout = QVBoxLayout(central_widget)
+        cw = QWidget(); self.setCentralWidget(cw); ml = QVBoxLayout(cw)
+        tp = QHBoxLayout()
+        lp = QFrame(); lp.setFixedWidth(450); ll = QVBoxLayout(lp)
+        ll.addWidget(QLabel("<h2>📁 Audio Library</h2>"))
+        la = QHBoxLayout()
+        self.scan_btn = QPushButton("📂 Scan Folder"); self.scan_btn.clicked.connect(self.scan_folder); la.addWidget(self.scan_btn)
+        self.embed_btn = QPushButton("🧠 AI Index"); self.embed_btn.clicked.connect(self.run_embedding); la.addWidget(self.embed_btn)
+        ll.addLayout(la)
+        self.search_bar = QLineEdit(); self.search_bar.setPlaceholderText("🔍 Semantic Search..."); ll.addWidget(self.search_bar)
+        self.library_table = DraggableTable(0, 3); self.library_table.setHorizontalHeaderLabels(["Track Name", "BPM", "Key"])
+        self.library_table.setColumnWidth(0, 250); self.library_table.itemSelectionChanged.connect(self.on_library_track_selected); ll.addWidget(self.library_table)
+        tp.addWidget(lp)
+        mp = QFrame(); mp.setFixedWidth(250); mlayout = QVBoxLayout(mp)
+        ag = QFrame(); ag.setStyleSheet("background-color: #1a1a1a; border: 1px solid #333; border-radius: 8px; padding: 5px;"); al = QVBoxLayout(ag)
+        al.addWidget(QLabel("<h3>📊 Analytics Board</h3>"))
+        self.mod_toggle = QPushButton("🔍 Hide Markers"); self.mod_toggle.setCheckable(True); self.mod_toggle.clicked.connect(self.toggle_analytics); al.addWidget(self.mod_toggle)
+        self.stats_label = QLabel("Timeline empty"); self.stats_label.setStyleSheet("color: #aaa; font-size: 11px;"); al.addWidget(self.stats_label)
+        save_btn = QPushButton("💾 Save Journey"); save_btn.clicked.connect(self.save_project); al.addWidget(save_btn)
+        load_btn = QPushButton("📂 Load Journey"); load_btn.clicked.connect(self.load_project); al.addWidget(load_btn)
+        mlayout.addWidget(ag); mlayout.addSpacing(10)
+        mlayout.addWidget(QLabel("<h3>⚡ Actions</h3>"))
+        self.add_to_timeline_btn = QPushButton("➕ Add to Timeline"); self.add_to_timeline_btn.clicked.connect(self.add_selected_to_timeline); mlayout.addWidget(self.add_to_timeline_btn)
+        self.play_btn = QPushButton("▶ Preview"); self.play_btn.clicked.connect(self.play_selected); mlayout.addWidget(self.play_btn)
+        mlayout.addStretch()
+        help_box = QLabel("<b>💡 Pro Tips:</b><br><br>• <b>Drag circles</b> at top to adjust Fades.<br>• <b>Shift + Drag</b> for Volume.<br>• <b>Right-Click</b> to Split.")
+        help_box.setStyleSheet("color: #888; font-size: 11px; background: #1a1a1a; padding: 10px;"); mlayout.addWidget(help_box)
+        tp.addWidget(mp)
+        rp = QFrame(); rp.setFixedWidth(450); rl = QVBoxLayout(rp); rl.addWidget(QLabel("<h3>✨ Smart Suggestions</h3>"))
+        self.rec_list = DraggableTable(0, 2); self.rec_list.setHorizontalHeaderLabels(["Match %", "Track"]); self.rec_list.itemDoubleClicked.connect(self.on_rec_double_clicked); rl.addWidget(self.rec_list)
+        tp.addWidget(rp); ml.addLayout(tp, stretch=1)
+        th = QHBoxLayout(); th.addWidget(QLabel("<h2>🎞 Timeline Journey</h2>"))
+        self.auto_gen_btn = QPushButton("🪄 Auto-Generate Path"); self.auto_gen_btn.clicked.connect(self.auto_populate_timeline); th.addWidget(self.auto_gen_btn)
+        th.addWidget(QLabel("Target BPM:")); self.target_bpm_edit = QLineEdit("124"); self.target_bpm_edit.setFixedWidth(60); self.target_bpm_edit.textChanged.connect(self.on_bpm_changed); th.addWidget(self.target_bpm_edit)
+        self.render_btn = QPushButton("🚀 RENDER FINAL MIX"); self.render_btn.setStyleSheet("background-color: #007acc; padding: 12px 25px; color: white; font-weight: bold;"); self.render_btn.clicked.connect(self.render_timeline); th.addWidget(self.render_btn)
+        th.addStretch(); ml.addLayout(th)
+        self.timeline_scroll = QScrollArea(); self.timeline_scroll.setWidgetResizable(True)
+        self.timeline_widget = TimelineWidget(); self.timeline_scroll.setWidget(self.timeline_widget); ml.addWidget(self.timeline_scroll, stretch=1)
+        self.status_bar = QStatusBar(); self.setStatusBar(self.status_bar); self.status_bar.showMessage("Ready.")
+        self.timeline_widget.segmentSelected.connect(self.on_segment_selected); self.timeline_widget.timelineChanged.connect(self.update_status)
+        self.setStyleSheet("QMainWindow { background-color: #121212; color: #e0e0e0; font-family: 'Segoe UI'; } QLabel { color: #ffffff; } QTableWidget { background-color: #1e1e1e; gridline-color: #333; } QPushButton { background-color: #333; color: #fff; padding: 8px; border-radius: 4px; }")
 
-        top_panels = QHBoxLayout()
-        
-        library_panel = QFrame()
-        library_panel.setFixedWidth(450)
-        lib_layout = QVBoxLayout(library_panel)
-        lib_layout.addWidget(QLabel("<h2>📁 Audio Library</h2>"))
-        
-        lib_actions = QHBoxLayout()
-        self.scan_btn = QPushButton("📂 Scan Folder")
-        self.scan_btn.setToolTip("Select a folder to import audio loops into your library.")
-        self.scan_btn.clicked.connect(self.scan_folder)
-        
-        self.embed_btn = QPushButton("🧠 AI Index")
-        self.embed_btn.setToolTip("Run AI analysis on new tracks to enable 'vibe-based' recommendations.")
-        self.embed_btn.clicked.connect(self.run_embedding)
-        
-        lib_actions.addWidget(self.scan_btn)
-        lib_actions.addWidget(self.embed_btn)
-        lib_layout.addLayout(lib_actions)
+    def save_project(self):
+        path, _ = QFileDialog.getSaveFileName(self, "Save Journey", "", "JSON Files (*.json)")
+        if path:
+            data = {'target_bpm': self.timeline_widget.target_bpm, 'segments': [s.to_dict() for s in self.timeline_widget.segments]}
+            with open(path, 'w') as f: json.dump(data, f)
+            self.status_bar.showMessage(f"Journey saved to {os.path.basename(path)}")
 
-        self.search_bar = QLineEdit()
-        self.search_bar.setPlaceholderText("🔍 Semantic Search (e.g. 'lofi beat', 'cinematic')")
-        self.search_bar.setToolTip("Search your library by 'vibe' using AI semantic matching.")
-        lib_layout.addWidget(self.search_bar)
-        
-        self.library_table = DraggableTable(0, 3)
-        self.library_table.setHorizontalHeaderLabels(["Track Name", "BPM", "Key"])
-        self.library_table.setColumnWidth(0, 250)
-        self.library_table.setColumnWidth(1, 60)
-        self.library_table.setColumnWidth(2, 60)
-        self.library_table.itemSelectionChanged.connect(self.on_library_track_selected)
-        lib_layout.addWidget(self.library_table)
-        top_panels.addWidget(library_panel)
-
-        mid_panel = QFrame()
-        mid_panel.setFixedWidth(250)
-        mid_layout = QVBoxLayout(mid_panel)
-        
-        analytics_group = QFrame()
-        analytics_group.setStyleSheet("background-color: #1a1a1a; border: 1px solid #333; border-radius: 8px; padding: 5px;")
-        analytics_layout = QVBoxLayout(analytics_group)
-        analytics_layout.addWidget(QLabel("<h3>📊 Analytics Board</h3>"))
-        
-        self.mod_toggle = QPushButton("🔍 Hide Markers")
-        self.mod_toggle.setCheckable(True)
-        self.mod_toggle.setChecked(False)
-        self.mod_toggle.clicked.connect(self.toggle_analytics)
-        analytics_layout.addWidget(self.mod_toggle)
-        
-        self.stats_label = QLabel("Timeline empty")
-        self.stats_label.setStyleSheet("color: #aaa; font-size: 11px;")
-        self.stats_label.setWordWrap(True)
-        analytics_layout.addWidget(self.stats_label)
-        
-        mid_layout.addWidget(analytics_group)
-        mid_layout.addSpacing(10)
-
-        mid_layout.addWidget(QLabel("<h3>⚡ Actions</h3>"))
-        self.add_to_timeline_btn = QPushButton("➕ Add to Timeline")
-        self.add_to_timeline_btn.setToolTip("Place the selected track at the end of your timeline.")
-        self.add_to_timeline_btn.setStyleSheet("background-color: #2e7d32; color: white;")
-        self.add_to_timeline_btn.clicked.connect(self.add_selected_to_timeline)
-        mid_layout.addWidget(self.add_to_timeline_btn)
-        
-        self.play_btn = QPushButton("▶ Preview")
-        self.play_btn.setToolTip("Play the raw audio file.")
-        self.play_btn.clicked.connect(self.play_selected)
-        mid_layout.addWidget(self.play_btn)
-        
-        mid_layout.addStretch()
-        
-        help_box = QLabel("<b>💡 Pro Tips:</b><br><br>"
-                          "• <b>Drag</b> clips between lanes to overlap.<br>"
-                          "• <b>Shift + Drag</b> vertically for volume.<br>"
-                          "• <b>Right-Click</b> to Split clips or mark Primary.<br>"
-                          "• <b>Horizontal Scroll</b> enabled for long sessions.")
-        help_box.setWordWrap(True)
-        help_box.setStyleSheet("color: #888; font-size: 11px; background: #1a1a1a; padding: 10px; border-radius: 5px;")
-        mid_layout.addWidget(help_box)
-        top_panels.addWidget(mid_panel)
-
-        rec_panel = QFrame()
-        rec_panel.setFixedWidth(450)
-        rec_layout = QVBoxLayout(rec_panel)
-        rec_layout.addWidget(QLabel("<h3>✨ Smart Suggestions</h3>"))
-        
-        self.rec_list = DraggableTable(0, 2)
-        self.rec_list.setHorizontalHeaderLabels(["Match %", "Track"])
-        self.rec_list.setColumnWidth(0, 80)
-        self.rec_list.setColumnWidth(1, 300)
-        self.rec_list.itemDoubleClicked.connect(self.on_rec_double_clicked)
-        rec_layout.addWidget(self.rec_list)
-        top_panels.addWidget(rec_panel)
-        
-        main_layout.addLayout(top_panels, stretch=1)
-
-        timeline_header = QHBoxLayout()
-        timeline_header.addWidget(QLabel("<h2>🎞 Timeline Journey</h2>"))
-        
-        self.auto_gen_btn = QPushButton("🪄 Auto-Generate Path")
-        self.auto_gen_btn.setToolTip("Let AI build a 6-track journey based on your currently selected track.")
-        self.auto_gen_btn.clicked.connect(self.auto_populate_timeline)
-        timeline_header.addWidget(self.auto_gen_btn)
-        
-        timeline_header.addWidget(QLabel("Target BPM:"))
-        self.target_bpm_edit = QLineEdit("124")
-        self.target_bpm_edit.setFixedWidth(60)
-        self.target_bpm_edit.textChanged.connect(self.on_bpm_changed)
-        timeline_header.addWidget(self.target_bpm_edit)
-        
-        self.render_btn = QPushButton("🚀 RENDER FINAL MIX")
-        self.render_btn.setToolTip("Stitch and synchronize all tracks into a high-quality MP3.")
-        self.render_btn.setStyleSheet("background-color: #007acc; padding: 12px 25px; font-size: 16px; color: white; font-weight: bold;")
-        self.render_btn.clicked.connect(self.render_timeline)
-        timeline_header.addWidget(self.render_btn)
-        
-        timeline_header.addStretch()
-        main_layout.addLayout(timeline_header)
-
-        self.timeline_scroll = QScrollArea()
-        self.timeline_scroll.setWidgetResizable(True)
-        self.timeline_widget = TimelineWidget()
-        self.timeline_scroll.setWidget(self.timeline_widget)
-        main_layout.addWidget(self.timeline_scroll, stretch=1)
-
-        self.status_bar = QStatusBar()
-        self.setStatusBar(self.status_bar)
-        self.status_bar.showMessage("Ready.")
-
-        self.timeline_widget.segmentSelected.connect(self.on_segment_selected)
-        self.timeline_widget.timelineChanged.connect(self.update_status)
-
-        self.setStyleSheet("""
-            QMainWindow { background-color: #121212; color: #e0e0e0; font-family: 'Segoe UI', sans-serif; }
-            QLabel { color: #ffffff; }
-            QTableWidget { background-color: #1e1e1e; color: #e0e0e0; gridline-color: #333333; selection-background-color: #333333; border: 1px solid #333; }
-            QLineEdit { background-color: #252525; color: #ffffff; border: 1px solid #444; padding: 8px; border-radius: 4px; }
-            QPushButton { background-color: #333333; color: #ffffff; padding: 10px; border-radius: 6px; font-weight: bold; border: 1px solid #444; }
-            QPushButton:hover { background-color: #444444; border: 1px solid #666; }
-            QScrollArea { border: 1px solid #333; background-color: #121212; border-radius: 8px; }
-            QStatusBar { background-color: #1e1e1e; color: #aaa; }
-        """)
+    def load_project(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Open Journey", "", "JSON Files (*.json)")
+        if path:
+            with open(path, 'r') as f: data = json.load(f)
+            self.timeline_widget.segments = []
+            self.target_bpm_edit.setText(str(data['target_bpm']))
+            for s in data['segments']:
+                seg = TrackSegment(s, start_ms=s['start_ms'], duration_ms=s['duration_ms'], lane=s['lane'], offset_ms=s['offset_ms'])
+                seg.volume = s['volume']; seg.is_primary = s['is_primary']; seg.fade_in_ms = s['fade_in_ms']; seg.fade_out_ms = s['fade_out_ms']
+                seg.waveform = self.processor.get_waveform_envelope(seg.file_path)
+                self.timeline_widget.segments.append(seg)
+            self.timeline_widget.update_geometry(); self.update_status()
 
     def on_bpm_changed(self, text):
-        try:
-            self.timeline_widget.target_bpm = float(text)
-            self.timeline_widget.update()
-            self.update_status()
+        try: self.timeline_widget.target_bpm = float(text); self.timeline_widget.update(); self.update_status()
         except: pass
-
     def toggle_analytics(self):
         self.timeline_widget.show_modifications = not self.mod_toggle.isChecked()
-        self.mod_toggle.setText("🔍 Show Markers" if self.mod_toggle.isChecked() else "🔍 Hide Markers")
-        self.timeline_widget.update()
-
+        self.mod_toggle.setText("🔍 Show Markers" if self.mod_toggle.isChecked() else "🔍 Hide Markers"); self.timeline_widget.update()
     def update_status(self):
         count = len(self.timeline_widget.segments)
         if count > 0:
             total_dur = max(s.start_ms + s.duration_ms for s in self.timeline_widget.segments)
             avg_bpm = sum(s.bpm for s in self.timeline_widget.segments) / count
             bpm_diff = abs(avg_bpm - self.timeline_widget.target_bpm)
-            
             self.status_bar.showMessage(f"Timeline: {count} tracks | Total Duration: {total_dur/1000:.1f}s")
-            
-            analytics_text = (f"<b>Tracks:</b> {count}<br>"
-                              f"<b>Duration:</b> {total_dur/1000:.1f}s<br>"
-                              f"<b>Avg Track BPM:</b> {avg_bpm:.1f}<br>"
-                              f"<b>BPM Variance:</b> {bpm_diff:.1f}<br>")
-            
-            if bpm_diff > 10: analytics_text += "<br><span style='color: #ffaa00;'>⚠️ Large BPM stretch active</span>"
-            self.stats_label.setText(analytics_text)
-        else:
-            self.status_bar.showMessage("Ready.")
-            self.stats_label.setText("Timeline empty")
-
+            at = (f"<b>Tracks:</b> {count}<br><b>Duration:</b> {total_dur/1000:.1f}s<br><b>Avg Track BPM:</b> {avg_bpm:.1f}<br><b>BPM Variance:</b> {bpm_diff:.1f}<br>")
+            if bpm_diff > 10: at += "<br><span style='color: #ffaa00;'>⚠️ Large BPM stretch active</span>"
+            self.stats_label.setText(at)
+        else: self.status_bar.showMessage("Ready."); self.stats_label.setText("Timeline empty")
     def load_library(self):
         try:
-            conn = self.dm.get_conn()
-            cursor = conn.cursor()
-            cursor.execute("SELECT id, filename, bpm, harmonic_key FROM tracks")
-            rows = cursor.fetchall()
-            self.library_table.setRowCount(0)
+            conn = self.dm.get_conn(); cursor = conn.cursor(); cursor.execute("SELECT id, filename, bpm, harmonic_key FROM tracks")
+            rows = cursor.fetchall(); self.library_table.setRowCount(0)
             for row in rows:
-                row_idx = self.library_table.rowCount()
-                self.library_table.insertRow(row_idx)
-                name_item = QTableWidgetItem(row[1])
-                name_item.setData(Qt.ItemDataRole.UserRole, row[0])
-                self.library_table.setItem(row_idx, 0, name_item)
-                self.library_table.setItem(row_idx, 1, QTableWidgetItem(f"{row[2]:.1f}"))
-                self.library_table.setItem(row_idx, 2, QTableWidgetItem(row[3]))
+                ri = self.library_table.rowCount(); self.library_table.insertRow(ri)
+                ni = QTableWidgetItem(row[1]); ni.setData(Qt.ItemDataRole.UserRole, row[0]); self.library_table.setItem(ri, 0, ni)
+                self.library_table.setItem(ri, 1, QTableWidgetItem(f"{row[2]:.1f}")); self.library_table.setItem(ri, 2, QTableWidgetItem(row[3]))
             conn.close()
         except Exception as e: show_error(self, "Library Error", "Failed to load library.", e)
-
     def on_library_track_selected(self):
-        selected_items = self.library_table.selectedItems()
-        if not selected_items: return
-        row = selected_items[0].row()
-        track_id = self.library_table.item(row, 0).data(Qt.ItemDataRole.UserRole)
-        self.add_track_by_id(track_id, only_update_recs=True)
-
+        si = self.library_table.selectedItems()
+        if not si: return
+        tid = self.library_table.item(si[0].row(), 0).data(Qt.ItemDataRole.UserRole); self.add_track_by_id(tid, only_update_recs=True)
     def add_track_by_id(self, track_id, x_pos=None, only_update_recs=False, lane=0):
         try:
-            conn = self.dm.get_conn()
-            conn.row_factory = sqlite3_factory
-            cursor = conn.cursor()
-            cursor.execute("SELECT * FROM tracks WHERE id = ?", (track_id,))
-            track = dict(cursor.fetchone())
-            conn.close()
+            conn = self.dm.get_conn(); conn.row_factory = sqlite3_factory; cursor = conn.cursor(); cursor.execute("SELECT * FROM tracks WHERE id = ?", (track_id,))
+            track = dict(cursor.fetchone()); conn.close()
             if not only_update_recs:
                 start_ms = x_pos / self.timeline_widget.pixels_per_ms if x_pos is not None else None
                 seg = self.timeline_widget.add_track(track, start_ms=start_ms)
                 if x_pos is not None: seg.lane = lane
-                # NEW: Generate waveform on add
-                seg.waveform = self.processor.get_waveform_envelope(track['file_path'])
-                self.timeline_widget.update()
-            self.selected_library_track = track
-            self.update_recommendations(track_id)
+                seg.waveform = self.processor.get_waveform_envelope(track['file_path']); self.timeline_widget.update()
+            self.selected_library_track = track; self.update_recommendations(track_id)
         except Exception as e: show_error(self, "Data Error", "Failed to retrieve track.", e)
-
     def add_selected_to_timeline(self):
         if self.selected_library_track: self.add_track_by_id(self.selected_library_track['id'])
-
     def on_rec_double_clicked(self, item):
-        row = item.row()
-        track_id = self.rec_list.item(row, 0).data(Qt.ItemDataRole.UserRole)
-        self.add_track_by_id(track_id)
-
+        tid = self.rec_list.item(item.row(), 0).data(Qt.ItemDataRole.UserRole); self.add_track_by_id(tid)
     def auto_populate_timeline(self):
         if not self.selected_library_track: return
         self.loading_overlay.show_loading()
@@ -673,11 +559,9 @@ class AudioSequencerApp(QMainWindow):
                 curr_ms += duration - 8000 
             self.timeline_widget.update_geometry()
         self.loading_overlay.hide_loading()
-
     def on_segment_selected(self, segment):
         if segment: self.status_bar.showMessage(f"Selected: {segment.filename} | Shift+Drag vertically for Volume | Right-Click for Split/Primary")
         else: self.update_status()
-
     def render_timeline(self):
         if not self.timeline_widget.segments: return
         sorted_segs = sorted(self.timeline_widget.segments, key=lambda s: s.start_ms)
@@ -686,78 +570,43 @@ class AudioSequencerApp(QMainWindow):
         self.loading_overlay.show_loading("Rendering your journey...")
         try:
             output_file = "timeline_mix.mp3"
-            render_data = [{'file_path': s.file_path, 'start_ms': int(s.start_ms), 'duration_ms': int(s.duration_ms), 'bpm': s.bpm, 'volume': s.volume, 'offset_ms': int(s.offset_ms), 'is_primary': s.is_primary} for s in sorted_segs]
+            render_data = [{'file_path': s.file_path, 'start_ms': int(s.start_ms), 'duration_ms': int(s.duration_ms), 'bpm': s.bpm, 'volume': s.volume, 'offset_ms': int(s.offset_ms), 'is_primary': s.is_primary, 'fade_in_ms': s.fade_in_ms, 'fade_out_ms': s.fade_out_ms} for s in sorted_segs]
             self.renderer.render_timeline(render_data, output_file, target_bpm=target_bpm)
             self.loading_overlay.hide_loading()
-            QMessageBox.information(self, "Success", f"Mix rendered: {output_file}")
-            os.startfile(output_file)
-        except Exception as e:
-            self.loading_overlay.hide_loading()
-            show_error(self, "Render Error", "Failed to render timeline.", e)
-
+            QMessageBox.information(self, "Success", f"Mix rendered: {output_file}"); os.startfile(output_file)
+        except Exception as e: self.loading_overlay.hide_loading(); show_error(self, "Render Error", "Failed to render timeline.", e)
     def scan_folder(self):
-        from PyQt6.QtWidgets import QFileDialog
         folder = QFileDialog.getExistingDirectory(self, "Select Music Folder")
         if folder:
             self.loading_overlay.show_loading("Scanning audio files...")
             try:
                 from src.ingestion import IngestionEngine
-                engine = IngestionEngine(db_path=self.dm.db_path)
-                engine.scan_directory(folder)
-                self.load_library()
-                self.loading_overlay.hide_loading()
-            except Exception as e:
-                self.loading_overlay.hide_loading()
-                show_error(self, "Scan Error", "Failed to scan folder.", e)
-
+                engine = IngestionEngine(db_path=self.dm.db_path); engine.scan_directory(folder); self.load_library(); self.loading_overlay.hide_loading()
+            except Exception as e: self.loading_overlay.hide_loading(); show_error(self, "Scan Error", "Failed to scan folder.", e)
     def run_embedding(self):
         self.loading_overlay.show_loading("AI Semantic Indexing... (this takes a moment)")
         try:
             from src.embeddings import EmbeddingEngine
-            embed_engine = EmbeddingEngine()
-            conn = self.dm.get_conn()
-            cursor = conn.cursor()
-            cursor.execute("SELECT id, file_path, clp_embedding_id FROM tracks")
+            embed_engine = EmbeddingEngine(); conn = self.dm.get_conn(); cursor = conn.cursor(); cursor.execute("SELECT id, file_path, clp_embedding_id FROM tracks")
             tracks = cursor.fetchall()
             for track_id, file_path, existing_embed in tracks:
                 if not existing_embed:
-                    embedding = embed_engine.get_embedding(file_path)
-                    self.dm.add_embedding(track_id, embedding, metadata={"file_path": file_path})
-            conn.close()
-            self.loading_overlay.hide_loading()
-            QMessageBox.information(self, "AI Complete", "Semantic indexing finished!")
-        except Exception as e:
-            self.loading_overlay.hide_loading()
-            show_error(self, "AI Error", "Semantic indexing failed.", e)
-
+                    embedding = embed_engine.get_embedding(file_path); self.dm.add_embedding(track_id, embedding, metadata={"file_path": file_path})
+            conn.close(); self.loading_overlay.hide_loading(); QMessageBox.information(self, "AI Complete", "Semantic indexing finished!")
+        except Exception as e: self.loading_overlay.hide_loading(); show_error(self, "AI Error", "Semantic indexing failed.", e)
     def update_recommendations(self, track_id):
         try:
-            conn = self.dm.get_conn()
-            conn.row_factory = sqlite3_factory
-            cursor = conn.cursor()
-            cursor.execute("SELECT * FROM tracks WHERE id = ?", (track_id,))
-            target = dict(cursor.fetchone())
-            target_emb = self.dm.get_embedding(target['clp_embedding_id']) if target['clp_embedding_id'] else None
-            cursor.execute("SELECT * FROM tracks WHERE id != ?", (track_id,))
-            others = cursor.fetchall()
-            results = []
+            conn = self.dm.get_conn(); conn.row_factory = sqlite3_factory; cursor = conn.cursor(); cursor.execute("SELECT * FROM tracks WHERE id = ?",(track_id,))
+            target = dict(cursor.fetchone()); target_emb = self.dm.get_embedding(target['clp_embedding_id']) if target['clp_embedding_id'] else None
+            cursor.execute("SELECT * FROM tracks WHERE id != ?", (track_id,)); others = cursor.fetchall(); results = []
             for other in others:
-                other_dict = dict(other)
-                other_emb = self.dm.get_embedding(other_dict['clp_embedding_id']) if other_dict['clp_embedding_id'] else None
-                score = self.scorer.get_total_score(target, other_dict, target_emb, other_emb)
-                results.append((score['total'], other_dict['filename'], other_dict['id']))
-            results.sort(key=lambda x: x[0], reverse=True)
-            self.rec_list.setRowCount(0)
+                other_dict = dict(other); other_emb = self.dm.get_embedding(other_dict['clp_embedding_id']) if other_dict['clp_embedding_id'] else None
+                score = self.scorer.get_total_score(target, other_dict, target_emb, other_emb); results.append((score['total'], other_dict['filename'], other_dict['id']))
+            results.sort(key=lambda x: x[0], reverse=True); self.rec_list.setRowCount(0)
             for score, name, tid in results[:10]:
-                row_idx = self.rec_list.rowCount()
-                self.rec_list.insertRow(row_idx)
-                score_item = QTableWidgetItem(f"{score}%")
-                score_item.setData(Qt.ItemDataRole.UserRole, tid)
-                self.rec_list.setItem(row_idx, 0, score_item)
-                self.rec_list.setItem(row_idx, 1, QTableWidgetItem(name))
+                ri = self.rec_list.rowCount(); self.rec_list.insertRow(ri); si = QTableWidgetItem(f"{score}%"); si.setData(Qt.ItemDataRole.UserRole, tid); self.rec_list.setItem(ri, 0, si); self.rec_list.setItem(ri, 1, QTableWidgetItem(name))
             conn.close()
         except Exception as e: print(f"Rec Engine Error: {e}")
-
     def play_selected(self):
         if self.selected_library_track:
             try: os.startfile(self.selected_library_track['file_path'])
@@ -765,12 +614,8 @@ class AudioSequencerApp(QMainWindow):
 
 def sqlite3_factory(cursor, row):
     d = {}
-    for idx, col in enumerate(cursor.description):
-        d[col[0]] = row[idx]
+    for idx, col in enumerate(cursor.description): d[col[0]] = row[idx]
     return d
 
 if __name__ == "__main__":
-    app = QApplication(sys.argv)
-    window = AudioSequencerApp()
-    window.show()
-    sys.exit(app.exec())
+    app = QApplication(sys.argv); window = AudioSequencerApp(); window.show(); sys.exit(app.exec())
