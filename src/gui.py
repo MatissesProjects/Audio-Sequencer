@@ -1,18 +1,67 @@
 import sys
 import os
 import sqlite3
+import traceback
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QTableWidget, QTableWidgetItem, 
                              QLineEdit, QLabel, QPushButton, QFrame, QMessageBox,
-                             QScrollArea, QMenu)
+                             QScrollArea, QMenu, QDialog, QTextEdit)
 from PyQt6.QtCore import Qt, QSize, QRect, pyqtSignal, QPoint
 from PyQt6.QtGui import QPainter, QColor, QBrush, QPen, QFont
-from src.database import DataManager
-from src.scoring import CompatibilityScorer
-from src.processor import AudioProcessor
-from src.renderer import FlowRenderer
-from src.generator import TransitionGenerator
-from src.orchestrator import FullMixOrchestrator
+
+class DetailedErrorDialog(QDialog):
+    def __init__(self, title, message, details, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.setMinimumSize(600, 400)
+        layout = QVBoxLayout(self)
+        
+        # Icon and Message
+        msg_layout = QHBoxLayout()
+        icon_label = QLabel("❌")
+        icon_label.setStyleSheet("font-size: 32px;")
+        msg_layout.addWidget(icon_label)
+        msg_label = QLabel(message)
+        msg_label.setWordWrap(True)
+        msg_label.setStyleSheet("font-size: 14px; font-weight: bold;")
+        msg_layout.addWidget(msg_label, stretch=1)
+        layout.addLayout(msg_layout)
+
+        # Technical Details
+        layout.addWidget(QLabel("Technical Details:"))
+        self.details_box = QTextEdit()
+        self.details_box.setReadOnly(True)
+        self.details_box.setText(details)
+        self.details_box.setStyleSheet("background-color: #1a1a1a; color: #ff5555; font-family: Consolas, monospace;")
+        layout.addWidget(self.details_box)
+
+        # Buttons
+        btn_layout = QHBoxLayout()
+        copy_btn = QPushButton("📋 Copy to Clipboard")
+        copy_btn.clicked.connect(self.copy_to_clipboard)
+        btn_layout.addWidget(copy_btn)
+        
+        close_btn = QPushButton("Close")
+        close_btn.clicked.connect(self.accept)
+        close_btn.setDefault(True)
+        btn_layout.addWidget(close_btn)
+        
+        layout.addLayout(btn_layout)
+        self.setStyleSheet("""
+            QDialog { background-color: #252525; color: white; }
+            QLabel { color: white; }
+            QPushButton { background-color: #444; color: white; padding: 8px; border-radius: 4px; }
+            QPushButton:hover { background-color: #555; }
+        """)
+
+    def copy_to_clipboard(self):
+        QApplication.clipboard().setText(self.details_box.toPlainText())
+        QMessageBox.information(self, "Copied", "Error details copied to clipboard.")
+
+def show_error(parent, title, message, exception):
+    details = "".join(traceback.format_exception(type(exception), exception, exception.__traceback__))
+    dialog = DetailedErrorDialog(title, message, details, parent)
+    dialog.exec()
 
 class TrackSegment:
     def __init__(self, track_data, start_ms=0, duration_ms=20000):
@@ -196,6 +245,28 @@ class TimelineWidget(QWidget):
         # but for now let's just accept if it's from our library
         event.acceptProposedAction()
 
+class LoadingOverlay(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.hide()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), QColor(0, 0, 0, 150))
+        painter.setPen(Qt.GlobalColor.white)
+        painter.setFont(QFont("Arial", 18, QFont.Weight.Bold))
+        painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "Processing... Please Wait")
+
+    def show_loading(self):
+        self.setGeometry(self.parent().rect())
+        self.raise_()
+        self.show()
+        QApplication.processEvents()
+
+    def hide_loading(self):
+        self.hide()
+
 class AudioSequencerApp(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -208,6 +279,7 @@ class AudioSequencerApp(QMainWindow):
         self.selected_library_track = None
         self.init_ui()
         self.load_library()
+        self.loading_overlay = LoadingOverlay(self.centralWidget())
 
     def init_ui(self):
         self.setWindowTitle("AudioSequencer AI - The Pro Flow")
@@ -339,21 +411,24 @@ class AudioSequencerApp(QMainWindow):
         """)
 
     def load_library(self):
-        conn = self.dm.get_conn()
-        cursor = conn.cursor()
-        cursor.execute("SELECT id, filename, bpm, harmonic_key FROM tracks")
-        rows = cursor.fetchall()
-        
-        self.library_table.setRowCount(0)
-        for row in rows:
-            row_idx = self.library_table.rowCount()
-            self.library_table.insertRow(row_idx)
-            name_item = QTableWidgetItem(row[1])
-            name_item.setData(Qt.ItemDataRole.UserRole, row[0])
-            self.library_table.setItem(row_idx, 0, name_item)
-            self.library_table.setItem(row_idx, 1, QTableWidgetItem(str(row[2])))
-            self.library_table.setItem(row_idx, 2, QTableWidgetItem(row[3]))
-        conn.close()
+        try:
+            conn = self.dm.get_conn()
+            cursor = conn.cursor()
+            cursor.execute("SELECT id, filename, bpm, harmonic_key FROM tracks")
+            rows = cursor.fetchall()
+            
+            self.library_table.setRowCount(0)
+            for row in rows:
+                row_idx = self.library_table.rowCount()
+                self.library_table.insertRow(row_idx)
+                name_item = QTableWidgetItem(row[1])
+                name_item.setData(Qt.ItemDataRole.UserRole, row[0])
+                self.library_table.setItem(row_idx, 0, name_item)
+                self.library_table.setItem(row_idx, 1, QTableWidgetItem(str(row[2])))
+                self.library_table.setItem(row_idx, 2, QTableWidgetItem(row[3]))
+            conn.close()
+        except Exception as e:
+            show_error(self, "Library Error", "Failed to load audio library.", e)
 
     def on_library_track_selected(self):
         selected_items = self.library_table.selectedItems()
@@ -433,7 +508,7 @@ class AudioSequencerApp(QMainWindow):
         except ValueError:
             target_bpm = 124.0
 
-        QMessageBox.information(self, "Rendering", f"Rendering mix with {len(sorted_segs)} segments at {target_bpm} BPM...")
+        self.loading_overlay.show_loading()
         
         try:
             output_file = "timeline_mix.mp3"
@@ -450,26 +525,32 @@ class AudioSequencerApp(QMainWindow):
                 })
             
             self.renderer.render_timeline(render_data, output_file, target_bpm=target_bpm)
+            self.loading_overlay.hide_loading()
             QMessageBox.information(self, "Success", f"Mix rendered to {output_file}")
             os.startfile(output_file)
             
         except Exception as e:
-            import traceback
-            traceback.print_exc()
-            QMessageBox.critical(self, "Error", f"Render failed: {e}")
+            self.loading_overlay.hide_loading()
+            show_error(self, "Render Error", "An error occurred while rendering the timeline.", e)
 
     def scan_folder(self):
         from PyQt6.QtWidgets import QFileDialog
         folder = QFileDialog.getExistingDirectory(self, "Select Music Folder")
         if folder:
-            from src.ingestion import IngestionEngine
-            engine = IngestionEngine(db_path=self.dm.db_path)
-            engine.scan_directory(folder)
-            self.load_library()
-            QMessageBox.information(self, "Scan Complete", f"Library updated from {folder}")
+            self.loading_overlay.show_loading()
+            try:
+                from src.ingestion import IngestionEngine
+                engine = IngestionEngine(db_path=self.dm.db_path)
+                engine.scan_directory(folder)
+                self.load_library()
+                self.loading_overlay.hide_loading()
+                QMessageBox.information(self, "Scan Complete", f"Library updated from {folder}")
+            except Exception as e:
+                self.loading_overlay.hide_loading()
+                show_error(self, "Scan Error", "Failed to scan directory for audio files.", e)
 
     def run_embedding(self):
-        QMessageBox.information(self, "AI Processing", "Starting CLAP embedding engine. This may take a moment...")
+        self.loading_overlay.show_loading()
         from src.embeddings import EmbeddingEngine
         try:
             embed_engine = EmbeddingEngine()
@@ -482,44 +563,53 @@ class AudioSequencerApp(QMainWindow):
                     embedding = embed_engine.get_embedding(file_path)
                     self.dm.add_embedding(track_id, embedding, metadata={"file_path": file_path})
             conn.close()
+            self.loading_overlay.hide_loading()
             QMessageBox.information(self, "AI Complete", "All tracks have been semantic-indexed!")
         except Exception as e:
-            QMessageBox.critical(self, "Error", f"AI Embedding failed: {e}")
+            self.loading_overlay.hide_loading()
+            show_error(self, "AI Error", "Semantic indexing failed.", e)
 
     def update_recommendations(self, track_id):
-        conn = self.dm.get_conn()
-        conn.row_factory = sqlite3_factory
-        cursor = conn.cursor()
-        
-        cursor.execute("SELECT * FROM tracks WHERE id = ?", (track_id,))
-        target = dict(cursor.fetchone())
-        target_emb = self.dm.get_embedding(target['clp_embedding_id']) if target['clp_embedding_id'] else None
-        
-        cursor.execute("SELECT * FROM tracks WHERE id != ?", (track_id,))
-        others = cursor.fetchall()
-        
-        results = []
-        for other in others:
-            other_dict = dict(other)
-            other_emb = self.dm.get_embedding(other_dict['clp_embedding_id']) if other_dict['clp_embedding_id'] else None
-            score = self.scorer.get_total_score(target, other_dict, target_emb, other_emb)
-            results.append((score['total'], other_dict['filename']))
+        try:
+            conn = self.dm.get_conn()
+            conn.row_factory = sqlite3_factory
+            cursor = conn.cursor()
             
-        results.sort(key=lambda x: x[0], reverse=True)
-        
-        self.rec_list.setRowCount(0)
-        for score, name in results[:10]:
-            row_idx = self.rec_list.rowCount()
-            self.rec_list.insertRow(row_idx)
-            self.rec_list.setItem(row_idx, 0, QTableWidgetItem(f"{score}%"))
-            self.rec_list.setItem(row_idx, 1, QTableWidgetItem(name))
+            cursor.execute("SELECT * FROM tracks WHERE id = ?", (track_id,))
+            target = dict(cursor.fetchone())
+            target_emb = self.dm.get_embedding(target['clp_embedding_id']) if target['clp_embedding_id'] else None
             
-        conn.close()
+            cursor.execute("SELECT * FROM tracks WHERE id != ?", (track_id,))
+            others = cursor.fetchall()
+            
+            results = []
+            for other in others:
+                other_dict = dict(other)
+                other_emb = self.dm.get_embedding(other_dict['clp_embedding_id']) if other_dict['clp_embedding_id'] else None
+                score = self.scorer.get_total_score(target, other_dict, target_emb, other_emb)
+                results.append((score['total'], other_dict['filename']))
+                
+            results.sort(key=lambda x: x[0], reverse=True)
+            
+            self.rec_list.setRowCount(0)
+            for score, name in results[:10]:
+                row_idx = self.rec_list.rowCount()
+                self.rec_list.insertRow(row_idx)
+                self.rec_list.setItem(row_idx, 0, QTableWidgetItem(f"{score}%"))
+                self.rec_list.setItem(row_idx, 1, QTableWidgetItem(name))
+                
+            conn.close()
+        except Exception as e:
+            # We don't want a popup every time selection changes, but logging details is good
+            print(f"Rec Engine Error: {e}")
 
     def play_selected(self):
         if not self.selected_library_track:
             return
-        os.startfile(self.selected_library_track['file_path'])
+        try:
+            os.startfile(self.selected_library_track['file_path'])
+        except Exception as e:
+            show_error(self, "Playback Error", "Failed to play the selected file.", e)
 
 def sqlite3_factory(cursor, row):
     d = {}
