@@ -23,19 +23,16 @@ from src.embeddings import EmbeddingEngine
 class DetailedErrorDialog(QDialog):
     def __init__(self, title, message, details, parent=None):
         super().__init__(parent)
-        self.setWindowTitle(title)
-        self.setMinimumSize(600, 400)
-        layout = QVBoxLayout(self)
-        msg_layout = QHBoxLayout()
+        self.setWindowTitle(title); self.setMinimumSize(600, 400)
+        layout = QVBoxLayout(self); msg_layout = QHBoxLayout()
         icon_label = QLabel("❌"); icon_label.setStyleSheet("font-size: 32px;"); msg_layout.addWidget(icon_label)
         msg_label = QLabel(message); msg_label.setWordWrap(True); msg_label.setStyleSheet("font-size: 14px; font-weight: bold;"); msg_layout.addWidget(msg_label, stretch=1)
         layout.addLayout(msg_layout); layout.addWidget(QLabel("Technical Details:"))
         self.details_box = QTextEdit(); self.details_box.setReadOnly(True); self.details_box.setText(details)
         self.details_box.setStyleSheet("background-color: #1a1a1a; color: #ff5555; font-family: Consolas, monospace;"); layout.addWidget(self.details_box)
         btn_layout = QHBoxLayout()
-        copy_btn = QPushButton("📋 Copy to Clipboard"); copy_btn.clicked.connect(self.copy_to_clipboard)
-        btn_layout.addWidget(copy_btn); close_btn = QPushButton("Close"); close_btn.clicked.connect(self.accept); close_btn.setDefault(True)
-        btn_layout.addWidget(close_btn); layout.addLayout(btn_layout)
+        copy_btn = QPushButton("📋 Copy to Clipboard"); copy_btn.clicked.connect(self.copy_to_clipboard); btn_layout.addWidget(copy_btn)
+        close_btn = QPushButton("Close"); close_btn.clicked.connect(self.accept); close_btn.setDefault(True); btn_layout.addWidget(close_btn); layout.addLayout(btn_layout)
         self.setStyleSheet("QDialog { background-color: #252525; color: white; } QLabel { color: white; } QPushButton { background-color: #444; color: white; padding: 8px; border-radius: 4px; }")
     def copy_to_clipboard(self): QApplication.clipboard().setText(self.details_box.toPlainText()); QMessageBox.information(self, "Copied", "Error details copied to clipboard.")
 
@@ -44,8 +41,7 @@ def show_error(parent, title, message, exception):
     dialog = DetailedErrorDialog(title, message, details, parent); dialog.exec()
 
 class SearchThread(QThread):
-    resultsFound = pyqtSignal(list)
-    errorOccurred = pyqtSignal(str)
+    resultsFound = pyqtSignal(list); errorOccurred = pyqtSignal(str)
     def __init__(self, query, dm): super().__init__(); self.query = query; self.dm = dm
     def run(self):
         try:
@@ -59,16 +55,19 @@ class TrackSegment:
         self.bpm = track_data['bpm']; self.key = track_data['harmonic_key']
         self.start_ms = start_ms; self.duration_ms = duration_ms; self.offset_ms = offset_ms
         self.volume = 1.0; self.lane = lane; self.is_primary = False; self.waveform = []
-        self.fade_in_ms = 2000; self.fade_out_ms = 2000; self.pitch_shift = 0
-        self.color = QColor(70, 130, 180, 200)
+        self.fade_in_ms = 2000; self.fade_out_ms = 2000; self.pitch_shift = 0; self.color = QColor(70, 130, 180, 200)
+        self.onsets = []
+        if 'onsets_json' in track_data and track_data['onsets_json']:
+            try: self.onsets = [float(x) * 1000.0 for x in track_data['onsets_json'].split(',')]
+            except: pass
     def to_dict(self):
-        return {'id': self.id, 'filename': self.filename, 'file_path': self.file_path, 'bpm': self.bpm, 'key': self.key, 'start_ms': self.start_ms, 'duration_ms': self.duration_ms, 'offset_ms': self.offset_ms, 'volume': self.volume, 'lane': self.lane, 'is_primary': self.is_primary, 'fade_in_ms': self.fade_in_ms, 'fade_out_ms': self.fade_out_ms, 'pitch_shift': self.pitch_shift}
+        d = {'id': self.id, 'filename': self.filename, 'file_path': self.file_path, 'bpm': self.bpm, 'key': self.key, 'start_ms': self.start_ms, 'duration_ms': self.duration_ms, 'offset_ms': self.offset_ms, 'volume': self.volume, 'lane': self.lane, 'is_primary': self.is_primary, 'fade_in_ms': self.fade_in_ms, 'fade_out_ms': self.fade_out_ms, 'pitch_shift': self.pitch_shift}
+        d['onsets_json'] = ",".join([str(x/1000.0) for x in self.onsets]); return d
 
 class UndoManager:
     def __init__(self): self.undo_stack = []; self.redo_stack = []
     def push_state(self, segments):
-        state = [json.dumps(s.to_dict()) for s in segments]
-        self.undo_stack.append(state); self.redo_stack.clear()
+        state = [json.dumps(s.to_dict()) for s in segments]; self.undo_stack.append(state); self.redo_stack.clear()
         if len(self.undo_stack) > 50: self.undo_stack.pop(0)
     def undo(self, current_segments):
         if not self.undo_stack: return None
@@ -88,33 +87,28 @@ class DraggableTable(QTableWidget):
         super().mousePressEvent(event)
 
 class TimelineWidget(QWidget):
-    segmentSelected = pyqtSignal(object)
-    timelineChanged = pyqtSignal()
+    segmentSelected = pyqtSignal(object); timelineChanged = pyqtSignal()
     def __init__(self):
         super().__init__(); self.segments = []; self.setMinimumHeight(550); self.setAcceptDrops(True); self.pixels_per_ms = 0.05
         self.selected_segment = None; self.dragging = self.resizing = self.vol_dragging = self.fade_in_dragging = self.fade_out_dragging = False
         self.drag_start_pos = None; self.drag_start_ms = self.drag_start_dur = self.drag_start_fade = 0; self.drag_start_vol = 1.0; self.drag_start_lane = 0
         self.lane_height = 120; self.lane_spacing = 10; self.snap_threshold_ms = 2000; self.target_bpm = 124.0
         self.show_modifications = True; self.cursor_pos_ms = 0; self.show_waveforms = True; self.snap_to_grid = True; self.update_geometry()
-    
     def update_geometry(self):
-        max_ms = 600000; 
+        max_ms = 600000
         if self.segments: max_ms = max(max_ms, max(s.start_ms + s.duration_ms for s in self.segments) + 60000)
         self.setMinimumWidth(int(max_ms * self.pixels_per_ms)); self.update()
-    
     def get_ms_per_beat(self): return (60.0 / self.target_bpm) * 1000.0
     def get_seg_rect(self, seg):
         x = int(seg.start_ms * self.pixels_per_ms); w = int(seg.duration_ms * self.pixels_per_ms); h = int((self.lane_height - 20) * seg.volume)
         y_center = (seg.lane * (self.lane_height + self.lane_spacing)) + (self.lane_height // 2) + 40
         return QRect(x, y_center - (h // 2), w, h)
-
     def paintEvent(self, event):
         painter = QPainter(self); painter.setRenderHint(QPainter.RenderHint.Antialiasing); painter.fillRect(self.rect(), QColor(25, 25, 25))
         painter.setPen(QPen(QColor(45, 45, 45), 1))
         for i in range(5): 
             y = i * (self.lane_height + self.lane_spacing) + 40; painter.fillRect(0, y, self.width(), self.lane_height, QColor(32, 32, 32))
             painter.setPen(QColor(100, 100, 100)); painter.drawText(5, y + 15, f"LANE {i+1}")
-        
         mpb = self.get_ms_per_beat(); mpbar = mpb * 4
         for i in range(0, 3600000, int(mpb)):
             x = int(i * self.pixels_per_ms); 
@@ -123,7 +117,6 @@ class TimelineWidget(QWidget):
                 painter.setPen(QPen(QColor(80, 80, 80), 1)); painter.drawLine(x, 0, x, self.height())
                 painter.setPen(QColor(150, 150, 150)); painter.drawText(x + 5, 25, f"BAR {int(i // mpbar) + 1}")
             else: painter.setPen(QPen(QColor(50, 50, 50), 1, Qt.PenStyle.DotLine)); painter.drawLine(x, 40, x, self.height())
-
         for seg in self.segments:
             rect = self.get_seg_rect(seg); color = QColor(seg.color); color.setAlpha(int(120 + 135 * (min(seg.volume, 1.5) / 1.5)))
             if seg == self.selected_segment: painter.setBrush(QBrush(color.lighter(130))); painter.setPen(QPen(Qt.GlobalColor.white, 3))
@@ -135,6 +128,11 @@ class TimelineWidget(QWidget):
                 for i in range(0, rect.width(), 2):
                     idx = int((i / rect.width()) * pts); 
                     if idx < pts: val = seg.waveform[idx] * max_h; painter.drawLine(rect.left() + i, int(mid_y - val), rect.left() + i, int(mid_y + val))
+            if seg.onsets:
+                painter.setPen(QPen(QColor(255, 255, 255, 120), 1)); stretch = self.target_bpm / seg.bpm
+                for o_ms in seg.onsets:
+                    adj_ms = (o_ms - seg.offset_ms) * stretch
+                    if 0 <= adj_ms <= seg.duration_ms: tx = rect.left() + int(adj_ms * self.pixels_per_ms); painter.drawLine(tx, rect.top() + 5, tx, rect.bottom() - 5)
             fi_w = int(seg.fade_in_ms * self.pixels_per_ms); fo_w = int(seg.fade_out_ms * self.pixels_per_ms)
             painter.setPen(QPen(QColor(255, 255, 255, 150), 1, Qt.PenStyle.DashLine)); painter.drawLine(rect.left(), rect.bottom(), rect.left() + fi_w, rect.top()); painter.drawLine(rect.right() - fo_w, rect.top(), rect.right(), rect.bottom())
             painter.setBrush(QBrush(Qt.GlobalColor.white)); painter.setPen(Qt.PenStyle.NoPen); painter.drawEllipse(rect.left() + fi_w - 4, rect.top() - 4, 8, 8); painter.drawEllipse(rect.right() - fo_w - 4, rect.top() - 4, 8, 8)
@@ -174,12 +172,13 @@ class TimelineWidget(QWidget):
                 if self.get_seg_rect(seg).contains(event.pos()): target_seg = seg; break
             menu = QMenu(self)
             if target_seg:
-                primary_text = "⭐ Unmark Primary" if target_seg.is_primary else "⭐ Set as Primary"; primary_action = menu.addAction(primary_text); split_action = menu.addAction("✂ Split at Cursor")
+                pa = menu.addAction("⭐ Unmark Primary" if target_seg.is_primary else "⭐ Set as Primary"); sa = menu.addAction("✂ Split at Cursor"); qa = menu.addAction("🪄 Quantize to Grid")
                 pm = menu.addMenu("🎵 Shift Pitch")
-                for i in range(-6, 7): t = f"{i:+} Semitones" if i != 0 else "Original Pitch"; pa = pm.addAction(t); pa.setData(i)
+                for i in range(-6, 7): t = f"{i:+} Semitones" if i != 0 else "Original Pitch"; p_act = pm.addAction(t); p_act.setData(i)
                 menu.addSeparator(); da = menu.addAction("🗑 Remove Track"); action = menu.exec(self.mapToGlobal(event.pos()))
-                if action == primary_action: self.window().push_undo(); target_seg.is_primary = not target_seg.is_primary
-                elif action == split_action: self.window().push_undo(); self.split_segment(target_seg, event.pos().x())
+                if action == pa: self.window().push_undo(); target_seg.is_primary = not target_seg.is_primary
+                elif action == sa: self.window().push_undo(); self.split_segment(target_seg, event.pos().x())
+                elif action == qa: self.window().push_undo(); self.quantize_segment(target_seg)
                 elif action in pm.actions(): self.window().push_undo(); target_seg.pitch_shift = action.data()
                 elif action == da: self.window().push_undo(); self.segments.remove(target_seg); 
                 if self.selected_segment == target_seg: self.selected_segment = None
@@ -192,15 +191,15 @@ class TimelineWidget(QWidget):
         if not self.selected_segment: return
         dx = event.pos().x() - self.drag_start_pos.x(); dy = event.pos().y() - self.drag_start_pos.y(); mpb = self.get_ms_per_beat()
         if self.fade_in_dragging:
-            rf = self.drag_start_fade + dx/self.pixels_per_ms
+            rf = self.drag_start_fade + dx/self.pixels_per_ms; 
             if self.snap_to_grid: rf = round(rf / mpb) * mpb
             self.selected_segment.fade_in_ms = max(0, min(self.selected_segment.duration_ms/2, rf))
         elif self.fade_out_dragging:
-            rf = self.drag_start_fade - dx/self.pixels_per_ms
+            rf = self.drag_start_fade - dx/self.pixels_per_ms; 
             if self.snap_to_grid: rf = round(rf / mpb) * mpb
             self.selected_segment.fade_out_ms = max(0, min(self.selected_segment.duration_ms/2, rf))
         elif self.resizing:
-            rd = self.drag_start_dur + dx/self.pixels_per_ms
+            rd = self.drag_start_dur + dx/self.pixels_per_ms; 
             if self.snap_to_grid: rd = round(rd / mpb) * mpb
             self.selected_segment.duration_ms = max(1000, rd)
         elif self.vol_dragging: self.selected_segment.volume = max(0.0, min(1.5, self.drag_start_vol - dy/150.0))
@@ -222,9 +221,15 @@ class TimelineWidget(QWidget):
         sm = x_pos / self.pixels_per_ms; rs = sm - seg.start_ms
         if rs < 500 or rs > (seg.duration_ms - 500): return 
         nd = seg.duration_ms - rs; no = seg.offset_ms + rs; seg.duration_ms = rs 
-        td = {'id': seg.id, 'filename': seg.filename, 'file_path': seg.file_path, 'bpm': seg.bpm, 'harmonic_key': seg.key}
+        td = {'id': seg.id, 'filename': seg.filename, 'file_path': seg.file_path, 'bpm': seg.bpm, 'harmonic_key': seg.key, 'onsets_json': ",".join([str(x/1000.0) for x in seg.onsets])}
         ns = TrackSegment(td, start_ms=sm, duration_ms=nd, lane=seg.lane, offset_ms=no); ns.volume = seg.volume; ns.is_primary = seg.is_primary; ns.waveform = seg.waveform; ns.pitch_shift = seg.pitch_shift
         self.segments.append(ns); self.update_geometry(); self.timelineChanged.emit()
+
+    def quantize_segment(self, seg):
+        if not seg.onsets: return
+        mpb = self.get_ms_per_beat(); stretch = self.target_bpm / seg.bpm
+        foc = (seg.onsets[0] - seg.offset_ms) * stretch; cwp = seg.start_ms + foc; twp = round(cwp / mpb) * mpb
+        seg.start_ms += (twp - cwp); self.update(); self.timelineChanged.emit()
 
     def add_track(self, track_data, start_ms=None, lane=0):
         if start_ms is None:
@@ -254,15 +259,11 @@ class AudioSequencerApp(QMainWindow):
         super().__init__(); self.dm = DataManager(); self.scorer = CompatibilityScorer(); self.processor = AudioProcessor(); self.renderer = FlowRenderer(); self.generator = TransitionGenerator(); self.orchestrator = FullMixOrchestrator(); self.undo_manager = UndoManager(); self.selected_library_track = None; 
         self.play_timer = QTimer(); self.play_timer.setInterval(20); self.play_timer.timeout.connect(self.update_playback_cursor); self.is_playing = False
         self.init_ui(); self.load_library(); self.loading_overlay = LoadingOverlay(self.centralWidget())
-    
-    def update_playback_cursor(self):
-        self.timeline_widget.cursor_pos_ms += 20; self.timeline_widget.update()
-    
+    def update_playback_cursor(self): self.timeline_widget.cursor_pos_ms += 20; self.timeline_widget.update()
     def toggle_playback(self):
         self.is_playing = not self.is_playing
         if self.is_playing: self.play_timer.start(); self.ptb.setText("⏹ Stop Preview")
         else: self.play_timer.stop(); self.ptb.setText("▶ Play Journey")
-
     def push_undo(self): self.undo_manager.push_state(self.timeline_widget.segments)
     def undo(self): 
         ns = self.undo_manager.undo(self.timeline_widget.segments)
@@ -273,7 +274,7 @@ class AudioSequencerApp(QMainWindow):
     def apply_state(self, state_list):
         self.timeline_widget.segments = []
         for sj in state_list:
-            s = json.loads(sj); td = {'id': s['id'], 'filename': s['filename'], 'file_path': s['file_path'], 'bpm': s['bpm'], 'harmonic_key': s['key']}
+            s = json.loads(sj); td = {'id': s['id'], 'filename': s['filename'], 'file_path': s['file_path'], 'bpm': s['bpm'], 'harmonic_key': s['key'], 'onsets_json': s.get('onsets_json', "")}
             seg = TrackSegment(td, start_ms=s['start_ms'], duration_ms=s['duration_ms'], lane=s['lane'], offset_ms=s['offset_ms'])
             seg.volume = s['volume']; seg.is_primary = s['is_primary']; seg.fade_in_ms = s['fade_in_ms']; seg.fade_out_ms = s['fade_out_ms']; seg.pitch_shift = s.get('pitch_shift', 0)
             seg.waveform = self.processor.get_waveform_envelope(seg.file_path); self.timeline_widget.segments.append(seg)
@@ -361,7 +362,7 @@ class AudioSequencerApp(QMainWindow):
             with open(p, 'r') as f: data = json.load(f)
             self.timeline_widget.segments = []; self.tbe.setText(str(data['target_bpm']))
             for s in data['segments']:
-                td = {'id': s['id'], 'filename': s['filename'], 'file_path': s['file_path'], 'bpm': s['bpm'], 'harmonic_key': s['key']}
+                td = {'id': s['id'], 'filename': s['filename'], 'file_path': s['file_path'], 'bpm': s['bpm'], 'harmonic_key': s['key'], 'onsets_json': s.get('onsets_json', "")}
                 seg = TrackSegment(td, start_ms=s['start_ms'], duration_ms=s['duration_ms'], lane=s['lane'], offset_ms=s['offset_ms'])
                 seg.volume = s['volume']; seg.is_primary = s['is_primary']; seg.fade_in_ms = s['fade_in_ms']; seg.fade_out_ms = s['fade_out_ms']; seg.pitch_shift = s.get('pitch_shift', 0); seg.waveform = self.processor.get_waveform_envelope(seg.file_path); self.timeline_widget.segments.append(seg)
             self.timeline_widget.update_geometry(); self.update_status()
@@ -387,7 +388,7 @@ class AudioSequencerApp(QMainWindow):
         try:
             conn = self.dm.get_conn(); cursor = conn.cursor(); cursor.execute("SELECT id, filename, bpm, harmonic_key FROM tracks"); rows = cursor.fetchall(); self.library_table.setRowCount(0)
             for r in rows:
-                ri = self.library_table.rowCount(); self.library_table.insertRow(ri); ni = QTableWidgetItem(r[1]); ni.setData(Qt.ItemDataRole.UserRole, row[0]); self.library_table.setItem(ri, 0, ni); self.library_table.setItem(ri, 1, QTableWidgetItem(f"{r[2]:.1f}")); self.library_table.setItem(ri, 2, QTableWidgetItem(r[3]))
+                ri = self.library_table.rowCount(); self.library_table.insertRow(ri); ni = QTableWidgetItem(r[1]); ni.setData(Qt.ItemDataRole.UserRole, r[0]); self.library_table.setItem(ri, 0, ni); self.library_table.setItem(ri, 1, QTableWidgetItem(f"{r[2]:.1f}")); self.library_table.setItem(ri, 2, QTableWidgetItem(r[3]))
             conn.close()
         except Exception as e: show_error(self, "Library Error", "Failed to load library.", e)
     def on_library_track_selected(self):
@@ -408,7 +409,7 @@ class AudioSequencerApp(QMainWindow):
     def auto_populate_timeline(self):
         if not self.selected_library_track: return
         self.push_undo(); self.loading_overlay.show_loading(); seq = self.orchestrator.find_curated_sequence(max_tracks=6, seed_track=self.selected_library_track)
-        if sequence:
+        if seq:
             self.timeline_widget.segments = []; cm = 0
             for i, t in enumerate(seq):
                 d = 20000 if i % 2 == 0 else 30000; seg = self.timeline_widget.add_track(t, start_ms=cm); seg.waveform = self.processor.get_waveform_envelope(t['file_path']); cm += d - 8000 
