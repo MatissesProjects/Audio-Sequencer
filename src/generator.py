@@ -23,12 +23,21 @@ class TransitionGenerator:
     def get_transition_params(self, track_a, track_b):
         """Asks Gemini for transition characteristics based on track metadata."""
         if not self.client:
-            return {"noise_type": "white", "filter_type": "highpass", "reverb_amount": 0.7}
+            return {"noise_type": "white", "filter_type": "highpass", "reverb_amount": 0.7, "description": "Default White Noise"}
+
+        # Normalize keys
+        bpm_a = track_a.get('bpm', 120)
+        key_a = track_a.get('harmonic_key', track_a.get('key', 'Unknown'))
+        name_a = track_a.get('filename', 'Track A')
+        
+        bpm_b = track_b.get('bpm', 120)
+        key_b = track_b.get('harmonic_key', track_b.get('key', 'Unknown'))
+        name_b = track_b.get('filename', 'Track B')
 
         prompt = f"""
         Analyze these two tracks and describe a 4-second audio transition (riser or sweep) to bridge them.
-        Track A: {track_a['filename']}, {track_a['bpm']} BPM, Key: {track_a['harmonic_key']}
-        Track B: {track_b['filename']}, {track_b['bpm']} BPM, Key: {track_b['harmonic_key']}
+        Track A: {name_a}, {bpm_a} BPM, Key: {key_a}
+        Track B: {name_b}, {bpm_b} BPM, Key: {key_b}
         
         Provide ONLY valid JSON output with keys: 
         'noise_type' (white, pink, or brown),

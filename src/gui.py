@@ -216,8 +216,11 @@ class TimelineWidget(QWidget):
                 if self.selected_segment == ts: self.selected_segment = None
                 self.update_geometry(); self.timelineChanged.emit()
             else:
-                ba = m.addAction("🪄 Find Bridge Track here"); act = m.exec(self.mapToGlobal(event.pos()))
+                ba = m.addAction("🪄 Find Bridge Track here")
+                ta = m.addAction("✨ Generate AI Transition")
+                act = m.exec(self.mapToGlobal(event.pos()))
                 if act == ba: self.window().find_bridge_for_gap(event.pos().x())
+                elif act == ta: self.window().generate_ai_transition(event.pos().x())
 
     def mouseMoveEvent(self, event):
         if self.setting_loop: self.loop_end_ms = max(self.loop_start_ms, event.pos().x() / self.pixels_per_ms); self.update(); return
@@ -424,6 +427,58 @@ class AudioSequencerApp(QMainWindow):
                 ri = self.rec_list.rowCount(); self.rec_list.insertRow(ri); si = QTableWidgetItem(f"{sc}% (BRIDGE)"); si.setData(Qt.ItemDataRole.UserRole, ot['id']); self.rec_list.setItem(ri, 0, si); self.rec_list.setItem(ri, 1, QTableWidgetItem(ot['filename']))
             self.loading_overlay.hide_loading(); self.status_bar.showMessage(f"AI found {len(results)} potential bridges."); conn.close()
         except Exception as e: self.loading_overlay.hide_loading(); show_error(self, "Bridge Error", "AI Bridge search failed.", e)
+
+    def generate_ai_transition(self, x_pos):
+        gap_ms = x_pos / self.timeline_widget.pixels_per_ms
+        prev_seg = next_seg = None
+        sorted_segs = sorted(self.timeline_widget.segments, key=lambda s: s.start_ms)
+        for s in sorted_segs:
+            if s.start_ms + s.duration_ms <= gap_ms: prev_seg = s
+            elif s.start_ms >= gap_ms:
+                if next_seg is None: next_seg = s
+        
+        if not prev_seg or not next_seg:
+            self.status_bar.showMessage("Need track before AND after gap for AI transition.")
+            return
+
+        self.loading_overlay.show_loading("✨ Gemini: Orchestrating Transition...")
+        
+        # Ensure output folder exists
+        os.makedirs("generated_assets", exist_ok=True)
+        out_path = os.path.abspath(f"generated_assets/trans_{int(gap_ms)}.wav")
+        
+        try:
+            # 1. Get Params from Gemini (Vibe check)
+            params = self.generator.get_transition_params(prev_seg.__dict__, next_seg.__dict__)
+            
+            # 2. Generate procedural audio
+            self.generator.generate_riser(duration_sec=4.0, bpm=self.timeline_widget.target_bpm, 
+                                          output_path=out_path, params=params)
+            
+            # 3. Add to timeline
+            # Data for TrackSegment (fake metadata for generated track)
+            td = {
+                'id': -1, 'filename': f"AI Sweep ({params.get('description', 'Procedural')})",
+                'file_path': out_path, 'bpm': self.timeline_widget.target_bpm, 'harmonic_key': 'N/A',
+                'onsets_json': ""
+            }
+            
+            # Place it so it ends exactly where next_track starts
+            start_ms = next_seg.start_ms - 4000
+            # Try to find an empty lane or use a high lane (4)
+            seg = self.timeline_widget.add_track(td, start_ms=start_ms, lane=4)
+            seg.duration_ms = 4000
+            seg.fade_in_ms = 3500
+            seg.fade_out_ms = 500
+            seg.waveform = self.processor.get_waveform_envelope(out_path)
+            
+            self.loading_overlay.hide_loading()
+            self.status_bar.showMessage("AI Transition generated and placed.")
+            self.timeline_widget.update()
+            self.push_undo()
+        except Exception as e:
+            self.loading_overlay.hide_loading()
+            show_error(self, "AI Generation Error", "Failed to generate transition.", e)
 
     def on_zoom_changed(self, v): self.timeline_widget.pixels_per_ms = v / 1000.0; self.timeline_widget.update_geometry()
     def clear_timeline(self):
