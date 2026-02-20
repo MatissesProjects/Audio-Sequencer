@@ -122,51 +122,50 @@ class FlowRenderer:
         combined.export(output_path, format="mp3", bitrate="320k")
         return output_path
 
-    def layered_mix(self, foundation_path, layer_configs, output_path):
-        foundation = AudioSegment.from_file(foundation_path)
-        foundation = foundation.set_frame_rate(self.sr).set_channels(2)
-        foundation = effects.normalize(foundation, headroom=0.5)
-        final = foundation
-        
-        for config in tqdm(layer_configs, desc="Layering tracks"):
-            layer = AudioSegment.from_file(config['path'])
-            layer = layer.set_frame_rate(self.sr).set_channels(2)
-            layer = effects.normalize(layer, headroom=1.0)
+    def render_timeline(self, segments, output_path, target_bpm=124):
+        """
+        Renders a full mix from a list of timeline segments.
+        Each segment should have: file_path, start_ms, duration_ms, bpm
+        """
+        if not segments:
+            return None
             
-            duration_ms = len(layer)
-            start_ms = config['start_ms']
-            fade_ms = 4000
-            
-            if start_ms + duration_ms > len(final): continue
+        # 1. Create a master segment (empty silence)
+        total_duration = max(s['start_ms'] + s['duration_ms'] for s in segments) + 2000 # padding
+        master = AudioSegment.silent(duration=total_duration, frame_rate=self.sr)
+        master = master.set_channels(2)
 
-            duck_seg = final[start_ms : start_ms + duration_ms]
-            duck_np = self.segment_to_numpy(duck_seg)
-            num_samples = duck_np.shape[1]
+        print(f"Rendering timeline: {len(segments)} segments, {total_duration/1000:.1f}s total.")
+
+        for i, s in enumerate(tqdm(segments, desc="Processing Segments")):
+            # Load and Sync
+            from src.processor import AudioProcessor
+            proc = AudioProcessor()
             
-            t = np.linspace(0, 1, int(self.sr * fade_ms / 1000))
-            s_fade = (0.5 * (1 - np.cos(np.pi * t))).astype(np.float32)
+            # 1. Loop and Stretch
+            # We need to loop it to the required duration first
+            onsets = [] # Simplified for now, or fetch from DB if available
+            tmp_loop = f"temp_render_{i}_loop.wav"
+            proc.loop_track(s['file_path'], s['duration_ms']/1000.0, onsets, tmp_loop)
             
-            envelope = np.ones(num_samples, dtype=np.float32)
-            f_s = len(s_fade)
-            if num_samples >= f_s * 2:
-                envelope[:f_s] = s_fade
-                envelope[-f_s:] = 1.0 - s_fade
+            # 2. Stretch to target BPM
+            y_sync = proc.stretch_to_bpm(tmp_loop, s['bpm'], target_bpm)
+            seg_audio = self.numpy_to_segment(y_sync, self.sr)
             
-            env_b = envelope.reshape(1, -1)
+            if os.path.exists(tmp_loop): os.remove(tmp_loop)
+
+            # 3. Apply Fades and Volume
+            fade_ms = 4000
+            seg_audio = seg_audio.fade_in(fade_ms).fade_out(fade_ms)
             
-            hp_board = Pedalboard([HighpassFilter(cutoff_frequency_hz=600)])
-            duck_hp = hp_board(duck_np, self.sr)[:, :num_samples]
+            # Apply volume gain
+            vol_db = 20 * np.log10(s.get('volume', 1.0) + 1e-9)
+            seg_audio = seg_audio + vol_db
             
-            ducked_np = (duck_np * (1.0 - env_b * 0.5)) + (duck_hp * (env_b * 0.5))
-            ducked_np *= (1.0 - env_b * 0.4)
-            
-            ducked_seg = self.numpy_to_segment(ducked_np, self.sr)
-            layer_processed = layer + config.get('gain', -2.0)
-            layer_processed = layer_processed.fade_in(fade_ms).fade_out(fade_ms)
-            
-            overlaid = ducked_seg.overlay(layer_processed)
-            final = final[:start_ms] + overlaid + final[start_ms + duration_ms:]
-            
-        final = effects.normalize(final, headroom=0.1)
-        final.export(output_path, format="mp3", bitrate="320k")
+            # 4. Overlay onto Master
+            master = master.overlay(seg_audio, position=s['start_ms'])
+
+        # Final Polish
+        master = effects.normalize(master, headroom=0.1)
+        master.export(output_path, format="mp3", bitrate="320k")
         return output_path

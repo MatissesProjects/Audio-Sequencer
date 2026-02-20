@@ -1,15 +1,200 @@
 import sys
 import os
+import sqlite3
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QTableWidget, QTableWidgetItem, 
-                             QLineEdit, QLabel, QPushButton, QFrame, QMessageBox)
-from PyQt6.QtCore import Qt, QSize
+                             QLineEdit, QLabel, QPushButton, QFrame, QMessageBox,
+                             QScrollArea, QMenu)
+from PyQt6.QtCore import Qt, QSize, QRect, pyqtSignal, QPoint
+from PyQt6.QtGui import QPainter, QColor, QBrush, QPen, QFont
 from src.database import DataManager
 from src.scoring import CompatibilityScorer
 from src.processor import AudioProcessor
 from src.renderer import FlowRenderer
 from src.generator import TransitionGenerator
 from src.orchestrator import FullMixOrchestrator
+
+class TrackSegment:
+    def __init__(self, track_data, start_ms=0, duration_ms=20000):
+        self.id = track_data['id']
+        self.filename = track_data['filename']
+        self.file_path = track_data['file_path']
+        self.bpm = track_data['bpm']
+        self.key = track_data['harmonic_key']
+        self.start_ms = start_ms
+        self.duration_ms = duration_ms
+        self.volume = 1.0 # 0.0 to 1.0
+        self.color = QColor(70, 130, 180, 200) # SteelBlue
+
+class TimelineWidget(QWidget):
+    segmentSelected = pyqtSignal(object)
+    
+    def __init__(self):
+        super().__init__()
+        self.segments = []
+        self.setMinimumHeight(300)
+        self.setAcceptDrops(True)
+        self.pixels_per_ms = 0.05 # 1 second = 50 pixels
+        self.selected_segment = None
+        self.dragging = False
+        self.resizing = False
+        self.vol_dragging = False
+        self.drag_start_pos = None
+        self.drag_start_ms = 0
+        self.drag_start_dur = 0
+        self.drag_start_vol = 1.0
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        # Draw background
+        painter.fillRect(self.rect(), QColor(30, 30, 30))
+        
+        # Draw time markings
+        painter.setPen(QColor(60, 60, 60))
+        for i in range(0, 1200000, 10000): # Up to 20 mins
+            x = int(i * self.pixels_per_ms)
+            painter.drawLine(x, 0, x, self.height())
+            if i % 30000 == 0:
+                painter.drawText(x + 5, 15, f"{i//1000}s")
+
+        # Draw segments
+        for seg in self.segments:
+            x = int(seg.start_ms * self.pixels_per_ms)
+            w = int(seg.duration_ms * self.pixels_per_ms)
+            h = int(120 * seg.volume) # Volume affects height
+            y = (self.height() - h) // 2
+            
+            rect = QRect(x, y, w, h)
+            
+            # Opacity based on volume
+            color = QColor(seg.color)
+            color.setAlpha(int(100 + 155 * seg.volume))
+            
+            if seg == self.selected_segment:
+                painter.setBrush(QBrush(color.lighter(130)))
+                painter.setPen(QPen(Qt.GlobalColor.white, 2))
+            else:
+                painter.setBrush(QBrush(color))
+                painter.setPen(QPen(QColor(200, 200, 200), 1))
+            
+            painter.drawRoundedRect(rect, 5, 5)
+            
+            # Duration handles (subtle bars at edges)
+            painter.setPen(QColor(255, 255, 255, 100))
+            painter.drawLine(x + w - 5, y + 5, x + w - 5, y + h - 5)
+            
+            # Text info
+            painter.setPen(Qt.GlobalColor.white)
+            painter.setFont(QFont("Arial", 9, QFont.Weight.Bold))
+            painter.drawText(rect.adjusted(10, 10, -10, -10), Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft, seg.filename)
+            painter.setFont(QFont("Arial", 8))
+            painter.drawText(rect.adjusted(10, 30, -10, -10), Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft, f"{seg.bpm} BPM | {seg.key}\nVol: {int(seg.volume*100)}%")
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            clicked_seg = None
+            edge_click = False
+            vol_click = False
+            
+            for seg in reversed(self.segments):
+                x = int(seg.start_ms * self.pixels_per_ms)
+                w = int(seg.duration_ms * self.pixels_per_ms)
+                h = int(120 * seg.volume)
+                y = (self.height() - h) // 2
+                rect = QRect(x, y, w, h)
+                
+                if rect.contains(event.pos()):
+                    clicked_seg = seg
+                    # Check if near right edge for resize
+                    if event.pos().x() > (x + w - 15):
+                        edge_click = True
+                    # Check if in middle for volume drag (Shift key or just vertical)
+                    if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+                        vol_click = True
+                    break
+            
+            self.selected_segment = clicked_seg
+            self.segmentSelected.emit(clicked_seg)
+            
+            if self.selected_segment:
+                self.drag_start_pos = event.pos()
+                if edge_click:
+                    self.resizing = True
+                    self.drag_start_dur = self.selected_segment.duration_ms
+                elif vol_click:
+                    self.vol_dragging = True
+                    self.drag_start_vol = self.selected_segment.volume
+                else:
+                    self.dragging = True
+                    self.drag_start_ms = self.selected_segment.start_ms
+            
+            self.update()
+        
+        elif event.button() == Qt.MouseButton.RightButton:
+            for seg in reversed(self.segments):
+                x = int(seg.start_ms * self.pixels_per_ms)
+                w = int(seg.duration_ms * self.pixels_per_ms)
+                h = int(120 * seg.volume)
+                y = (self.height() - h) // 2
+                if QRect(x, y, w, h).contains(event.pos()):
+                    menu = QMenu(self)
+                    del_action = menu.addAction("Remove Track")
+                    action = menu.exec(self.mapToGlobal(event.pos()))
+                    if action == del_action:
+                        self.segments.remove(seg)
+                        if self.selected_segment == seg:
+                            self.selected_segment = None
+                        self.update()
+                    break
+
+    def mouseMoveEvent(self, event):
+        if not self.selected_segment:
+            return
+            
+        delta_x = event.pos().x() - self.drag_start_pos.x()
+        delta_y = event.pos().y() - self.drag_start_pos.y()
+        
+        if self.resizing:
+            delta_ms = delta_x / self.pixels_per_ms
+            self.selected_segment.duration_ms = max(1000, self.drag_start_dur + delta_ms)
+        elif self.vol_dragging:
+            delta_vol = -delta_y / 100.0 # Up is louder
+            self.selected_segment.volume = max(0.1, min(1.2, self.drag_start_vol + delta_vol))
+        elif self.dragging:
+            delta_ms = delta_x / self.pixels_per_ms
+            self.selected_segment.start_ms = max(0, self.drag_start_ms + delta_ms)
+            
+        self.update()
+
+    def mouseReleaseEvent(self, event):
+        self.dragging = False
+        self.resizing = False
+        self.vol_dragging = False
+
+    def add_track(self, track_data, start_ms=None):
+        if start_ms is None:
+            # Place at the end of the last track
+            if self.segments:
+                last_seg = max(self.segments, key=lambda s: s.start_ms + s.duration_ms)
+                start_ms = last_seg.start_ms + last_seg.duration_ms - 5000 # 5s default overlap
+            else:
+                start_ms = 0
+        
+        new_seg = TrackSegment(track_data, start_ms=start_ms)
+        self.segments.append(new_seg)
+        self.selected_segment = new_seg
+        self.update()
+        return new_seg
+
+    def dragEnterEvent(self, event):
+        event.acceptProposedAction()
+
+    def dropEvent(self, event):
+        # We'll handle this from the main app's logic if needed, 
+        # but for now let's just accept if it's from our library
+        event.acceptProposedAction()
 
 class AudioSequencerApp(QMainWindow):
     def __init__(self):
@@ -20,27 +205,28 @@ class AudioSequencerApp(QMainWindow):
         self.renderer = FlowRenderer()
         self.generator = TransitionGenerator()
         self.orchestrator = FullMixOrchestrator()
-        self.selected_track = None
+        self.selected_library_track = None
         self.init_ui()
         self.load_library()
 
     def init_ui(self):
         self.setWindowTitle("AudioSequencer AI - The Pro Flow")
-        self.setMinimumSize(QSize(1200, 800))
+        self.setMinimumSize(QSize(1300, 900))
         
         # Main Layout
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
-        main_layout = QHBoxLayout(central_widget)
+        main_layout = QVBoxLayout(central_widget)
 
+        # Top Section: Library and Recommendations
+        top_panels = QHBoxLayout()
+        
         # 1. Left Sidebar: Library
         library_panel = QFrame()
         library_panel.setFixedWidth(400)
         lib_layout = QVBoxLayout(library_panel)
-        
         lib_layout.addWidget(QLabel("<h2>Audio Library</h2>"))
         
-        # Action Buttons for Library
         lib_actions = QHBoxLayout()
         self.scan_btn = QPushButton("📂 Scan Folder")
         self.scan_btn.clicked.connect(self.scan_folder)
@@ -56,63 +242,90 @@ class AudioSequencerApp(QMainWindow):
         
         self.library_table = QTableWidget(0, 3)
         self.library_table.setHorizontalHeaderLabels(["Track Name", "BPM", "Key"])
-        self.library_table.itemSelectionChanged.connect(self.on_track_selected)
+        self.library_table.itemSelectionChanged.connect(self.on_library_track_selected)
         lib_layout.addWidget(self.library_table)
         
-        main_layout.addWidget(library_panel)
+        top_panels.addWidget(library_panel)
 
-        # 2. Center Canvas: The Flow & Pro Orchestration
-        canvas_panel = QFrame()
-        canvas_panel.setFrameShape(QFrame.Shape.StyledPanel)
-        canvas_layout = QVBoxLayout(canvas_panel)
-        canvas_layout.addWidget(QLabel("<h2>Master Orchestrator</h2>"), alignment=Qt.AlignmentFlag.AlignCenter)
+        # 2. Middle: Selected Track Actions
+        actions_panel = QFrame()
+        actions_panel.setFixedWidth(250)
+        actions_layout = QVBoxLayout(actions_panel)
+        actions_layout.addWidget(QLabel("<h3>Track Actions</h3>"))
         
-        self.active_track_label = QLabel("Select a 'Seed' track to begin")
-        self.active_track_label.setStyleSheet("border: 2px dashed #666; padding: 40px; background-color: #222; font-size: 14px;")
-        self.active_track_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        canvas_layout.addWidget(self.active_track_label)
+        self.add_to_timeline_btn = QPushButton("➕ Add to Timeline")
+        self.add_to_timeline_btn.setStyleSheet("background-color: #2e7d32; color: white;")
+        self.add_to_timeline_btn.clicked.connect(self.add_selected_to_timeline)
+        actions_layout.addWidget(self.add_to_timeline_btn)
         
-        # Power Actions
-        pro_group = QFrame()
-        pro_group.setStyleSheet("background-color: #252525; border-radius: 10px; padding: 10px;")
-        pro_layout = QVBoxLayout(pro_group)
-        pro_layout.addWidget(QLabel("<b>Pro Orchestration Modes</b>"))
-
-        self.full_mix_btn = QPushButton("🚀 Generate Curated Journey (6-Clip Path)")
-        self.full_mix_btn.setStyleSheet("background-color: #007acc; padding: 15px; color: white;")
-        self.full_mix_btn.clicked.connect(self.run_curated_journey)
-        
-        self.layered_btn = QPushButton("🌊 Create 2-Min Layered Foundation")
-        self.layered_btn.setStyleSheet("background-color: #2e7d32; padding: 15px; color: white;")
-        self.layered_btn.clicked.connect(self.run_layered_journey)
-        
-        pro_layout.addWidget(self.full_mix_btn)
-        pro_layout.addWidget(self.layered_btn)
-        canvas_layout.addWidget(pro_group)
-
-        # Basic Playback Controls
-        controls_layout = QHBoxLayout()
-        self.play_btn = QPushButton("▶ Preview Seed")
+        self.play_btn = QPushButton("▶ Preview Audio")
         self.play_btn.clicked.connect(self.play_selected)
-        self.mix_btn = QPushButton("🔀 Smart Mix (Seed + Top Rec)")
-        self.mix_btn.clicked.connect(self.mix_with_top)
-        controls_layout.addWidget(self.play_btn)
-        controls_layout.addWidget(self.mix_btn)
-        canvas_layout.addLayout(controls_layout)
+        actions_layout.addWidget(self.play_btn)
         
-        main_layout.addWidget(canvas_panel, stretch=2)
+        actions_layout.addStretch()
+        top_panels.addWidget(actions_panel)
 
         # 3. Right Sidebar: Recommendations
         rec_panel = QFrame()
-        rec_panel.setFixedWidth(300)
+        rec_panel.setFixedWidth(350)
         rec_layout = QVBoxLayout(rec_panel)
         rec_layout.addWidget(QLabel("<h3>AI Recommendations</h3>"))
         
         self.rec_list = QTableWidget(0, 2)
         self.rec_list.setHorizontalHeaderLabels(["Match %", "Track"])
+        self.rec_list.itemDoubleClicked.connect(self.on_rec_double_clicked)
         rec_layout.addWidget(self.rec_list)
         
-        main_layout.addWidget(rec_panel)
+        top_panels.addWidget(rec_panel)
+        
+        main_layout.addLayout(top_panels, stretch=1)
+
+        # Bottom Section: Timeline
+        timeline_header = QHBoxLayout()
+        timeline_header.addWidget(QLabel("<h2>Timeline Editor</h2>"))
+        
+        self.auto_gen_btn = QPushButton("🪄 Auto-Generate Path (6 clips)")
+        self.auto_gen_btn.clicked.connect(self.auto_populate_timeline)
+        timeline_header.addWidget(self.auto_gen_btn)
+        
+        timeline_header.addWidget(QLabel("Target BPM:"))
+        self.target_bpm_edit = QLineEdit("124")
+        self.target_bpm_edit.setFixedWidth(50)
+        timeline_header.addWidget(self.target_bpm_edit)
+        
+        self.render_btn = QPushButton("🚀 RENDER FINAL MIX")
+        self.render_btn.setStyleSheet("background-color: #007acc; padding: 10px 20px; font-size: 16px; color: white;")
+        self.render_btn.clicked.connect(self.render_timeline)
+        timeline_header.addWidget(self.render_btn)
+        
+        timeline_header.addStretch()
+        main_layout.addLayout(timeline_header)
+
+        self.timeline_scroll = QScrollArea()
+        self.timeline_scroll.setWidgetResizable(True)
+        self.timeline_widget = TimelineWidget()
+        self.timeline_scroll.setWidget(self.timeline_widget)
+        main_layout.addWidget(self.timeline_scroll, stretch=1)
+
+        # Segment Properties Panel
+        self.prop_panel = QFrame()
+        self.prop_panel.setFixedHeight(100)
+        self.prop_panel.setStyleSheet("background-color: #252525; border-top: 1px solid #444;")
+        prop_layout = QHBoxLayout(self.prop_panel)
+        self.seg_label = QLabel("Select a segment to edit properties")
+        prop_layout.addWidget(self.seg_label)
+        
+        # Duration edit
+        prop_layout.addWidget(QLabel("Duration (ms):"))
+        self.dur_edit = QLineEdit()
+        self.dur_edit.setFixedWidth(80)
+        self.dur_edit.editingFinished.connect(self.update_segment_duration)
+        prop_layout.addWidget(self.dur_edit)
+        
+        prop_layout.addStretch()
+        main_layout.addWidget(self.prop_panel)
+
+        self.timeline_widget.segmentSelected.connect(self.on_segment_selected)
 
         # Apply basic dark styling
         self.setStyleSheet("""
@@ -120,8 +333,9 @@ class AudioSequencerApp(QMainWindow):
             QLabel { color: #ffffff; }
             QTableWidget { background-color: #2d2d2d; color: #ffffff; gridline-color: #3d3d3d; selection-background-color: #444; }
             QLineEdit { background-color: #3d3d3d; color: #ffffff; border: 1px solid #555; padding: 5px; }
-            QPushButton { background-color: #444; color: #ffffff; padding: 10px; border-radius: 5px; font-weight: bold; border: 1px solid #555; }
+            QPushButton { background-color: #444; color: #ffffff; padding: 8px; border-radius: 5px; font-weight: bold; border: 1px solid #555; }
             QPushButton:hover { background-color: #555; }
+            QScrollArea { border: none; background-color: #1e1e1e; }
         """)
 
     def load_library(self):
@@ -140,6 +354,109 @@ class AudioSequencerApp(QMainWindow):
             self.library_table.setItem(row_idx, 1, QTableWidgetItem(str(row[2])))
             self.library_table.setItem(row_idx, 2, QTableWidgetItem(row[3]))
         conn.close()
+
+    def on_library_track_selected(self):
+        selected_items = self.library_table.selectedItems()
+        if not selected_items:
+            return
+            
+        row = selected_items[0].row()
+        track_id = self.library_table.item(row, 0).data(Qt.ItemDataRole.UserRole)
+        
+        conn = self.dm.get_conn()
+        conn.row_factory = sqlite3_factory
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM tracks WHERE id = ?", (track_id,))
+        self.selected_library_track = dict(cursor.fetchone())
+        conn.close()
+        
+        self.update_recommendations(track_id)
+
+    def add_selected_to_timeline(self):
+        if not self.selected_library_track:
+            QMessageBox.warning(self, "No Track", "Select a track from the library first.")
+            return
+        self.timeline_widget.add_track(self.selected_library_track)
+
+    def on_rec_double_clicked(self, item):
+        row = item.row()
+        name = self.rec_list.item(row, 1).text()
+        conn = self.dm.get_conn()
+        conn.row_factory = sqlite3_factory
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM tracks WHERE filename = ?", (name,))
+        track = dict(cursor.fetchone())
+        conn.close()
+        self.timeline_widget.add_track(track)
+
+    def auto_populate_timeline(self):
+        if not self.selected_library_track:
+            QMessageBox.warning(self, "No Seed", "Select a starting track in the library first.")
+            return
+            
+        sequence = self.orchestrator.find_curated_sequence(max_tracks=6, seed_track=self.selected_library_track)
+        if sequence:
+            self.timeline_widget.segments = []
+            curr_ms = 0
+            for i, track in enumerate(sequence):
+                duration = 20000 if i % 2 == 0 else 30000
+                self.timeline_widget.add_track(track, start_ms=curr_ms)
+                curr_ms += duration - 8000 # 8s overlap
+            self.timeline_widget.update()
+
+    def on_segment_selected(self, segment):
+        if segment:
+            self.seg_label.setText(f"Editing: {segment.filename}")
+            self.dur_edit.setText(str(segment.duration_ms))
+        else:
+            self.seg_label.setText("Select a segment to edit properties")
+            self.dur_edit.clear()
+
+    def update_segment_duration(self):
+        if self.timeline_widget.selected_segment:
+            try:
+                new_dur = int(self.dur_edit.text())
+                self.timeline_widget.selected_segment.duration_ms = new_dur
+                self.timeline_widget.update()
+            except ValueError:
+                pass
+
+    def render_timeline(self):
+        if not self.timeline_widget.segments:
+            QMessageBox.warning(self, "Empty", "Add some tracks to the timeline first.")
+            return
+            
+        sorted_segs = sorted(self.timeline_widget.segments, key=lambda s: s.start_ms)
+        
+        try:
+            target_bpm = float(self.target_bpm_edit.text())
+        except ValueError:
+            target_bpm = 124.0
+
+        QMessageBox.information(self, "Rendering", f"Rendering mix with {len(sorted_segs)} segments at {target_bpm} BPM...")
+        
+        try:
+            output_file = "timeline_mix.mp3"
+            
+            # Prepare data for renderer
+            render_data = []
+            for s in sorted_segs:
+                render_data.append({
+                    'file_path': s.file_path,
+                    'start_ms': int(s.start_ms),
+                    'duration_ms': int(s.duration_ms),
+                    'bpm': s.bpm,
+                    'volume': s.volume
+                })
+            
+            self.renderer.render_timeline(render_data, output_file, target_bpm=target_bpm)
+            QMessageBox.information(self, "Success", f"Mix rendered to {output_file}")
+            os.startfile(output_file)
+            
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            QMessageBox.critical(self, "Error", f"Render failed: {e}")
 
     def scan_folder(self):
         from PyQt6.QtWidgets import QFileDialog
@@ -168,79 +485,6 @@ class AudioSequencerApp(QMainWindow):
             QMessageBox.information(self, "AI Complete", "All tracks have been semantic-indexed!")
         except Exception as e:
             QMessageBox.critical(self, "Error", f"AI Embedding failed: {e}")
-
-    def on_track_selected(self):
-        selected_items = self.library_table.selectedItems()
-        if not selected_items:
-            return
-            
-        row = selected_items[0].row()
-        track_id = self.library_table.item(row, 0).data(Qt.ItemDataRole.UserRole)
-        
-        conn = self.dm.get_conn()
-        conn.row_factory = sqlite3_factory
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM tracks WHERE id = ?", (track_id,))
-        self.selected_track = dict(cursor.fetchone())
-        conn.close()
-        
-        self.active_track_label.setText(f"SEED TRACK: {self.selected_track['filename']}\n{self.selected_track['bpm']} BPM | Key: {self.selected_track['harmonic_key']}")
-        self.update_recommendations(track_id)
-
-    def run_curated_journey(self):
-        if not self.selected_track:
-            QMessageBox.warning(self, "No Seed", "Select a starting track first.")
-            return
-        
-        QMessageBox.information(self, "Orchestrating", "Calculating high-compatibility path for 6 tracks...")
-        try:
-            out_file = "gui_curated_journey.mp3"
-            self.orchestrator.generate_full_mix(output_path=out_file, target_bpm=124, seed_track=self.selected_track)
-            QMessageBox.information(self, "Success", f"Journey Created: {out_file}")
-            os.startfile(out_file)
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Journey failed: {e}")
-
-    def run_layered_journey(self):
-        if not self.selected_track:
-            QMessageBox.warning(self, "No Seed", "Select a foundation track first.")
-            return
-            
-        QMessageBox.information(self, "Orchestrating", "Building 2-minute layered foundation...")
-        try:
-            out_file = "gui_layered_journey.mp3"
-            self.orchestrator.generate_layered_journey(output_path=out_file, target_bpm=124, seed_track=self.selected_track)
-            QMessageBox.information(self, "Success", f"Layered journey created: {out_file}")
-            os.startfile(out_file)
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Layering failed: {e}")
-
-    def play_selected(self):
-        if not self.selected_track:
-            return
-        os.startfile(self.selected_track['file_path'])
-
-    def mix_with_top(self):
-        if not self.selected_track or self.rec_list.rowCount() == 0:
-            return
-        
-        top_name = self.rec_list.item(0, 1).text()
-        conn = self.dm.get_conn()
-        conn.row_factory = sqlite3_factory
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM tracks WHERE filename = ?", (top_name,))
-        t2 = dict(cursor.fetchone())
-        conn.close()
-        
-        t1 = self.selected_track
-        QMessageBox.information(self, "Mixing", f"Synchronizing {t2['filename']} to {t1['bpm']} BPM...")
-        
-        try:
-            final_mix = "gui_quick_mix.mp3"
-            self.renderer.dj_stitch([t1['file_path'], t2['file_path']], final_mix)
-            os.startfile(final_mix)
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Mixing failed: {e}")
 
     def update_recommendations(self, track_id):
         conn = self.dm.get_conn()
@@ -271,6 +515,11 @@ class AudioSequencerApp(QMainWindow):
             self.rec_list.setItem(row_idx, 1, QTableWidgetItem(name))
             
         conn.close()
+
+    def play_selected(self):
+        if not self.selected_library_track:
+            return
+        os.startfile(self.selected_library_track['file_path'])
 
 def sqlite3_factory(cursor, row):
     d = {}
