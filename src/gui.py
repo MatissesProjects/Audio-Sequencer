@@ -217,20 +217,13 @@ class AudioSequencerApp(QMainWindow):
             stretched_path = "temp_t2_stretched.wav"
             self.processor.stretch_to_bpm(loop2_path, t2['bpm'], t1['bpm'], stretched_path)
             
-            # 4. Gemini Transition Orchestration
-            params = self.generator.get_transition_params(t1, t2)
-            riser_path = "temp_ai_riser.wav"
-            self.generator.generate_riser(4.0, t1['bpm'], riser_path, params=params)
-            
-            # 5. Render Final Layered Mix
-            intermediate_mix = "temp_layered.wav"
-            self.renderer.mix_tracks(loop1_path, stretched_path, intermediate_mix)
-            
+            # 4. Render Final Layered Mix
+            # Removed Gemini noise riser as requested
             final_mix = "smart_looped_mix.wav"
-            self.renderer.mix_tracks(intermediate_mix, riser_path, final_mix, gain2=0.0)
+            self.renderer.mix_tracks(loop1_path, stretched_path, final_mix)
             
             # Cleanup
-            for p in [loop1_path, loop2_path, riser_path, stretched_path, intermediate_mix]:
+            for p in [loop1_path, loop2_path, stretched_path]:
                 if os.path.exists(p): os.remove(p)
                 
             QMessageBox.information(self, "Success", f"Looped Smart Mix Created!\nDuration: {target_dur}s")

@@ -11,5 +11,5 @@ torch
 laion-clap
 transformers
 PyQt6
-google-generativeai
+google-genai
 audiocraft
