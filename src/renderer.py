@@ -131,7 +131,13 @@ class FlowRenderer:
             seg_np = self.segment_to_numpy(seg_audio)
             num_samples = seg_np.shape[1]
 
-            # 4. Gain & S-Curve Envelopes
+            # 4. RMS Balancing & S-Curve Envelopes
+            # Balance based on RMS energy if provided in track metadata (future)
+            # For now, we apply user volume and then normalize the clip energy
+            clip_rms = np.sqrt(np.mean(seg_np**2)) + 1e-9
+            target_rms = 0.15 # Reference level
+            balancing_gain = target_rms / clip_rms
+            
             vol_mult = s.get('volume', 1.0)
             fi_s = int(s.get('fade_in_ms', 2000) * self.sr / 1000.0)
             fo_s = int(s.get('fade_out_ms', 2000) * self.sr / 1000.0)
@@ -144,7 +150,8 @@ class FlowRenderer:
                 t_out = np.linspace(0, 1, min(fo_s, num_samples))
                 envelope[-len(t_out):] *= 0.5 * (1 + np.cos(np.pi * t_out))
             
-            seg_np *= (vol_mult * envelope)
+            # Combine balancing gain with user volume
+            seg_np *= (balancing_gain * vol_mult * envelope)
             
             processed_data.append({
                 'samples': seg_np,

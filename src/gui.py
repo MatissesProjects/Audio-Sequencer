@@ -268,6 +268,9 @@ class TimelineWidget(QWidget):
                 if rect.contains(event.pos()): clicked_seg = seg; break
             self.selected_segment = clicked_seg; self.segmentSelected.emit(clicked_seg)
             if self.selected_segment:
+                # Capture undo state BEFORE starting any drag/slip/resize
+                self.window().push_undo()
+                
                 self.drag_start_pos = event.pos(); self.drag_start_ms = self.selected_segment.start_ms; self.drag_start_dur = self.selected_segment.duration_ms; self.drag_start_vol = self.selected_segment.volume; self.drag_start_lane = self.selected_segment.lane; self.drag_start_offset = self.selected_segment.offset_ms
                 rect = self.get_seg_rect(self.selected_segment); 
                 if event.modifiers() & Qt.KeyboardModifier.AltModifier: self.slipping = True
@@ -762,6 +765,27 @@ class AudioSequencerApp(QMainWindow):
         if self.selected_library_track:
             try: os.startfile(self.selected_library_track['file_path'])
             except Exception as e: show_error(self, "Playback Error", "Failed to play.", e)
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_Space:
+            self.toggle_playback()
+        elif event.key() == Qt.Key.Key_M:
+            sel = self.timeline_widget.selected_segment
+            if sel:
+                self.timeline_widget.mutes[sel.lane] = not self.timeline_widget.mutes[sel.lane]
+                self.timeline_widget.update(); self.preview_dirty = True
+        elif event.key() == Qt.Key.Key_S:
+            sel = self.timeline_widget.selected_segment
+            if sel:
+                self.timeline_widget.solos[sel.lane] = not self.timeline_widget.solos[sel.lane]
+                self.timeline_widget.update(); self.preview_dirty = True
+        elif event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            if event.key() == Qt.Key.Key_Z:
+                self.undo()
+            elif event.key() == Qt.Key.Key_Y:
+                self.redo()
+        else:
+            super().keyPressEvent(event)
 
 def sqlite3_factory(cursor, row):
     d = {}
