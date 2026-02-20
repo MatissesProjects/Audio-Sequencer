@@ -90,3 +90,19 @@ class AudioProcessor:
             sf.write(output_path, final, sr)
             return output_path
         return final
+
+    def get_waveform_envelope(self, input_path, num_points=500):
+        """Returns a low-res amplitude envelope for waveform display."""
+        try:
+            y, sr = librosa.load(input_path, sr=22050) # Use lower sr for speed
+            # Compute RMSE or just absolute mean in blocks
+            hop_length = max(1, len(y) // num_points)
+            envelope = []
+            for i in range(0, len(y), hop_length):
+                chunk = y[i : i + hop_length]
+                if len(chunk) > 0:
+                    envelope.append(float(np.max(np.abs(chunk))))
+            return envelope
+        except:
+            return []
+

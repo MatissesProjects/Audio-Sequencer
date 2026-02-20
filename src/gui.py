@@ -84,6 +84,7 @@ class TrackSegment:
         self.volume = 1.0 
         self.lane = lane
         self.is_primary = False
+        self.waveform = []
         self.color = QColor(70, 130, 180, 200) # SteelBlue
 
 class DraggableTable(QTableWidget):
@@ -127,6 +128,8 @@ class TimelineWidget(QWidget):
         self.snap_threshold_ms = 2000 
         self.target_bpm = 124.0
         self.show_modifications = True
+        self.cursor_pos_ms = 0
+        self.show_waveforms = True
         self.update_geometry()
 
     def update_geometry(self):
@@ -182,6 +185,18 @@ class TimelineWidget(QWidget):
                 painter.setPen(QPen(QColor(200, 200, 200), 1))
             
             painter.drawRoundedRect(rect, 6, 6)
+
+            if self.show_waveforms and seg.waveform:
+                painter.setPen(QPen(QColor(255, 255, 255, 80), 1))
+                pts = len(seg.waveform)
+                mid_y = rect.center().y()
+                max_h = rect.height() // 2
+                for i in range(0, rect.width(), 2):
+                    idx = int((i / rect.width()) * pts)
+                    if idx < pts:
+                        val = seg.waveform[idx] * max_h
+                        painter.drawLine(rect.left() + i, int(mid_y - val), rect.left() + i, int(mid_y + val))
+
             painter.setPen(Qt.GlobalColor.white)
             painter.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
             painter.drawText(rect.adjusted(8, 8, -8, -8), Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft, seg.filename)
@@ -219,6 +234,12 @@ class TimelineWidget(QWidget):
                     painter.setFont(QFont("Segoe UI", 7, QFont.Weight.Bold))
                     painter.drawText(badge_rect, Qt.AlignmentFlag.AlignCenter, f"{int(seg.volume*100)}%")
 
+        cursor_x = int(self.cursor_pos_ms * self.pixels_per_ms)
+        painter.setPen(QPen(QColor(255, 50, 50), 2))
+        painter.drawLine(cursor_x, 0, cursor_x, self.height())
+        painter.setBrush(QBrush(QColor(255, 50, 50)))
+        painter.drawPolygon(QPoint(cursor_x - 8, 0), QPoint(cursor_x + 8, 0), QPoint(cursor_x, 12))
+
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             clicked_seg = None
@@ -244,6 +265,9 @@ class TimelineWidget(QWidget):
                     self.vol_dragging = True
                 else:
                     self.dragging = True
+            else:
+                # Clicked empty space - move cursor
+                self.cursor_pos_ms = event.pos().x() / self.pixels_per_ms
             
             self.update()
         
@@ -292,6 +316,7 @@ class TimelineWidget(QWidget):
         new_seg = TrackSegment(track_data, start_ms=split_ms, duration_ms=new_dur, lane=seg.lane, offset_ms=new_offset)
         new_seg.volume = seg.volume
         new_seg.is_primary = seg.is_primary
+        new_seg.waveform = seg.waveform # Pass the waveform too
         
         self.segments.append(new_seg)
         self.update_geometry()
@@ -619,12 +644,15 @@ class AudioSequencerApp(QMainWindow):
                 start_ms = x_pos / self.timeline_widget.pixels_per_ms if x_pos is not None else None
                 seg = self.timeline_widget.add_track(track, start_ms=start_ms)
                 if x_pos is not None: seg.lane = lane
+                # NEW: Generate waveform on add
+                seg.waveform = self.processor.get_waveform_envelope(track['file_path'])
+                self.timeline_widget.update()
             self.selected_library_track = track
             self.update_recommendations(track_id)
         except Exception as e: show_error(self, "Data Error", "Failed to retrieve track.", e)
 
     def add_selected_to_timeline(self):
-        if self.selected_library_track: self.timeline_widget.add_track(self.selected_library_track)
+        if self.selected_library_track: self.add_track_by_id(self.selected_library_track['id'])
 
     def on_rec_double_clicked(self, item):
         row = item.row()
@@ -640,7 +668,8 @@ class AudioSequencerApp(QMainWindow):
             curr_ms = 0
             for i, track in enumerate(sequence):
                 duration = 20000 if i % 2 == 0 else 30000
-                self.timeline_widget.add_track(track, start_ms=curr_ms)
+                seg = self.timeline_widget.add_track(track, start_ms=curr_ms)
+                seg.waveform = self.processor.get_waveform_envelope(track['file_path'])
                 curr_ms += duration - 8000 
             self.timeline_widget.update_geometry()
         self.loading_overlay.hide_loading()
