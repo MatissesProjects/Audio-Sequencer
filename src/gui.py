@@ -72,7 +72,7 @@ def show_error(parent, title, message, exception):
     dialog.exec()
 
 class TrackSegment:
-    def __init__(self, track_data, start_ms=0, duration_ms=20000):
+    def __init__(self, track_data, start_ms=0, duration_ms=20000, lane=0):
         self.id = track_data['id']
         self.filename = track_data['filename']
         self.file_path = track_data['file_path']
@@ -80,7 +80,8 @@ class TrackSegment:
         self.key = track_data['harmonic_key']
         self.start_ms = start_ms
         self.duration_ms = duration_ms
-        self.volume = 1.0 # 0.0 to 1.0
+        self.volume = 1.0 
+        self.lane = lane
         self.color = QColor(70, 130, 180, 200) # SteelBlue
 
 class DraggableTable(QTableWidget):
@@ -106,7 +107,7 @@ class TimelineWidget(QWidget):
     def __init__(self):
         super().__init__()
         self.segments = []
-        self.setMinimumHeight(350)
+        self.setMinimumHeight(500)
         self.setAcceptDrops(True)
         self.pixels_per_ms = 0.05 
         self.selected_segment = None
@@ -117,14 +118,36 @@ class TimelineWidget(QWidget):
         self.drag_start_ms = 0
         self.drag_start_dur = 0
         self.drag_start_vol = 1.0
+        self.drag_start_lane = 0
+        
+        self.lane_height = 120
+        self.lane_spacing = 10
         self.snap_threshold_ms = 2000 
+        self.target_bpm = 124.0
+
+    def get_seg_rect(self, seg):
+        x = int(seg.start_ms * self.pixels_per_ms)
+        w = int(seg.duration_ms * self.pixels_per_ms)
+        h = int((self.lane_height - 20) * seg.volume)
+        # Center the variable height within the fixed lane height
+        y_center = (seg.lane * (self.lane_height + self.lane_spacing)) + (self.lane_height // 2) + 20
+        y = y_center - (h // 2)
+        return QRect(x, y, w, h)
 
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.fillRect(self.rect(), QColor(30, 30, 30))
+        painter.fillRect(self.rect(), QColor(25, 25, 25))
         
-        painter.setPen(QColor(60, 60, 60))
+        # Draw lane backgrounds
+        painter.setPen(QPen(QColor(45, 45, 45), 1))
+        for i in range(5): # Show 5 lanes
+            y = i * (self.lane_height + self.lane_spacing) + 20
+            painter.fillRect(0, y, self.width(), self.lane_height, QColor(32, 32, 32))
+            painter.drawText(5, y + 15, f"Lane {i+1}")
+
+        # Time markings
+        painter.setPen(QColor(70, 70, 70))
         for i in range(0, 1200000, 10000):
             x = int(i * self.pixels_per_ms)
             painter.drawLine(x, 0, x, self.height())
@@ -132,14 +155,11 @@ class TimelineWidget(QWidget):
                 painter.drawText(x + 5, 15, f"{i//1000}s")
 
         for seg in self.segments:
-            x = int(seg.start_ms * self.pixels_per_ms)
-            w = int(seg.duration_ms * self.pixels_per_ms)
-            h = int(140 * seg.volume)
-            y = (self.height() - h) // 2
-            rect = QRect(x, y, w, h)
+            rect = self.get_seg_rect(seg)
             
             color = QColor(seg.color)
-            color.setAlpha(int(100 + 155 * seg.volume))
+            # Volume visual: darker/lighter or opacity
+            color.setAlpha(int(120 + 135 * (seg.volume / 1.5)))
             
             if seg == self.selected_segment:
                 painter.setBrush(QBrush(color.lighter(130)))
@@ -148,34 +168,44 @@ class TimelineWidget(QWidget):
                 painter.setBrush(QBrush(color))
                 painter.setPen(QPen(QColor(200, 200, 200), 1))
             
-            painter.drawRoundedRect(rect, 8, 8)
+            painter.drawRoundedRect(rect, 6, 6)
             
+            # Draw Labels
             painter.setPen(Qt.GlobalColor.white)
-            painter.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
-            painter.drawText(rect.adjusted(12, 12, -12, -12), Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft, seg.filename)
-            painter.setFont(QFont("Segoe UI", 9))
-            painter.drawText(rect.adjusted(12, 35, -12, -12), Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft, 
-                             f"🎵 {seg.bpm:.1f} BPM | {seg.key}\n🔊 Vol: {int(seg.volume*100)}%\n🕒 {seg.duration_ms/1000:.1f}s")
+            painter.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
+            painter.drawText(rect.adjusted(8, 8, -8, -8), Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft, seg.filename)
+            
+            # Modification Indicators (Badges)
+            badge_y = rect.bottom() - 22
+            badge_x = rect.left() + 8
+            
+            # BPM Stretch Badge
+            if abs(seg.bpm - self.target_bpm) > 0.1:
+                painter.setBrush(QBrush(QColor(255, 165, 0))) # Orange
+                painter.setPen(Qt.PenStyle.NoPen)
+                badge_rect = QRect(badge_x, badge_y, 50, 16)
+                painter.drawRoundedRect(badge_rect, 4, 4)
+                painter.setPen(Qt.GlobalColor.black)
+                painter.setFont(QFont("Segoe UI", 7, QFont.Weight.Bold))
+                painter.drawText(badge_rect, Qt.AlignmentFlag.AlignCenter, "STRETCH")
+                badge_x += 55
+
+            # Volume Modified Badge
+            if abs(seg.volume - 1.0) > 0.05:
+                painter.setBrush(QBrush(QColor(0, 200, 255))) # Cyan
+                painter.setPen(Qt.PenStyle.NoPen)
+                badge_rect = QRect(badge_x, badge_y, 40, 16)
+                painter.drawRoundedRect(badge_rect, 4, 4)
+                painter.setPen(Qt.GlobalColor.black)
+                painter.setFont(QFont("Segoe UI", 7, QFont.Weight.Bold))
+                painter.drawText(badge_rect, Qt.AlignmentFlag.AlignCenter, f"{int(seg.volume*100)}%")
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             clicked_seg = None
-            edge_click = False
-            vol_click = False
-            
             for seg in reversed(self.segments):
-                x = int(seg.start_ms * self.pixels_per_ms)
-                w = int(seg.duration_ms * self.pixels_per_ms)
-                h = int(140 * seg.volume)
-                y = (self.height() - h) // 2
-                rect = QRect(x, y, w, h)
-                
-                if rect.contains(event.pos()):
+                if self.get_seg_rect(seg).contains(event.pos()):
                     clicked_seg = seg
-                    if event.pos().x() > (x + w - 20):
-                        edge_click = True
-                    if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
-                        vol_click = True
                     break
             
             self.selected_segment = clicked_seg
@@ -183,39 +213,36 @@ class TimelineWidget(QWidget):
             
             if self.selected_segment:
                 self.drag_start_pos = event.pos()
-                if edge_click:
+                self.drag_start_ms = self.selected_segment.start_ms
+                self.drag_start_dur = self.selected_segment.duration_ms
+                self.drag_start_vol = self.selected_segment.volume
+                self.drag_start_lane = self.selected_segment.lane
+                
+                rect = self.get_seg_rect(self.selected_segment)
+                if event.pos().x() > (rect.right() - 20):
                     self.resizing = True
-                    self.drag_start_dur = self.selected_segment.duration_ms
-                elif vol_click:
+                elif event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
                     self.vol_dragging = True
-                    self.drag_start_vol = self.selected_segment.volume
                 else:
                     self.dragging = True
-                    self.drag_start_ms = self.selected_segment.start_ms
             
             self.update()
         
         elif event.button() == Qt.MouseButton.RightButton:
             for seg in reversed(self.segments):
-                x = int(seg.start_ms * self.pixels_per_ms)
-                w = int(seg.duration_ms * self.pixels_per_ms)
-                h = int(140 * seg.volume)
-                y = (self.height() - h) // 2
-                if QRect(x, y, w, h).contains(event.pos()):
+                if self.get_seg_rect(seg).contains(event.pos()):
                     menu = QMenu(self)
                     del_action = menu.addAction("🗑 Remove Track")
                     action = menu.exec(self.mapToGlobal(event.pos()))
                     if action == del_action:
                         self.segments.remove(seg)
-                        if self.selected_segment == seg:
-                            self.selected_segment = None
+                        if self.selected_segment == seg: self.selected_segment = None
                         self.update()
                         self.timelineChanged.emit()
                     break
 
     def mouseMoveEvent(self, event):
-        if not self.selected_segment:
-            return
+        if not self.selected_segment: return
             
         delta_x = event.pos().x() - self.drag_start_pos.x()
         delta_y = event.pos().y() - self.drag_start_pos.y()
@@ -227,18 +254,22 @@ class TimelineWidget(QWidget):
             delta_vol = -delta_y / 150.0 
             self.selected_segment.volume = max(0.0, min(1.5, self.drag_start_vol + delta_vol))
         elif self.dragging:
+            # Horizontal Move
             delta_ms = delta_x / self.pixels_per_ms
             new_start = max(0, self.drag_start_ms + delta_ms)
             
+            # Snapping
             for other in self.segments:
                 if other == self.selected_segment: continue
                 other_end = other.start_ms + other.duration_ms
-                if abs(new_start - other_end) < self.snap_threshold_ms:
-                    new_start = other_end
-                elif abs(new_start - other.start_ms) < self.snap_threshold_ms:
-                    new_start = other.start_ms
+                if abs(new_start - other_end) < self.snap_threshold_ms: new_start = other_end
+                elif abs(new_start - other.start_ms) < self.snap_threshold_ms: new_start = other.start_ms
             
             self.selected_segment.start_ms = new_start
+            
+            # Lane Change (Vertical)
+            new_lane = int((event.pos().y() - 20) // (self.lane_height + self.lane_spacing))
+            self.selected_segment.lane = max(0, min(4, new_lane))
             
         self.update()
         self.timelineChanged.emit()
@@ -249,14 +280,16 @@ class TimelineWidget(QWidget):
         self.vol_dragging = False
 
     def add_track(self, track_data, start_ms=None):
+        lane = 0
         if start_ms is None:
             if self.segments:
                 last_seg = max(self.segments, key=lambda s: s.start_ms + s.duration_ms)
                 start_ms = last_seg.start_ms + last_seg.duration_ms - 5000 
+                lane = last_seg.lane
             else:
                 start_ms = 0
         
-        new_seg = TrackSegment(track_data, start_ms=start_ms)
+        new_seg = TrackSegment(track_data, start_ms=start_ms, lane=lane)
         self.segments.append(new_seg)
         self.selected_segment = new_seg
         self.update()
@@ -264,14 +297,15 @@ class TimelineWidget(QWidget):
         return new_seg
 
     def dragEnterEvent(self, event):
-        if event.mimeData().hasText():
-            event.acceptProposedAction()
+        if event.mimeData().hasText(): event.acceptProposedAction()
 
     def dropEvent(self, event):
         track_id = event.mimeData().text()
         if track_id:
-            # We communicate via parent reference for the prototype
-            self.window().add_track_by_id(int(track_id), event.pos().x())
+            pos = event.position()
+            lane = int((pos.y() - 20) // (self.lane_height + self.lane_spacing))
+            lane = max(0, min(4, lane))
+            self.window().add_track_by_id(int(track_id), pos.x(), lane=lane)
             event.acceptProposedAction()
 
 class LoadingOverlay(QWidget):
@@ -370,13 +404,12 @@ class AudioSequencerApp(QMainWindow):
         self.play_btn.clicked.connect(self.play_selected)
         actions_layout.addWidget(self.play_btn)
         
-        # Add a help section
         actions_layout.addStretch()
         help_box = QLabel("<b>💡 Pro Tips:</b><br><br>"
-                          "• <b>Drag</b> tracks from tables to timeline.<br>"
-                          "• <b>Shift + Drag</b> clips vertically for volume.<br>"
-                          "• <b>Drag edges</b> to change duration.<br>"
-                          "• <b>Right-Click</b> to delete clips.")
+                          "• <b>Drag</b> clips between lanes to overlap.<br>"
+                          "• <b>Shift + Drag</b> vertically for volume.<br>"
+                          "• <b>Orange Badge:</b> Track is being stretched.<br>"
+                          "• <b>Blue Badge:</b> Volume is modified.")
         help_box.setWordWrap(True)
         help_box.setStyleSheet("color: #888; font-size: 11px; background: #1a1a1a; padding: 10px; border-radius: 5px;")
         actions_layout.addWidget(help_box)
@@ -408,6 +441,7 @@ class AudioSequencerApp(QMainWindow):
         timeline_header.addWidget(QLabel("Target BPM:"))
         self.target_bpm_edit = QLineEdit("124")
         self.target_bpm_edit.setFixedWidth(60)
+        self.target_bpm_edit.textChanged.connect(self.on_bpm_changed)
         timeline_header.addWidget(self.target_bpm_edit)
         
         self.render_btn = QPushButton("🚀 RENDER FINAL MIX")
@@ -443,6 +477,12 @@ class AudioSequencerApp(QMainWindow):
             QStatusBar { background-color: #1e1e1e; color: #aaa; }
         """)
 
+    def on_bpm_changed(self, text):
+        try:
+            self.timeline_widget.target_bpm = float(text)
+            self.timeline_widget.update()
+        except: pass
+
     def update_status(self):
         count = len(self.timeline_widget.segments)
         if count > 0:
@@ -477,7 +517,7 @@ class AudioSequencerApp(QMainWindow):
         track_id = self.library_table.item(row, 0).data(Qt.ItemDataRole.UserRole)
         self.add_track_by_id(track_id, only_update_recs=True)
 
-    def add_track_by_id(self, track_id, x_pos=None, only_update_recs=False):
+    def add_track_by_id(self, track_id, x_pos=None, only_update_recs=False, lane=0):
         try:
             conn = self.dm.get_conn()
             conn.row_factory = sqlite3_factory
@@ -487,7 +527,8 @@ class AudioSequencerApp(QMainWindow):
             conn.close()
             if not only_update_recs:
                 start_ms = x_pos / self.timeline_widget.pixels_per_ms if x_pos is not None else None
-                self.timeline_widget.add_track(track, start_ms=start_ms)
+                seg = self.timeline_widget.add_track(track, start_ms=start_ms)
+                if x_pos is not None: seg.lane = lane
             self.selected_library_track = track
             self.update_recommendations(track_id)
         except Exception as e:
@@ -518,7 +559,7 @@ class AudioSequencerApp(QMainWindow):
 
     def on_segment_selected(self, segment):
         if segment:
-            self.status_bar.showMessage(f"Selected: {segment.filename} | Shift+Drag vertically for Volume")
+            self.status_bar.showMessage(f"Selected: {segment.filename} | Shift+Drag vertically for Volume | Drag to change lane")
         else:
             self.update_status()
 
@@ -527,7 +568,7 @@ class AudioSequencerApp(QMainWindow):
         sorted_segs = sorted(self.timeline_widget.segments, key=lambda s: s.start_ms)
         try: target_bpm = float(self.target_bpm_edit.text())
         except: target_bpm = 124.0
-        self.loading_overlay.show_loading()
+        self.loading_overlay.show_loading("Rendering your journey...")
         try:
             output_file = "timeline_mix.mp3"
             render_data = [{'file_path': s.file_path, 'start_ms': int(s.start_ms), 'duration_ms': int(s.duration_ms), 'bpm': s.bpm, 'volume': s.volume} for s in sorted_segs]
@@ -543,7 +584,7 @@ class AudioSequencerApp(QMainWindow):
         from PyQt6.QtWidgets import QFileDialog
         folder = QFileDialog.getExistingDirectory(self, "Select Music Folder")
         if folder:
-            self.loading_overlay.show_loading()
+            self.loading_overlay.show_loading("Scanning audio files...")
             try:
                 from src.ingestion import IngestionEngine
                 engine = IngestionEngine(db_path=self.dm.db_path)
@@ -555,7 +596,7 @@ class AudioSequencerApp(QMainWindow):
                 show_error(self, "Scan Error", "Failed to scan folder.", e)
 
     def run_embedding(self):
-        self.loading_overlay.show_loading()
+        self.loading_overlay.show_loading("AI Semantic Indexing... (this takes a moment)")
         try:
             from src.embeddings import EmbeddingEngine
             embed_engine = EmbeddingEngine()
