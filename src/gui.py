@@ -51,13 +51,27 @@ class SearchThread(QThread):
         except Exception as e: self.errorOccurred.emit(str(e))
 
 class TrackSegment:
+    KEY_COLORS = {
+        'C': QColor(255, 50, 50), 'C#': QColor(255, 100, 200),
+        'D': QColor(255, 150, 50), 'D#': QColor(255, 50, 255),
+        'E': QColor(255, 255, 50), 'F': QColor(255, 50, 150),
+        'F#': QColor(50, 255, 255), 'G': QColor(50, 255, 50),
+        'G#': QColor(150, 50, 255), 'A': QColor(50, 150, 255),
+        'A#': QColor(200, 100, 255), 'B': QColor(100, 255, 100)
+    }
+
     def __init__(self, track_data, start_ms=0, duration_ms=20000, lane=0, offset_ms=0):
         self.id = track_data['id']; self.filename = track_data['filename']; self.file_path = track_data['file_path']
         self.bpm = track_data['bpm']; self.key = track_data['harmonic_key']
         self.start_ms = start_ms; self.duration_ms = duration_ms; self.offset_ms = offset_ms
         self.volume = 1.0; self.lane = lane; self.is_primary = False; self.waveform = []
-        self.fade_in_ms = 2000; self.fade_out_ms = 2000; self.pitch_shift = 0; self.color = QColor(70, 130, 180, 200)
-        self.onsets = []
+        self.fade_in_ms = 2000; self.fade_out_ms = 2000; self.pitch_shift = 0
+        
+        # Deterministic Color based on Key
+        base_color = self.KEY_COLORS.get(self.key, QColor(70, 130, 180))
+        self.color = QColor(base_color.red(), base_color.green(), base_color.blue(), 200)
+        
+        # Beat Data
         if 'onsets_json' in track_data and track_data['onsets_json']:
             try: self.onsets = [float(x) * 1000.0 for x in track_data['onsets_json'].split(',')]
             except: pass
@@ -533,14 +547,34 @@ class AudioSequencerApp(QMainWindow):
     def update_status(self):
         count = len(self.timeline_widget.segments)
         if count > 0:
-            tdur = max(s.start_ms + s.duration_ms for s in self.timeline_widget.segments); abpm = sum(s.bpm for s in self.timeline_widget.segments) / count; bdiff = abs(abpm - self.timeline_widget.target_bpm); self.status_bar.showMessage(f"Timeline: {count} tracks | {tdur/1000:.1f}s")
-            at = (f"<b>Tracks:</b> {count}<br><b>Duration:</b> {tdur/1000:.1f}s<br><b>Avg Track BPM:</b> {abpm:.1f}<br><b>BPM Variance:</b> {bdiff:.1f}<br>")
+            tdur = max(s.start_ms + s.duration_ms for s in self.timeline_widget.segments)
+            abpm = sum(s.bpm for s in self.timeline_widget.segments) / count
+            bdiff = abs(abpm - self.timeline_widget.target_bpm)
+            self.status_bar.showMessage(f"Timeline: {count} tracks | {tdur/1000:.1f}s total mix")
+            
+            at = (f"<b>Journey Stats</b><br>Tracks: {count}<br>Duration: {tdur/1000:.1f}s<br>Avg BPM: {abpm:.1f}<br>")
+            
+            # Journey Flow Analysis
+            sorted_segs = sorted(self.timeline_widget.segments, key=lambda s: s.start_ms)
+            flow_score = 100
+            for i in range(len(sorted_segs) - 1):
+                s1, s2 = sorted_segs[i], sorted_segs[i+1]
+                # If they overlap or are very close
+                if s2.start_ms < (s1.start_ms + s1.duration_ms + 2000):
+                    h_match = self.scorer.calculate_harmonic_score(s1.key, s2.key)
+                    if h_match < 60: flow_score -= 10
+            
+            at += f"<b>Flow Health:</b> {max(0, flow_score)}%<br>"
+            
             if self.timeline_widget.selected_segment:
-                sel = self.timeline_widget.selected_segment; at += f"<br><b>Selected Key:</b> {sel.key}"
+                sel = self.timeline_widget.selected_segment
+                at += f"<hr><b>Selected Clip:</b><br>{sel.filename[:20]}<br>Key: {sel.key}"
+                # ... (overlap check stays same)
                 for o in self.timeline_widget.segments:
                     if o == sel: continue
                     if max(sel.start_ms, o.start_ms) < min(sel.start_ms + sel.duration_ms, o.start_ms + o.duration_ms):
-                        hs = self.scorer.calculate_harmonic_score(sel.key, o.key); color = "#00ff66" if hs >= 100 else "#ccff00" if hs >= 80 else "#ff5555"; at += f"<br>Overlap with '{o.filename[:10]}...': <span style='color: {color};'>{hs}% Match</span>"
+                        hs = self.scorer.calculate_harmonic_score(sel.key, o.key); color = "#00ff66" if hs >= 100 else "#ccff00" if hs >= 80 else "#ff5555"; at += f"<br>vs '{o.filename[:8]}...': <span style='color: {color};'>{hs}%</span>"
+            
             self.stats_label.setText(at)
         else: self.status_bar.showMessage("Ready."); self.stats_label.setText("Timeline empty")
     def load_library(self):
