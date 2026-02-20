@@ -19,6 +19,7 @@ class TrackSegment:
         self.duration_ms = duration_ms
         self.offset_ms = offset_ms
         self.volume = 1.0
+        self.pan = 0.0 # -1.0 (Left) to 1.0 (Right)
         self.lane = lane
         self.is_primary = False
         self.waveform = []
@@ -39,7 +40,7 @@ class TrackSegment:
             'id': self.id, 'filename': self.filename, 'file_path': self.file_path, 
             'bpm': self.bpm, 'key': self.key, 'start_ms': self.start_ms, 
             'duration_ms': self.duration_ms, 'offset_ms': self.offset_ms, 
-            'volume': self.volume, 'lane': self.lane, 'is_primary': self.is_primary, 
+            'volume': self.volume, 'pan': self.pan, 'lane': self.lane, 'is_primary': self.is_primary, 
             'fade_in_ms': self.fade_in_ms, 'fade_out_ms': self.fade_out_ms, 
             'pitch_shift': self.pitch_shift
         }

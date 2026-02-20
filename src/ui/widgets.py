@@ -181,10 +181,24 @@ class TimelineWidget(QWidget):
                 painter.setPen(QPen(QColor(80, 80, 80), 1))
                 painter.drawLine(x, 0, x, self.height())
                 painter.setPen(QColor(150, 150, 150))
-                painter.drawText(x + 5, 25, f"BAR {int(i // mpbar) + 1}")
+                painter.drawText(x + 5, 15, f"BAR {int(i // mpbar) + 1}")
             else:
                 painter.setPen(QPen(QColor(50, 50, 50), 1, Qt.PenStyle.DotLine))
                 painter.drawLine(x, 40, x, self.height())
+                
+        # Time Tickers (Every 10 seconds)
+        painter.setPen(QPen(QColor(0, 200, 255, 100), 1))
+        for s in range(0, 3600, 10):
+            ms = s * 1000
+            x = int(ms * self.pixels_per_ms)
+            if x > self.width(): break
+            painter.drawLine(x, 25, x, 40)
+            if s % 30 == 0:
+                mins = s // 60
+                secs = s % 60
+                painter.setPen(QColor(0, 200, 255, 180))
+                painter.drawText(x + 5, 35, f"{mins}:{secs:02d}")
+                painter.setPen(QPen(QColor(0, 200, 255, 100), 1))
                 
         for seg in self.segments:
             rect = self.get_seg_rect(seg)

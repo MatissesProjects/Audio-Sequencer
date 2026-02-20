@@ -201,12 +201,12 @@ class AudioSequencerApp(QMainWindow):
         self.prop_layout.addWidget(QLabel("<b>Track Properties</b>"))
         
         v_lay = QHBoxLayout()
-        v_lay.addWidget(QLabel("Vol:"))
-        self.vol_slider = QSlider(Qt.Orientation.Horizontal)
-        self.vol_slider.setRange(0, 150)
-        self.vol_slider.valueChanged.connect(self.on_prop_changed)
-        v_lay.addWidget(self.vol_slider)
+        v_lay.addWidget(QLabel("Vol:")); self.vol_slider = QSlider(Qt.Orientation.Horizontal); self.vol_slider.setRange(0, 150); self.vol_slider.valueChanged.connect(self.on_prop_changed); v_lay.addWidget(self.vol_slider)
         self.prop_layout.addLayout(v_lay)
+        
+        p_pan = QHBoxLayout()
+        p_pan.addWidget(QLabel("Pan:")); self.pan_slider = QSlider(Qt.Orientation.Horizontal); self.pan_slider.setRange(-100, 100); self.pan_slider.setValue(0); self.pan_slider.valueChanged.connect(self.on_prop_changed); p_pan.addWidget(self.pan_slider)
+        self.prop_layout.addLayout(p_pan)
         
         p_lay = QHBoxLayout()
         p_lay.addWidget(QLabel("Pitch:"))
@@ -501,18 +501,10 @@ class AudioSequencerApp(QMainWindow):
         if s:
             self.status_bar.showMessage(f"Selected: {s.filename}")
             self.prop_group.setVisible(True)
-            self.vol_slider.blockSignals(True)
-            self.vol_slider.setValue(int(s.volume * 100))
-            self.vol_slider.blockSignals(False)
-            
-            self.pitch_combo.blockSignals(True)
-            idx = self.pitch_combo.findData(s.pitch_shift)
-            self.pitch_combo.setCurrentIndex(idx)
-            self.pitch_combo.blockSignals(False)
-            
-            self.prim_check.blockSignals(True)
-            self.prim_check.setChecked(s.is_primary)
-            self.prim_check.blockSignals(False)
+            self.vol_slider.blockSignals(True); self.vol_slider.setValue(int(s.volume * 100)); self.vol_slider.blockSignals(False)
+            self.pan_slider.blockSignals(True); self.pan_slider.setValue(int(s.pan * 100)); self.pan_slider.blockSignals(False)
+            self.pitch_combo.blockSignals(True); idx = self.pitch_combo.findData(s.pitch_shift); self.pitch_combo.setCurrentIndex(idx); self.pitch_combo.blockSignals(False)
+            self.prim_check.blockSignals(True); self.prim_check.setChecked(s.is_primary); self.prim_check.blockSignals(False)
         else:
             self.prop_group.setVisible(False)
             self.update_status()
@@ -522,6 +514,7 @@ class AudioSequencerApp(QMainWindow):
         if sel:
             self.push_undo()
             sel.volume = self.vol_slider.value() / 100.0
+            sel.pan = self.pan_slider.value() / 100.0
             sel.pitch_shift = self.pitch_combo.currentData()
             sel.is_primary = self.prim_check.isChecked()
             self.timeline_widget.update()

@@ -95,6 +95,24 @@ class FlowRenderer:
         target_samples[:, :min_len] *= ducking_curve[:min_len]
         return target_samples
 
+    def _apply_panning(self, samples, pan):
+        """
+        Applies linear stereo panning.
+        pan: -1.0 (Full Left) to 1.0 (Full Right)
+        """
+        if pan == 0: return samples
+        
+        # Linear Panning (Equal Power would be better, but linear is simpler for now)
+        # Left Gain: (1 - pan) / 2
+        # Right Gain: (1 + pan) / 2
+        # Actually standard DAW linear pan is different but this works well:
+        l_gain = max(0.0, min(1.0, 1.0 - pan))
+        r_gain = max(0.0, min(1.0, 1.0 + pan))
+        
+        samples[0, :] *= l_gain
+        samples[1, :] *= r_gain
+        return samples
+
     def _apply_spectral_ducking(self, target_samples, sr):
         """Applies a high-pass filter to clear mud from background tracks."""
         board = Pedalboard([
@@ -187,6 +205,9 @@ class FlowRenderer:
             
             # Combine balancing gain with user volume
             seg_np *= (balancing_gain * vol_mult * envelope)
+            
+            # Apply Panning
+            seg_np = self._apply_panning(seg_np, s.get('pan', 0.0))
             
             processed_data.append({
                 'samples': seg_np,
