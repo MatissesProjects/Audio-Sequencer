@@ -41,6 +41,32 @@ def show_error(parent, title, message, exception):
     details = "".join(traceback.format_exception(type(exception), exception, exception.__traceback__))
     dialog = DetailedErrorDialog(title, message, details, parent); dialog.exec()
 
+class LibraryWaveformPreview(QWidget):
+    def __init__(self):
+        super().__init__(); self.waveform = []; self.setFixedHeight(60)
+    def set_waveform(self, w): self.waveform = w; self.update()
+    def paintEvent(self, event):
+        p = QPainter(self); p.setRenderHint(QPainter.RenderHint.Antialiasing); p.fillRect(self.rect(), QColor(25, 25, 25))
+        if not self.waveform: return
+        p.setPen(QPen(QColor(0, 255, 200, 180), 1)); pts = len(self.waveform); mid = self.height() // 2; mh = self.height() // 2 - 5
+        for i in range(0, self.width(), 2):
+            idx = int((i / self.width()) * pts)
+            if idx < pts: v = self.waveform[idx] * mh; p.drawLine(i, int(mid - v), i, int(mid + v))
+
+class IngestionThread(QThread):
+    finished = pyqtSignal()
+    def __init__(self, paths, dm):
+        super().__init__(); self.paths = paths; self.dm = dm
+    def run(self):
+        try:
+            from src.ingestion import IngestionEngine
+            ie = IngestionEngine(db_path=self.dm.db_path)
+            for p in self.paths:
+                if os.path.isdir(p): ie.scan_directory(p)
+                else: ie.analyze_and_store(p)
+            self.finished.emit()
+        except: pass
+
 class SearchThread(QThread):
     resultsFound = pyqtSignal(list); errorOccurred = pyqtSignal(str)
     def __init__(self, query, dm): super().__init__(); self.query = query; self.dm = dm
@@ -53,8 +79,7 @@ class SearchThread(QThread):
 class WaveformLoader(QThread):
     waveformLoaded = pyqtSignal(object, list)
     def __init__(self, segment, processor):
-        super().__init__()
-        self.segment = segment; self.processor = processor
+        super().__init__(); self.segment = segment; self.processor = processor
     def run(self):
         try:
             w = self.processor.get_waveform_envelope(self.segment.file_path)
@@ -117,17 +142,13 @@ class TimelineWidget(QWidget):
         self.lane_height = 120; self.lane_spacing = 10; self.snap_threshold_ms = 2000; self.target_bpm = 124.0
         self.show_modifications = True; self.cursor_pos_ms = 0; self.show_waveforms = True; self.snap_to_grid = True
         self.mutes = [False] * 5; self.solos = [False] * 5; self.loop_start_ms = 0; self.loop_end_ms = 30000; self.loop_enabled = False
-        self.scorer = CompatibilityScorer()
-        self.update_geometry()
+        self.scorer = CompatibilityScorer(); self.update_geometry()
     def update_geometry(self):
         max_ms = 600000
         if self.segments: max_ms = max(max_ms, max(s.start_ms + s.duration_ms for s in self.segments) + 60000)
         self.setMinimumWidth(int(max_ms * self.pixels_per_ms))
-        
-        # Prevent shrinking vertically: calculate total height needed
         total_h = 5 * (self.lane_height + self.lane_spacing) + 100
-        self.setMinimumHeight(total_h)
-        self.update()
+        self.setMinimumHeight(total_h); self.update()
     def get_ms_per_beat(self): return (60.0 / self.target_bpm) * 1000.0
     def get_seg_rect(self, seg):
         x = int(seg.start_ms * self.pixels_per_ms); w = int(seg.duration_ms * self.pixels_per_ms); h = self.lane_height - 20
@@ -190,21 +211,10 @@ class TimelineWidget(QWidget):
                 if abs(seg.volume - 1.0) > 0.05: painter.setBrush(QBrush(QColor(0, 200, 255))); br = QRect(bx, by, 40, 16); painter.drawRoundedRect(br, 4, 4); painter.setPen(Qt.GlobalColor.black); painter.drawText(br, Qt.AlignmentFlag.AlignCenter, f"{int(seg.volume*100)}%"); bx += 45
                 if seg.pitch_shift != 0: painter.setBrush(QBrush(QColor(200, 100, 255))); br = QRect(bx, by, 40, 16); painter.drawRoundedRect(br, 4, 4); painter.setPen(Qt.GlobalColor.black); painter.drawText(br, Qt.AlignmentFlag.AlignCenter, f"{seg.pitch_shift:+}st")
         cx = int(self.cursor_pos_ms * self.pixels_per_ms); painter.setPen(QPen(QColor(255, 50, 50), 2)); painter.drawLine(cx, 0, cx, self.height()); painter.setBrush(QBrush(QColor(255, 50, 50))); painter.drawPolygon(QPoint(cx - 8, 0), QPoint(cx + 8, 0), QPoint(cx, 12))
-
-        # Visual Resizer Handle at bottom
-        painter.fillRect(0, self.height() - 15, self.width(), 15, QColor(40, 40, 40))
-        painter.setPen(QPen(QColor(100, 100, 100), 1))
-        painter.drawLine(0, self.height() - 15, self.width(), self.height() - 15)
-        painter.setPen(QColor(120, 120, 120)); painter.setFont(QFont("Segoe UI", 7))
-        painter.drawText(self.rect().adjusted(0, 0, 0, -2), Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignHCenter, "↕ DRAG TO RESIZE TIMELINE VERTICALLY")
+        painter.fillRect(0, self.height() - 15, self.width(), 15, QColor(40, 40, 40)); painter.setPen(QPen(QColor(100, 100, 100), 1)); painter.drawLine(0, self.height() - 15, self.width(), self.height() - 15); painter.setPen(QColor(120, 120, 120)); painter.setFont(QFont("Segoe UI", 7)); painter.drawText(self.rect().adjusted(0, 0, 0, -2), Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignHCenter, "↕ DRAG TO RESIZE TIMELINE VERTICALLY")
 
     def mousePressEvent(self, event):
-        # 0. Timeline Resizer Handle
-        if event.pos().y() > self.height() - 15:
-            self.resizing_timeline = True
-            self.drag_start_pos = event.pos()
-            self.drag_start_h = self.height(); return
-
+        if event.pos().y() > self.height() - 15: self.resizing_timeline = True; self.drag_start_pos = event.pos(); self.drag_start_h = self.height(); return
         for i in range(5):
             y = i * (self.lane_height + self.lane_spacing) + 40
             m_r = QRect(5, y + 25, 20, 20); s_r = QRect(30, y + 25, 20, 20)
@@ -233,14 +243,10 @@ class TimelineWidget(QWidget):
                 if self.get_seg_rect(seg).contains(event.pos()): ts = seg; break
             m = QMenu(self)
             if ts:
-                pa = m.addAction("⭐ Unmark Primary" if ts.is_primary else "⭐ Set as Primary"); sa = m.addAction("✂ Split at Cursor"); qa = m.addAction("🪄 Quantize to Grid")
-                da_dup = m.addAction("👯 Duplicate Track")
-                m.addSeparator()
+                pa = m.addAction("⭐ Unmark Primary" if ts.is_primary else "⭐ Set as Primary"); sa = m.addAction("✂ Split at Cursor"); qa = m.addAction("🪄 Quantize to Grid"); da_dup = m.addAction("👯 Duplicate Track"); m.addSeparator()
                 pm = m.addMenu("🎵 Shift Pitch")
                 for i in range(-6, 7): t = f"{i:+} st" if i != 0 else "Original"; p_act = pm.addAction(t); p_act.setData(i)
-                m.addSeparator()
-                sl = m.addAction("💾 Capture as New Loop")
-                da_rem = m.addAction("🗑 Remove Track"); act = m.exec(self.mapToGlobal(event.pos()))
+                m.addSeparator(); sl = m.addAction("💾 Capture as New Loop"); da_rem = m.addAction("🗑 Remove Track"); act = m.exec(self.mapToGlobal(event.pos()))
                 if act == pa: self.window().push_undo(); ts.is_primary = not ts.is_primary
                 elif act == sa: self.window().push_undo(); self.split_segment(ts, event.pos().x())
                 elif act == qa: self.window().push_undo(); self.quantize_segment(ts)
@@ -251,23 +257,13 @@ class TimelineWidget(QWidget):
                 if self.selected_segment == ts: self.selected_segment = None
                 self.update_geometry(); self.timelineChanged.emit()
             else:
-                ba = m.addAction("🪄 Find Bridge Track here")
-                ta = m.addAction("✨ Generate AI Transition")
-                act = m.exec(self.mapToGlobal(event.pos()))
+                ba = m.addAction("🪄 Find Bridge Track here"); ta = m.addAction("✨ Generate AI Transition"); act = m.exec(self.mapToGlobal(event.pos()))
                 if act == ba: self.window().find_bridge_for_gap(event.pos().x())
                 elif act == ta: self.window().generate_ai_transition(event.pos().x())
 
-        def mouseMoveEvent(self, event):
-            if self.resizing_timeline:
-                dy = event.pos().y() - self.drag_start_pos.y()
-                # Adjust lane heights or just the container height?
-                # User suggested "hard to interact with", so we'll allow expanding the whole area
-                new_h = max(400, self.drag_start_h + dy)
-                self.setMinimumHeight(new_h)
-                self.update_geometry(); return
-    
-            if self.setting_loop:
-     self.loop_end_ms = max(self.loop_start_ms, event.pos().x() / self.pixels_per_ms); self.update(); return
+    def mouseMoveEvent(self, event):
+        if self.resizing_timeline: self.setMinimumHeight(max(400, self.drag_start_h + (event.pos().y() - self.drag_start_pos.y()))); self.update_geometry(); return
+        if self.setting_loop: self.loop_end_ms = max(self.loop_start_ms, event.pos().x() / self.pixels_per_ms); self.update(); return
         if not self.selected_segment: return
         dx = event.pos().x() - self.drag_start_pos.x(); dy = event.pos().y() - self.drag_start_pos.y(); mpb = self.get_ms_per_beat()
         if self.slipping: self.selected_segment.offset_ms = max(0, self.drag_start_offset - dx/self.pixels_per_ms)
@@ -330,39 +326,29 @@ class LoadingOverlay(QWidget):
 class AudioSequencerApp(QMainWindow):
     def __init__(self):
         super().__init__(); self.dm = DataManager(); self.scorer = CompatibilityScorer(); self.processor = AudioProcessor(); self.renderer = FlowRenderer(); self.generator = TransitionGenerator(); self.orchestrator = FullMixOrchestrator(); self.undo_manager = UndoManager(); self.selected_library_track = None
-        self.player = QMediaPlayer(); self.audio_output = QAudioOutput(); self.player.setAudioOutput(self.audio_output); self.audio_output.setVolume(0.8); self.preview_path = "temp_preview.wav"; self.preview_dirty = True
-        self.play_timer = QTimer(); self.play_timer.setInterval(20); self.play_timer.timeout.connect(self.update_playback_cursor); self.is_playing = False
-        
-        # Waveform Loaders
-        self.waveform_loaders = []
-        
-        self.init_ui(); self.load_library(); self.loading_overlay = LoadingOverlay(self.centralWidget())
-    
-    def load_waveform_async(self, segment):
-        loader = WaveformLoader(segment, self.processor)
-        loader.waveformLoaded.connect(self.on_waveform_loaded)
-        self.waveform_loaders.append(loader)
-        loader.start()
-
-    def on_waveform_loaded(self, segment, waveform):
-        segment.waveform = waveform
-        self.timeline_widget.update()
-        # Clean up finished loaders
-        self.waveform_loaders = [l for l in self.waveform_loaders if l.isRunning()]
-    
+        self.player = QMediaPlayer(); self.audio_output = QAudioOutput(); self.player.setAudioOutput(self.audio_output); self.audio_output.setVolume(0.8); self.preview_path = "temp_preview.wav"; self.preview_dirty = True; self.play_timer = QTimer(); self.play_timer.setInterval(20); self.play_timer.timeout.connect(self.update_playback_cursor); self.is_playing = False; self.waveform_loaders = []
+        self.init_ui(); self.load_library(); self.loading_overlay = LoadingOverlay(self.centralWidget()); self.setAcceptDrops(True)
+    def load_waveform_async(self, seg):
+        l = WaveformLoader(seg, self.processor); l.waveformLoaded.connect(self.on_waveform_loaded); self.waveform_loaders.append(l); l.start()
+    def on_waveform_loaded(self, seg, w):
+        seg.waveform = w; self.timeline_widget.update(); self.waveform_loaders = [l for l in self.waveform_loaders if l.isRunning()]
+    def dragEnterEvent(self, e):
+        if e.mimeData().hasUrls(): e.acceptProposedAction()
+    def dropEvent(self, e):
+        urls = e.mimeData().urls(); paths = [u.toLocalFile() for u in urls if u.isLocalFile()]
+        if paths: self.loading_overlay.show_loading("Ingesting Files..."); self.it = IngestionThread(paths, self.dm); self.it.finished.connect(self.on_ingestion_finished); self.it.start()
+    def on_ingestion_finished(self): self.load_library(); self.loading_overlay.hide_loading(); self.status_bar.showMessage("Ingestion complete.")
     def update_playback_cursor(self):
         if self.is_playing:
             p = self.player.position()
             if self.timeline_widget.loop_enabled and p >= self.timeline_widget.loop_end_ms: self.player.setPosition(int(self.timeline_widget.loop_start_ms)); p = self.timeline_widget.loop_start_ms
-            self.timeline_widget.cursor_pos_ms = p; self.timeline_widget.update()
-            t_e = 0
+            self.timeline_widget.cursor_pos_ms = p; self.timeline_widget.update(); t_e = 0
             for s in self.timeline_widget.segments:
                 if s.start_ms <= p <= s.start_ms + s.duration_ms:
                     any_s = any(self.timeline_widget.solos); is_a = (self.timeline_widget.solos[s.lane] if any_s else not self.timeline_widget.mutes[s.lane])
                     if is_a: t_e += s.volume
             mw = int(min(1.0, t_e / 3.0) * 20); ms = "█" * mw + "░" * (20 - mw); self.status_bar.showMessage(f"Playing | Energy: [{ms}] | {p/1000:.1f}s")
             if not self.timeline_widget.loop_enabled and p >= self.player.duration() and self.player.duration() > 0: self.stop_playback()
-
     def stop_playback(self): self.player.stop(); self.play_timer.stop(); self.is_playing = False; self.ptb.setText("▶ Play Journey"); self.status_bar.showMessage("Stopped.")
     def toggle_playback(self):
         if not self.timeline_widget.segments: return
@@ -370,7 +356,6 @@ class AudioSequencerApp(QMainWindow):
         else:
             if self.preview_dirty: self.render_preview_for_playback()
             self.player.setPosition(int(self.timeline_widget.cursor_pos_ms)); self.player.play(); self.play_timer.start(); self.is_playing = True; self.ptb.setText("⏸ Pause Preview")
-
     def render_preview_for_playback(self):
         self.loading_overlay.show_loading("Building Preview..."); 
         try:
@@ -378,33 +363,23 @@ class AudioSequencerApp(QMainWindow):
             rd = [s.to_dict() for s in ss]; self.renderer.render_timeline(rd, self.preview_path, target_bpm=tb, mutes=self.timeline_widget.mutes, solos=self.timeline_widget.solos); self.player.setSource(QUrl.fromLocalFile(os.path.abspath(self.preview_path))); self.preview_dirty = False
         except Exception as e: show_error(self, "Preview Error", "Failed to build audio.", e)
         finally: self.loading_overlay.hide_loading()
-
     def jump_to_start(self):
-        self.timeline_widget.cursor_pos_ms = 0
+        self.timeline_widget.cursor_pos_ms = 0; 
         if self.is_playing: self.player.setPosition(0)
         self.timeline_widget.update()
-
-    def push_undo(self): 
-        self.preview_dirty = True
-        self.undo_manager.push_state(self.timeline_widget.segments)
-
+    def push_undo(self): self.preview_dirty = True; self.undo_manager.push_state(self.timeline_widget.segments)
     def undo(self): 
         ns = self.undo_manager.undo(self.timeline_widget.segments)
         if ns: self.apply_state(ns)
-
     def redo(self): 
         ns = self.undo_manager.redo(self.timeline_widget.segments)
         if ns: self.apply_state(ns)
-
     def apply_state(self, sl):
         self.timeline_widget.segments = []
         for sj in sl:
             s = json.loads(sj); td = {'id': s['id'], 'filename': s['filename'], 'file_path': s['file_path'], 'bpm': s['bpm'], 'harmonic_key': s['key'], 'onsets_json': s.get('onsets_json', "")}
-            seg = TrackSegment(td, start_ms=s['start_ms'], duration_ms=s['duration_ms'], lane=s['lane'], offset_ms=s['offset_ms']); seg.volume = s['volume']; seg.is_primary = s['is_primary']; seg.fade_in_ms = s['fade_in_ms']; seg.fade_out_ms = s['fade_out_ms']; seg.pitch_shift = s.get('pitch_shift', 0)
-            self.load_waveform_async(seg)
-            self.timeline_widget.segments.append(seg)
+            seg = TrackSegment(td, start_ms=s['start_ms'], duration_ms=s['duration_ms'], lane=s['lane'], offset_ms=s['offset_ms']); seg.volume = s['volume']; seg.is_primary = s['is_primary']; seg.fade_in_ms = s['fade_in_ms']; seg.fade_out_ms = s['fade_out_ms']; seg.pitch_shift = s.get('pitch_shift', 0); self.load_waveform_async(seg); self.timeline_widget.segments.append(seg)
         self.timeline_widget.update_geometry(); self.update_status()
-
     def init_ui(self):
         self.setWindowTitle("AudioSequencer AI - The Pro Flow"); self.setMinimumSize(QSize(1400, 950))
         cw = QWidget(); self.setCentralWidget(cw); ml = QVBoxLayout(cw); tp = QHBoxLayout()
@@ -413,8 +388,10 @@ class AudioSequencerApp(QMainWindow):
         self.embed_btn = QPushButton("🧠 AI Index"); self.embed_btn.clicked.connect(self.run_embedding); la.addWidget(self.embed_btn); ll.addLayout(la)
         sl = QHBoxLayout(); self.search_bar = QLineEdit(); self.search_bar.setPlaceholderText("🔍 Semantic Search..."); self.search_bar.textChanged.connect(self.on_search_text_changed); self.search_bar.returnPressed.connect(self.trigger_semantic_search); sl.addWidget(self.search_bar)
         rsb = QPushButton("↺"); rsb.setFixedWidth(30); rsb.clicked.connect(self.load_library); sl.addWidget(rsb); ll.addLayout(sl)
-        self.library_table = DraggableTable(0, 3); self.library_table.setHorizontalHeaderLabels(["Track Name", "BPM", "Key"]); self.library_table.setColumnWidth(0, 250); self.library_table.itemSelectionChanged.connect(self.on_library_track_selected); ll.addWidget(self.library_table); tp.addWidget(lp)
-        mp = QFrame(); mp.setFixedWidth(250); mlayout = QVBoxLayout(mp); ag = QFrame(); ag.setStyleSheet("background-color: #1a1a1a; border: 1px solid #333; border-radius: 8px; padding: 10px;"); al = QVBoxLayout(ag); al.addWidget(QLabel("<h3>📊 Analytics Board</h3>"))
+        self.library_table = DraggableTable(0, 3); self.library_table.setHorizontalHeaderLabels(["Track Name", "BPM", "Key"]); self.library_table.setColumnWidth(0, 250); self.library_table.itemSelectionChanged.connect(self.on_library_track_selected); ll.addWidget(self.library_table)
+        self.lib_preview_group = QFrame(); self.lib_preview_group.setStyleSheet("background-color: #1a1a1a; border: 1px solid #333; border-radius: 4px; margin-top: 5px;")
+        lpl = QVBoxLayout(self.lib_preview_group); self.l_wave = LibraryWaveformPreview(); lpl.addWidget(self.l_wave); self.l_wave_label = QLabel("Select track to preview"); self.l_wave_label.setAlignment(Qt.AlignmentFlag.AlignCenter); self.l_wave_label.setStyleSheet("color: #666; font-size: 10px;"); lpl.addWidget(self.l_wave_label); ll.addWidget(self.lib_preview_group); tp.addWidget(lp)
+        mp = QFrame(); mp.setFixedWidth(250); mlayout = QVBoxLayout(mp); ag = QFrame(); ag.setStyleSheet("background-color: #1a1a1a; border: 1px solid #333; border-radius: 8px; padding: 5px;"); al = QVBoxLayout(ag); al.addWidget(QLabel("<h3>📊 Analytics Board</h3>"))
         self.mod_toggle = QPushButton("🔍 Hide Markers"); self.mod_toggle.setCheckable(True); self.mod_toggle.clicked.connect(self.toggle_analytics); al.addWidget(self.mod_toggle)
         self.grid_toggle = QPushButton("📏 Grid Snap: ON"); self.grid_toggle.setCheckable(True); self.grid_toggle.setChecked(True); self.grid_toggle.clicked.connect(self.toggle_grid); al.addWidget(self.grid_toggle)
         ur = QHBoxLayout(); self.ub = QPushButton("↶ Undo"); self.ub.clicked.connect(self.undo); ur.addWidget(self.ub); self.rb = QPushButton("↷ Redo"); self.rb.clicked.connect(self.redo); ur.addWidget(self.rb); al.addLayout(ur)
@@ -430,33 +407,19 @@ class AudioSequencerApp(QMainWindow):
         self.prim_check = QCheckBox("Set as Primary Track"); self.prim_check.stateChanged.connect(self.on_prop_changed); self.prop_layout.addWidget(self.prim_check); self.prop_group.setVisible(False); mlayout.addWidget(self.prop_group); mlayout.addStretch(); tp.addWidget(mp)
         rp = QFrame(); rp.setFixedWidth(450); rl = QVBoxLayout(rp); rl.addWidget(QLabel("<h3>✨ Smart Suggestions</h3>")); self.rec_list = DraggableTable(0, 2); self.rec_list.setHorizontalHeaderLabels(["Match %", "Track"]); self.rec_list.itemDoubleClicked.connect(self.on_rec_double_clicked); rl.addWidget(self.rec_list); tp.addWidget(rp); ml.addLayout(tp, stretch=1)
         th = QHBoxLayout(); th.addWidget(QLabel("<h2>🎞 Timeline Journey</h2>"))
-        self.sb = QPushButton("⏹"); self.sb.setFixedWidth(40); self.sb.clicked.connect(self.jump_to_start); th.addWidget(self.sb)
-        self.ptb = QPushButton("▶ Play Journey"); self.ptb.setFixedWidth(120); self.ptb.clicked.connect(self.toggle_playback); th.addWidget(self.ptb)
-        # Zoom Controls
+        # Transport Controls
         th.addSpacing(20); th.addWidget(QLabel("H-Zoom:")); self.zs = QSlider(Qt.Orientation.Horizontal); self.zs.setRange(10, 200); self.zs.setValue(50); self.zs.setFixedWidth(100); self.zs.valueChanged.connect(self.on_zoom_changed); th.addWidget(self.zs)
-        
         th.addSpacing(10); th.addWidget(QLabel("V-Zoom:")); self.vs = QSlider(Qt.Orientation.Horizontal); self.vs.setRange(40, 250); self.vs.setValue(120); self.vs.setFixedWidth(100); self.vs.valueChanged.connect(self.on_vzoom_changed); th.addWidget(self.vs)
-        
-        th.addStretch()
-        self.new_btn = QPushButton("📄 New"); self.new_btn.clicked.connect(self.new_project); th.addWidget(self.new_btn)
-        self.agb = QPushButton("🪄 Auto-Generate Path"); self.agb.clicked.connect(self.auto_populate_timeline); th.addWidget(self.agb); self.cb = QPushButton("🗑 Clear"); self.cb.clicked.connect(self.clear_timeline); th.addWidget(self.cb)
+        th.addStretch(); self.new_btn = QPushButton("📄 New"); self.new_btn.clicked.connect(self.new_project); th.addWidget(self.new_btn); self.sb = QPushButton("⏹"); self.sb.setFixedWidth(40); self.sb.clicked.connect(self.jump_to_start); th.addWidget(self.sb); self.ptb = QPushButton("▶ Play Journey"); self.ptb.setFixedWidth(120); self.ptb.clicked.connect(self.toggle_playback); th.addWidget(self.ptb); self.agb = QPushButton("🪄 Auto-Generate Path"); self.agb.clicked.connect(self.auto_populate_timeline); th.addWidget(self.agb); self.cb = QPushButton("🗑 Clear"); self.cb.clicked.connect(self.clear_timeline); th.addWidget(self.cb)
         th.addWidget(QLabel("Target BPM:")); self.tbe = QLineEdit("124"); self.tbe.setFixedWidth(60); self.tbe.textChanged.connect(self.on_bpm_changed); th.addWidget(self.tbe)
         
         # Master Volume
-        th.addSpacing(10)
-        th.addWidget(QLabel("Master:"))
-        self.master_vol_slider = QSlider(Qt.Orientation.Horizontal)
-        self.master_vol_slider.setRange(0, 100); self.master_vol_slider.setValue(80); self.master_vol_slider.setFixedWidth(100)
-        self.master_vol_slider.valueChanged.connect(self.on_master_vol_changed)
-        th.addWidget(self.master_vol_slider)
-        
+        th.addSpacing(10); th.addWidget(QLabel("Master:")); self.mv_s = QSlider(Qt.Orientation.Horizontal); self.mv_s.setRange(0, 100); self.mv_s.setValue(80); self.mv_s.setFixedWidth(100); self.mv_s.valueChanged.connect(self.on_master_vol_changed); th.addWidget(self.mv_s)
         self.render_btn = QPushButton("🚀 RENDER FINAL MIX"); self.render_btn.setStyleSheet("background-color: #007acc; padding: 12px 25px; color: white; font-weight: bold;"); self.render_btn.clicked.connect(self.render_timeline); th.addWidget(self.render_btn)
         self.stems_btn = QPushButton("📦 EXPORT STEMS"); self.stems_btn.setStyleSheet("background-color: #444; padding: 12px 15px; color: white; font-weight: bold;"); self.stems_btn.clicked.connect(self.export_stems); th.addWidget(self.stems_btn); ml.addLayout(th)
         t_s = QScrollArea(); t_s.setWidgetResizable(True); t_s.setStyleSheet("QScrollArea { background-color: #1a1a1a; border: 1px solid #333; } QScrollBar:horizontal { height: 12px; background: #222; } QScrollBar::handle:horizontal { background: #444; border-radius: 6px; }"); self.timeline_widget = TimelineWidget(); t_s.setWidget(self.timeline_widget); ml.addWidget(t_s, stretch=1)
         self.status_bar = QStatusBar(); self.setStatusBar(self.status_bar); self.status_bar.showMessage("Ready.")
         self.timeline_widget.segmentSelected.connect(self.on_segment_selected); self.timeline_widget.timelineChanged.connect(self.update_status)
-        
-        # Comprehensive App Styling
         self.setStyleSheet("""
             QMainWindow { background-color: #121212; color: #e0e0e0; font-family: 'Segoe UI'; }
             QLabel { color: #ffffff; }
@@ -486,38 +449,34 @@ class AudioSequencerApp(QMainWindow):
     def duplicate_segment(self, ts):
         td = {'id': ts.id, 'filename': ts.filename, 'file_path': ts.file_path, 'bpm': ts.bpm, 'harmonic_key': ts.key, 'onsets_json': ",".join([str(x/1000.0) for x in ts.onsets])}
         ns = self.timeline_widget.add_track(td, start_ms=ts.start_ms + ts.duration_ms, lane=ts.lane)
-        ns.duration_ms = ts.duration_ms; ns.offset_ms = ts.offset_ms; ns.volume = ts.volume; ns.pitch_shift = ts.pitch_shift; ns.is_primary = ts.is_primary; ns.fade_in_ms = ts.fade_in_ms; ns.fade_out_ms = ts.fade_out_ms; ns.waveform = ts.waveform
-        self.timeline_widget.update_geometry(); self.timeline_widget.update()
+        ns.duration_ms = ts.duration_ms; ns.offset_ms = ts.offset_ms; ns.volume = ts.volume; ns.pitch_shift = ts.pitch_shift; ns.is_primary = ts.is_primary; ns.fade_in_ms = ts.fade_in_ms; ns.fade_out_ms = ts.fade_out_ms; ns.waveform = ts.waveform; self.timeline_widget.update_geometry(); self.timeline_widget.update()
 
     def capture_segment_to_library(self, ts):
         self.loading_overlay.show_loading("Capturing Processed Loop...")
         try:
-            # 1. Render just this clip
             out_name = f"captured_{int(ts.start_ms)}_{ts.filename}.mp3"
-            os.makedirs("captured_loops", exist_ok=True)
-            out_path = os.path.abspath(os.path.join("captured_loops", out_name))
-            
-            # Use current target bpm for capture
+            os.makedirs("captured_loops", exist_ok=True); out_path = os.path.abspath(os.path.join("captured_loops", out_name))
             tb = float(self.tbe.text()) if self.tbe.text() else 124.0
-            
-            # Wrap segment in a list for renderer
             self.renderer.render_timeline([ts.to_dict()], out_path, target_bpm=tb)
-            
-            # 2. Ingest back to library
-            from src.ingestion import IngestionEngine
-            ie = IngestionEngine(db_path=self.dm.db_path)
-            ie.scan_directory(os.path.dirname(out_path)) # Just scan the folder
-            
-            self.load_library()
-            self.loading_overlay.hide_loading()
-            QMessageBox.information(self, "Captured", f"Clip captured and added to library:\n{out_name}")
-        except Exception as e:
-            self.loading_overlay.hide_loading()
-            show_error(self, "Capture Error", "Failed to capture loop.", e)
+            from src.ingestion import IngestionEngine; ie = IngestionEngine(db_path=self.dm.db_path); ie.scan_directory(os.path.dirname(out_path)); self.load_library(); self.loading_overlay.hide_loading(); QMessageBox.information(self, "Captured", f"Clip captured and added to library:\n{out_name}")
+        except Exception as e: self.loading_overlay.hide_loading(); show_error(self, "Capture Error", "Failed to capture loop.", e)
 
     def on_cursor_jump(self, ms):
         if self.is_playing: self.player.setPosition(int(ms))
         self.update_status()
+
+    def generate_ai_transition(self, x):
+        gm = x / self.timeline_widget.pixels_per_ms; ps = ns = None; ss = sorted(self.timeline_widget.segments, key=lambda s: s.start_ms)
+        for s in ss:
+            if s.start_ms + s.duration_ms <= gm: ps = s
+            elif s.start_ms >= gm:
+                if ns is None: ns = s
+        if not ps or not ns: self.status_bar.showMessage("Need track before AND after gap."); return
+        self.loading_overlay.show_loading("✨ Gemini: Orchestrating Transition..."); os.makedirs("generated_assets", exist_ok=True); op = os.path.abspath(f"generated_assets/trans_{int(gm)}.wav")
+        try:
+            p = self.generator.get_transition_params(ps.__dict__, ns.__dict__); self.generator.generate_riser(duration_sec=4.0, bpm=self.timeline_widget.target_bpm, output_path=op, params=p)
+            td = {'id': -1, 'filename': f"AI Sweep ({p.get('description', 'Procedural')})", 'file_path': op, 'bpm': self.timeline_widget.target_bpm, 'harmonic_key': 'N/A', 'onsets_json': ""}; sm = ns.start_ms - 4000; seg = self.timeline_widget.add_track(td, start_ms=sm, lane=4); seg.duration_ms = 4000; seg.fade_in_ms = 3500; seg.fade_out_ms = 500; self.load_waveform_async(seg); self.loading_overlay.hide_loading(); self.status_bar.showMessage("AI Transition generated."); self.timeline_widget.update(); self.push_undo()
+        except Exception as e: self.loading_overlay.hide_loading(); show_error(self, "AI Generation Error", "Failed to generate transition.", e)
 
     def find_bridge_for_gap(self, x):
         gm = x / self.timeline_widget.pixels_per_ms; ps = ns = None; ss = sorted(self.timeline_widget.segments, key=lambda s: s.start_ms)
@@ -537,74 +496,10 @@ class AudioSequencerApp(QMainWindow):
             self.loading_overlay.hide_loading(); self.status_bar.showMessage(f"AI found {len(results)} potential bridges."); conn.close()
         except Exception as e: self.loading_overlay.hide_loading(); show_error(self, "Bridge Error", "AI Bridge search failed.", e)
 
-    def generate_ai_transition(self, x_pos):
-        gap_ms = x_pos / self.timeline_widget.pixels_per_ms
-        prev_seg = next_seg = None
-        sorted_segs = sorted(self.timeline_widget.segments, key=lambda s: s.start_ms)
-        for s in sorted_segs:
-            if s.start_ms + s.duration_ms <= gap_ms: prev_seg = s
-            elif s.start_ms >= gap_ms:
-                if next_seg is None: next_seg = s
-        
-        if not prev_seg or not next_seg:
-            self.status_bar.showMessage("Need track before AND after gap for AI transition.")
-            return
-
-        self.loading_overlay.show_loading("✨ Gemini: Orchestrating Transition...")
-        
-        # Ensure output folder exists
-        os.makedirs("generated_assets", exist_ok=True)
-        out_path = os.path.abspath(f"generated_assets/trans_{int(gap_ms)}.wav")
-        
-        try:
-            # 1. Get Params from Gemini (Vibe check)
-            params = self.generator.get_transition_params(prev_seg.__dict__, next_seg.__dict__)
-            
-            # 2. Generate procedural audio
-            self.generator.generate_riser(duration_sec=4.0, bpm=self.timeline_widget.target_bpm, 
-                                          output_path=out_path, params=params)
-            
-            # 3. Add to timeline
-            # Data for TrackSegment (fake metadata for generated track)
-            td = {
-                'id': -1, 'filename': f"AI Sweep ({params.get('description', 'Procedural')})",
-                'file_path': out_path, 'bpm': self.timeline_widget.target_bpm, 'harmonic_key': 'N/A',
-                'onsets_json': ""
-            }
-            
-            # Place it so it ends exactly where next_track starts
-            start_ms = next_seg.start_ms - 4000
-            # Try to find an empty lane or use a high lane (4)
-            seg = self.timeline_widget.add_track(td, start_ms=start_ms, lane=4)
-            seg.duration_ms = 4000
-            seg.fade_in_ms = 3500
-            seg.fade_out_ms = 500
-            self.load_waveform_async(seg)
-            
-            self.loading_overlay.hide_loading()
-            self.status_bar.showMessage("AI Transition generated and placed.")
-            self.timeline_widget.update()
-            self.push_undo()
-        except Exception as e:
-            self.loading_overlay.hide_loading()
-            show_error(self, "AI Generation Error", "Failed to generate transition.", e)
-
-        def new_project(self):
-            if QMessageBox.question(self, "New Project", "Discard current journey and start new?") == QMessageBox.StandardButton.Yes:
-                self.push_undo()
-                self.timeline_widget.segments = []
-                self.timeline_widget.cursor_pos_ms = 0
-                self.timeline_widget.loop_enabled = False
-                self.preview_dirty = True
-                self.timeline_widget.update_geometry()
-                self.update_status()
-    
-        def on_vzoom_changed(self, value):
-            self.timeline_widget.lane_height = value
-            self.timeline_widget.update_geometry()
-    
-        def on_zoom_changed(self, v):
-     self.timeline_widget.pixels_per_ms = v / 1000.0; self.timeline_widget.update_geometry()
+    def new_project(self):
+        if QMessageBox.question(self, "New Project", "Discard current journey?") == QMessageBox.StandardButton.Yes: self.push_undo(); self.timeline_widget.segments = []; self.timeline_widget.cursor_pos_ms = 0; self.timeline_widget.loop_enabled = False; self.preview_dirty = True; self.timeline_widget.update_geometry(); self.update_status()
+    def on_vzoom_changed(self, v): self.timeline_widget.lane_height = v; self.timeline_widget.update_geometry()
+    def on_zoom_changed(self, v): self.timeline_widget.pixels_per_ms = v / 1000.0; self.timeline_widget.update_geometry()
     def clear_timeline(self):
         if QMessageBox.question(self, "Clear", "Clear journey?") == QMessageBox.StandardButton.Yes: self.push_undo(); self.timeline_widget.segments = []; self.timeline_widget.update_geometry(); self.update_status()
     def on_search_text_changed(self, t):
@@ -636,18 +531,12 @@ class AudioSequencerApp(QMainWindow):
             with open(p, 'r') as f: data = json.load(f)
             self.timeline_widget.segments = []; self.tbe.setText(str(data['target_bpm']))
             for s in data['segments']:
-                seg = TrackSegment(td, start_ms=s['start_ms'], duration_ms=s['duration_ms'], lane=s['lane'], offset_ms=s['offset_ms']); seg.volume = s['volume']; seg.is_primary = s['is_primary']; seg.fade_in_ms = s['fade_in_ms']; seg.fade_out_ms = s['fade_out_ms']; seg.pitch_shift = s.get('pitch_shift', 0)
-                self.load_waveform_async(seg)
-                self.timeline_widget.segments.append(seg)
+                td = {'id': s['id'], 'filename': s['filename'], 'file_path': s['file_path'], 'bpm': s['bpm'], 'harmonic_key': s['key'], 'onsets_json': s.get('onsets_json', "")}; seg = TrackSegment(td, start_ms=s['start_ms'], duration_ms=s['duration_ms'], lane=s['lane'], offset_ms=s['offset_ms']); seg.volume = s['volume']; seg.is_primary = s['is_primary']; seg.fade_in_ms = s['fade_in_ms']; seg.fade_out_ms = s['fade_out_ms']; seg.pitch_shift = s.get('pitch_shift', 0); self.load_waveform_async(seg); self.timeline_widget.segments.append(seg)
             self.timeline_widget.update_geometry(); self.update_status()
     def on_bpm_changed(self, t):
         try: self.timeline_widget.target_bpm = float(t); self.preview_dirty = True; self.timeline_widget.update(); self.update_status()
         except: pass
-
-    def on_master_vol_changed(self, value):
-        v = value / 100.0
-        self.audio_output.setVolume(v)
-        self.status_bar.showMessage(f"Master Volume: {value}%")
+    def on_master_vol_changed(self, v): self.audio_output.setVolume(v / 100.0); self.status_bar.showMessage(f"Master Volume: {v}%")
     def toggle_analytics(self): self.timeline_widget.show_modifications = not self.mod_toggle.isChecked(); self.mod_toggle.setText("🔍 Show Markers" if self.mod_toggle.isChecked() else "🔍 Hide Markers"); self.timeline_widget.update()
     def toggle_grid(self): self.timeline_widget.snap_to_grid = self.grid_toggle.isChecked(); self.grid_toggle.setText(f"📏 Grid Snap: {'ON' if self.timeline_widget.snap_to_grid else 'OFF'}"); self.timeline_widget.update()
     def update_status(self):
@@ -677,73 +566,38 @@ class AudioSequencerApp(QMainWindow):
         except Exception as e: show_error(self, "Library Error", "Failed to load library.", e)
     def on_library_track_selected(self):
         si = self.library_table.selectedItems()
-        if si: self.add_track_by_id(self.library_table.item(si[0].row(), 0).data(Qt.ItemDataRole.UserRole), only_update_recs=True)
+        if si:
+            tid = self.library_table.item(si[0].row(), 0).data(Qt.ItemDataRole.UserRole); self.add_track_by_id(tid, only_update_recs=True)
+            try:
+                conn = self.dm.get_conn(); cursor = conn.cursor(); cursor.execute("SELECT file_path FROM tracks WHERE id = ?", (tid,)); fp = cursor.fetchone()[0]; conn.close()
+                w = self.processor.get_waveform_envelope(fp); self.l_wave.set_waveform(w); self.l_wave_label.setText(os.path.basename(fp))
+                self.player.setSource(QUrl.fromLocalFile(os.path.abspath(fp)))
+            except: pass
     def add_track_by_id(self, tid, x=None, only_update_recs=False, lane=0):
         try:
             conn = self.dm.get_conn(); conn.row_factory = sqlite3_factory; cursor = conn.cursor(); cursor.execute("SELECT * FROM tracks WHERE id = ?", (tid,)); track = dict(cursor.fetchone()); conn.close()
             if not only_update_recs:
                 self.push_undo(); sm = x / self.timeline_widget.pixels_per_ms if x is not None else None; seg = self.timeline_widget.add_track(track, start_ms=sm); 
                 if x is not None: seg.lane = lane
-                self.load_waveform_async(seg)
-                self.timeline_widget.update()
+                self.load_waveform_async(seg); self.timeline_widget.update()
             self.selected_library_track = track; self.update_recommendations(tid)
         except Exception as e: show_error(self, "Data Error", "Failed to retrieve track.", e)
     def add_selected_to_timeline(self):
         if self.selected_library_track: self.add_track_by_id(self.selected_library_track['id'])
     def on_rec_double_clicked(self, i): self.add_track_by_id(self.rec_list.item(i.row(), 0).data(Qt.ItemDataRole.UserRole))
     def auto_populate_timeline(self):
-        if not self.selected_library_track:
-            self.status_bar.showMessage("Select a track in the library to use as a seed.")
-            return
-            
-        self.push_undo(); self.loading_overlay.show_loading("AI: Orchestrating Layered Journey...")
-        
-        # 1. Clear current (optional, but better for a fresh start)
-        self.timeline_widget.segments = []
-        
-        try:
-            # 2. Get a high-compatibility sequence
-            seq = self.orchestrator.find_curated_sequence(max_tracks=8, seed_track=self.selected_library_track)
-            
-            if seq:
-                # We'll create a structured mix:
-                # - Tracks 0, 2, 4, 6 are 'Foundation' (Lane 1)
-                # - Tracks 1, 3, 5, 7 are 'Interludes' (Lane 2 or 3)
-                
-                current_ms = 0
-                for i, track in enumerate(seq):
-                    is_foundation = (i % 2 == 0)
-                    lane = 0 if is_foundation else (1 if i % 4 == 1 else 2)
-                    
-                    # Duration: Foundations are long, Interludes are shorter
-                    duration = 30000 if is_foundation else 15000
-                    
-                    # Overlap: Foundation tracks overlap each other by 8s
-                    # Interludes start 5s into a foundation
-                    if is_foundation:
-                        start_ms = current_ms
-                        if i > 0: start_ms -= 8000 # crossfade overlap
-                        current_ms = start_ms + duration
-                    else:
-                        # Interludes sit 'inside' the foundation
-                        start_ms = current_ms - 25000 
-                    
-                    seg = self.timeline_widget.add_track(track, start_ms=max(0, start_ms), lane=lane)
-                    seg.duration_ms = duration
-                    seg.is_primary = is_foundation
-                    self.load_waveform_async(seg)
-                    
-                    # Set default fades
-                    seg.fade_in_ms = 4000
-                    seg.fade_out_ms = 4000
-                
-                self.timeline_widget.update_geometry()
-                self.status_bar.showMessage(f"AI: Orchestrated {len(seq)} tracks into a multi-lane journey.")
-            
-            self.loading_overlay.hide_loading()
-        except Exception as e:
-            self.loading_overlay.hide_loading()
-            show_error(self, "Orchestration Error", "Failed to auto-generate path.", e)
+        if not self.selected_library_track: self.status_bar.showMessage("Select seed track."); return
+        self.push_undo(); self.loading_overlay.show_loading("AI Orchestrating..."); seq = self.orchestrator.find_curated_sequence(max_tracks=8, seed_track=self.selected_library_track)
+        if seq:
+            self.timeline_widget.segments = []; cm = 0
+            for i, t in enumerate(seq):
+                is_f = (i % 2 == 0); lane = 0 if is_f else (1 if i % 4 == 1 else 2); dur = 30000 if is_f else 15000; sm = cm; 
+                if is_f and i > 0: sm -= 8000
+                elif not is_f: sm = cm - 25000
+                seg = self.timeline_widget.add_track(t, start_ms=max(0, sm), lane=lane); seg.duration_ms = dur; seg.is_primary = is_f; seg.fade_in_ms = seg.fade_out_ms = 4000; self.load_waveform_async(seg); 
+                if is_f: cm = sm + dur
+            self.timeline_widget.update_geometry()
+        self.loading_overlay.hide_loading()
     def render_timeline(self):
         if not self.timeline_widget.segments: return
         ss = sorted(self.timeline_widget.segments, key=lambda s: s.start_ms); tb = float(self.tbe.text()) if self.tbe.text() else 124.0
@@ -788,9 +642,8 @@ class AudioSequencerApp(QMainWindow):
             conn.close()
         except Exception as e: print(f"Rec Engine Error: {e}")
     def play_selected(self):
-        if self.selected_library_track:
-            try: os.startfile(self.selected_library_track['file_path'])
-            except Exception as e: show_error(self, "Playback Error", "Failed to play.", e)
+        if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState: self.player.pause()
+        else: self.player.play()
     def keyPressEvent(self, event):
         if event.key() == Qt.Key.Key_Space: self.toggle_playback()
         elif event.key() == Qt.Key.Key_M:
@@ -801,13 +654,7 @@ class AudioSequencerApp(QMainWindow):
             if sel: self.timeline_widget.solos[sel.lane] = not self.timeline_widget.solos[sel.lane]; self.timeline_widget.update(); self.preview_dirty = True
         elif event.key() == Qt.Key.Key_Delete or event.key() == Qt.Key.Key_Backspace:
             sel = self.timeline_widget.selected_segment
-            if sel:
-                self.push_undo()
-                self.timeline_widget.segments.remove(sel)
-                self.timeline_widget.selected_segment = None
-                self.on_segment_selected(None)
-                self.timeline_widget.update_geometry()
-                self.update_status()
+            if sel: self.push_undo(); self.timeline_widget.segments.remove(sel); self.timeline_widget.selected_segment = None; self.on_segment_selected(None); self.timeline_widget.update_geometry(); self.update_status()
         elif event.modifiers() & Qt.KeyboardModifier.ControlModifier:
             if event.key() == Qt.Key.Key_Z: self.undo()
             elif event.key() == Qt.Key.Key_Y: self.redo()
