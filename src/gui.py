@@ -408,6 +408,15 @@ class AudioSequencerApp(QMainWindow):
         th.addSpacing(20); th.addWidget(QLabel("Zoom:")); self.zs = QSlider(Qt.Orientation.Horizontal); self.zs.setRange(10, 200); self.zs.setValue(50); self.zs.setFixedWidth(150); self.zs.valueChanged.connect(self.on_zoom_changed); th.addWidget(self.zs); th.addStretch()
         self.agb = QPushButton("🪄 Auto-Generate Path"); self.agb.clicked.connect(self.auto_populate_timeline); th.addWidget(self.agb); self.cb = QPushButton("🗑 Clear"); self.cb.clicked.connect(self.clear_timeline); th.addWidget(self.cb)
         th.addWidget(QLabel("Target BPM:")); self.tbe = QLineEdit("124"); self.tbe.setFixedWidth(60); self.tbe.textChanged.connect(self.on_bpm_changed); th.addWidget(self.tbe)
+        
+        # Master Volume
+        th.addSpacing(10)
+        th.addWidget(QLabel("Master:"))
+        self.master_vol_slider = QSlider(Qt.Orientation.Horizontal)
+        self.master_vol_slider.setRange(0, 100); self.master_vol_slider.setValue(80); self.master_vol_slider.setFixedWidth(100)
+        self.master_vol_slider.valueChanged.connect(self.on_master_vol_changed)
+        th.addWidget(self.master_vol_slider)
+        
         self.render_btn = QPushButton("🚀 RENDER FINAL MIX"); self.render_btn.setStyleSheet("background-color: #007acc; padding: 12px 25px; color: white; font-weight: bold;"); self.render_btn.clicked.connect(self.render_timeline); th.addWidget(self.render_btn)
         self.stems_btn = QPushButton("📦 EXPORT STEMS"); self.stems_btn.setStyleSheet("background-color: #444; padding: 12px 15px; color: white; font-weight: bold;"); self.stems_btn.clicked.connect(self.export_stems); th.addWidget(self.stems_btn); ml.addLayout(th)
         t_s = QScrollArea(); t_s.setWidgetResizable(True); t_s.setStyleSheet("QScrollArea { background-color: #1a1a1a; border: 1px solid #333; } QScrollBar:horizontal { height: 12px; background: #222; } QScrollBar::handle:horizontal { background: #444; border-radius: 6px; }"); self.timeline_widget = TimelineWidget(); t_s.setWidget(self.timeline_widget); ml.addWidget(t_s, stretch=1)
@@ -586,6 +595,11 @@ class AudioSequencerApp(QMainWindow):
     def on_bpm_changed(self, t):
         try: self.timeline_widget.target_bpm = float(t); self.preview_dirty = True; self.timeline_widget.update(); self.update_status()
         except: pass
+
+    def on_master_vol_changed(self, value):
+        v = value / 100.0
+        self.audio_output.setVolume(v)
+        self.status_bar.showMessage(f"Master Volume: {value}%")
     def toggle_analytics(self): self.timeline_widget.show_modifications = not self.mod_toggle.isChecked(); self.mod_toggle.setText("🔍 Show Markers" if self.mod_toggle.isChecked() else "🔍 Hide Markers"); self.timeline_widget.update()
     def toggle_grid(self): self.timeline_widget.snap_to_grid = self.grid_toggle.isChecked(); self.grid_toggle.setText(f"📏 Grid Snap: {'ON' if self.timeline_widget.snap_to_grid else 'OFF'}"); self.timeline_widget.update()
     def update_status(self):
