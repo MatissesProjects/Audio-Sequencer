@@ -66,18 +66,13 @@ class FlowRenderer:
             # 1. OUTGOING: Blend from Unfiltered to High-passed (remove bass)
             hp_board = Pedalboard([HighpassFilter(cutoff_frequency_hz=400)])
             out_hp = hp_board(out_np, self.sr)
-            # Starts unfiltered (1.0), ends high-passed (0.0)
-            # Actually, we want to gradually apply the filter
             out_final_np = (out_np * (1.0 - s_curve)) + (out_hp * s_curve)
-            # Then apply the overall volume fade
             out_final_np *= (1.0 - s_curve)
 
             # 2. INCOMING: Blend from Low-passed to Unfiltered (add highs)
             lp_board = Pedalboard([LowpassFilter(cutoff_frequency_hz=400)])
             in_lp = lp_board(in_np, self.sr)
-            # Starts low-passed (1.0), ends unfiltered (0.0) -> s_curve goes 0 to 1
             in_final_np = (in_lp * (1.0 - s_curve)) + (in_np * s_curve)
-            # Then apply the overall volume fade-in
             in_final_np *= s_curve
             
             # 3. Sum and Glue
@@ -93,4 +88,67 @@ class FlowRenderer:
             
         combined = effects.normalize(combined, headroom=0.1)
         combined.export(output_path, format="mp3", bitrate="320k")
+        return output_path
+
+    def layered_mix(self, foundation_path, layer_configs, output_path):
+        """
+        Layers multiple tracks over a foundation with smooth S-curve frequency ducking.
+        """
+        foundation = AudioSegment.from_file(foundation_path)
+        foundation = foundation.set_frame_rate(self.sr).set_channels(2)
+        foundation = effects.normalize(foundation, headroom=0.5)
+        
+        final = foundation
+        
+        # We process the foundation in chunks to allow for smooth automation
+        for config in tqdm(layer_configs, desc="Layering tracks"):
+            layer = AudioSegment.from_file(config['path'])
+            layer = layer.set_frame_rate(self.sr).set_channels(2)
+            layer = effects.normalize(layer, headroom=1.0)
+            
+            duration_ms = len(layer)
+            start_ms = config['start_ms']
+            fade_ms = 4000 # 4-second smooth transition for ducking
+            
+            if start_ms + duration_ms > len(final):
+                continue
+
+            # 1. Extract the foundation part that needs ducking
+            # We take extra room for the fades
+            duck_seg = final[start_ms : start_ms + duration_ms]
+            duck_np = self.segment_to_numpy(duck_seg)
+            num_samples = duck_np.shape[1]
+            
+            # 2. Create the Ducking Envelope (S-Curve)
+            # 0.0 = no ducking, 1.0 = full ducking
+            t = np.linspace(0, 1, int(self.sr * fade_ms / 1000))
+            s_fade_in = 0.5 * (1 - np.cos(np.pi * t))
+            s_fade_out = 1.0 - s_fade_in
+            
+            envelope = np.ones(num_samples)
+            # Apply fade in at start
+            envelope[:len(s_fade_in)] = s_fade_in
+            # Apply fade out at end
+            envelope[-len(s_fade_out):] = s_fade_out
+            
+            # 3. Apply Progressive Filtering to Foundation
+            # Blend between clean and high-passed based on envelope
+            hp_board = Pedalboard([HighpassFilter(cutoff_frequency_hz=600)])
+            duck_hp = hp_board(duck_np, self.sr)
+            
+            # Foundation becomes filtered and quieter as layer swells in
+            ducked_np = (duck_np * (1.0 - envelope * 0.5)) + (duck_hp * (envelope * 0.5))
+            ducked_np *= (1.0 - envelope * 0.4) # Overall gain reduction
+            
+            ducked_seg = self.numpy_to_segment(ducked_np, self.sr)
+            
+            # 4. Prepare layer with matching crossfades
+            layer_processed = layer + config.get('gain', -2.0)
+            layer_processed = layer_processed.fade_in(fade_ms).fade_out(fade_ms)
+            
+            overlaid = ducked_seg.overlay(layer_processed)
+            final = final[:start_ms] + overlaid + final[start_ms + duration_ms:]
+            
+        final = effects.normalize(final, headroom=0.1)
+        final.export(output_path, format="mp3", bitrate="320k")
         return output_path

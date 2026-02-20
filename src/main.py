@@ -17,6 +17,7 @@ def main():
     parser.add_argument("--embed", action="store_true", help="Generate AI embeddings for all tracks")
     parser.add_argument("--gui", action="store_true", help="Launch the Desktop GUI")
     parser.add_argument("--full-mix", action="store_true", help="Sequence and mix ALL tracks into a continuous journey")
+    parser.add_argument("--layered", action="store_true", help="Create a 2-minute layered journey with a foundation track")
     
     args = parser.parse_args()
     dm = DataManager()
@@ -68,6 +69,11 @@ def main():
         from src.orchestrator import FullMixOrchestrator
         orch = FullMixOrchestrator()
         orch.generate_full_mix(target_bpm=124)
+
+    if args.layered:
+        from src.orchestrator import FullMixOrchestrator
+        orch = FullMixOrchestrator()
+        orch.generate_layered_journey(target_bpm=124)
 
 if __name__ == "__main__":
     main()
