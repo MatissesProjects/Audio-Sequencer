@@ -6,7 +6,7 @@ from pedalboard import Pedalboard, HighpassFilter, LowpassFilter, Limiter, Compr
 from tqdm import tqdm
 
 class FlowRenderer:
-    """Handles mixing, layering, and crossfading multiple tracks with creative modulation."""
+    """Handles mixing, layering, and crossfading multiple tracks with pro gain staging."""
     
     def __init__(self, sample_rate=44100):
         self.sr = sample_rate
@@ -23,6 +23,7 @@ class FlowRenderer:
 
     def numpy_to_segment(self, samples, sr):
         """Helper to convert numpy float32 back to pydub segment."""
+        # Safety normalization
         peak = np.max(np.abs(samples))
         if peak > 1.0:
             samples /= peak
@@ -34,33 +35,9 @@ class FlowRenderer:
         else:
             return AudioSegment(samples.tobytes(), frame_rate=sr, sample_width=2, channels=1)
 
-    def apply_dynamic_ducking(self, samples, curve, filter_type='highpass'):
-        """
-        Applies a changing filter/volume curve over time.
-        curve: numpy array of values from 0.0 to 1.0.
-        """
-        num_samples = samples.shape[1]
-        chunk_size = 4410 # 100ms
-        processed = np.zeros_like(samples)
-        
-        for start in range(0, num_samples, chunk_size):
-            end = min(start + chunk_size, num_samples)
-            intensity = curve[start]
-            chunk = samples[:, start:end]
-            
-            if filter_type == 'highpass':
-                cutoff = 20 + (intensity * 400)
-                board = Pedalboard([HighpassFilter(cutoff_frequency_hz=cutoff)])
-            else:
-                cutoff = 20000 - (intensity * 15000)
-                board = Pedalboard([LowpassFilter(cutoff_frequency_hz=cutoff)])
-                
-            processed[:, start:end] = board(chunk, self.sr)
-        return processed
-
     def dj_stitch(self, track_paths, output_path, overlay_ms=12000):
         """
-        Creates a 'Professional DJ Mix' with dynamic ducking automation.
+        Creates a 'Professional DJ Mix' with Parallel Filter Blending and S-curve easing.
         """
         if not track_paths:
             return None
@@ -74,26 +51,39 @@ class FlowRenderer:
             next_seg = next_seg.set_frame_rate(self.sr).set_channels(2)
             next_seg = effects.normalize(next_seg, headroom=0.5)
             
-            # 1. Segments for transition
+            # Prepare segments
             out_seg = combined[-overlay_ms:]
             in_seg = next_seg[:overlay_ms]
             
             out_np = self.segment_to_numpy(out_seg)
             in_np = self.segment_to_numpy(in_seg)
             
-            # 2. Dynamic Curves (Automation)
-            out_curve = np.linspace(0, 1, out_np.shape[1])
-            in_curve = np.linspace(1, 0, in_np.shape[1])
+            # S-Curve for blending
+            num_samples = out_np.shape[1]
+            t = np.linspace(0, 1, num_samples)
+            s_curve = 0.5 * (1 - np.cos(np.pi * t))
             
-            # Outgoing: High-pass (remove bass)
-            out_filtered = self.apply_dynamic_ducking(out_np, out_curve, 'highpass')
-            # Incoming: Low-pass (keep only bass then fade in highs)
-            in_filtered = self.apply_dynamic_ducking(in_np, in_curve, 'lowpass')
+            # 1. OUTGOING: Blend from Unfiltered to High-passed (remove bass)
+            hp_board = Pedalboard([HighpassFilter(cutoff_frequency_hz=400)])
+            out_hp = hp_board(out_np, self.sr)
+            # Starts unfiltered (1.0), ends high-passed (0.0)
+            # Actually, we want to gradually apply the filter
+            out_final_np = (out_np * (1.0 - s_curve)) + (out_hp * s_curve)
+            # Then apply the overall volume fade
+            out_final_np *= (1.0 - s_curve)
+
+            # 2. INCOMING: Blend from Low-passed to Unfiltered (add highs)
+            lp_board = Pedalboard([LowpassFilter(cutoff_frequency_hz=400)])
+            in_lp = lp_board(in_np, self.sr)
+            # Starts low-passed (1.0), ends unfiltered (0.0) -> s_curve goes 0 to 1
+            in_final_np = (in_lp * (1.0 - s_curve)) + (in_np * s_curve)
+            # Then apply the overall volume fade-in
+            in_final_np *= s_curve
             
-            # 3. Sum and Master Bus
-            summed_np = (out_filtered * (1.0 - out_curve)) + (in_filtered * (1.0 - in_curve))
+            # 3. Sum and Glue
+            summed_np = out_final_np + in_final_np
             master_bus = Pedalboard([
-                Compressor(threshold_db=-10, ratio=2.0),
+                Compressor(threshold_db=-12, ratio=2.5, attack_ms=10, release_ms=200),
                 Limiter(threshold_db=-0.1)
             ])
             transition_np = master_bus(summed_np, self.sr)
@@ -104,8 +94,3 @@ class FlowRenderer:
         combined = effects.normalize(combined, headroom=0.1)
         combined.export(output_path, format="mp3", bitrate="320k")
         return output_path
-
-if __name__ == "__main__":
-    # Test mixing the original and the stretched version
-    renderer = FlowRenderer()
-    # We will use this in preview_mix.py

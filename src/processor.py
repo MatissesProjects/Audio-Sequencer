@@ -45,32 +45,45 @@ class AudioProcessor:
 
     def loop_track(self, input_path, target_duration, onsets, output_path=None):
         """
-        Extends a track to a target duration by looping it rhythmically.
-        onsets: List of beat timestamps.
+        Extends a track to a target duration by looping it rhythmically with 
+        high-quality equal-power crossfades to prevent jumping.
         """
         y, sr = librosa.load(input_path, sr=self.sr)
         duration = librosa.get_duration(y=y, sr=sr)
         
         if duration >= target_duration:
-            return y[:int(target_duration * sr)]
+            y_out = y[:int(target_duration * sr)]
+            if output_path:
+                sf.write(output_path, y_out, sr)
+            return y_out
 
-        # Use the first and last beat onsets as loop points if available
-        # to avoid silence/tail issues at the very start/end
+        # Use loop points based on onsets
         start_sample = int(onsets[0] * sr) if onsets else 0
         end_sample = int(onsets[-1] * sr) if onsets else len(y)
         
         loop_segment = y[start_sample:end_sample]
-        num_repeats = int(np.ceil((target_duration - duration) / (len(loop_segment)/sr))) + 1
+        fade_len = int(sr * 0.5) # 500ms crossfade for seamlessness
         
-        # Concatenate with a tiny crossfade to prevent clicks
-        fade_len = int(sr * 0.05) # 50ms fade
         extended = y[:end_sample]
         
-        for _ in range(num_repeats):
-            # Simple append for now, can add crossfade logic here
-            extended = np.concatenate([extended, loop_segment])
+        # Crossfade curves (Equal Power)
+        t = np.linspace(0, 1, fade_len)
+        fade_out = np.cos(0.5 * np.pi * t)
+        fade_in = np.sin(0.5 * np.pi * t)
+        
+        current_dur = len(extended) / sr
+        while current_dur < target_duration + 2.0:
+            # 1. Take the end of current 'extended' and start of 'loop_segment'
+            overlap_end = extended[-fade_len:]
+            overlap_start = loop_segment[:fade_len]
             
-        # Trim to exact target
+            # 2. Blend them
+            blended = (overlap_end * fade_out) + (overlap_start * fade_in)
+            
+            # 3. Replace end and append remainder
+            extended = np.concatenate([extended[:-fade_len], blended, loop_segment[fade_len:]])
+            current_dur = len(extended) / sr
+            
         final = extended[:int(target_duration * sr)]
         
         if output_path:

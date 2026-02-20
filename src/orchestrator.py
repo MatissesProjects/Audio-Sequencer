@@ -81,10 +81,10 @@ class FullMixOrchestrator:
                 if pitch_steps < -6: pitch_steps += 12
                 pitch_steps = max(-2, min(2, pitch_steps))
 
-            # 2. Rhythmic Looping (Extend each track to at least 60s for long transitions)
+            # 2. Rhythmic Looping (Extend each track to 45s for long transitions)
             onsets = [float(x) for x in track['onsets_json'].split(',')] if track['onsets_json'] else []
             loop_path = os.path.join(tmp_dir, f"loop_{i}.wav")
-            self.processor.loop_track(track['file_path'], 60.0, onsets, loop_path)
+            self.processor.loop_track(track['file_path'], 45.0, onsets, loop_path)
 
             # 3. Process: Time Stretch + Pitch Shift
             temp_y = self.processor.stretch_to_bpm(loop_path, track['bpm'], target_bpm)
