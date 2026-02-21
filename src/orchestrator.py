@@ -242,39 +242,56 @@ class FullMixOrchestrator:
             try: self.processor.generate_grain_cloud(melodic_leads[0]['file_path'], cloud_path, duration=20.0)
             except: cloud_path = melodic_leads[0]['file_path']
 
-        # Production Constant: Overlap blocks by 4 seconds to ensure no silence
+        # Production Constant: Overlap blocks
         overlap = 4000 
+
+        def find_free_lane(start, dur, preferred=None):
+            # Check which lanes are busy during this time window
+            busy_lanes = set()
+            for s in segments:
+                if max(start, s['start_ms']) < min(start + dur, s['start_ms'] + s['duration_ms']):
+                    busy_lanes.add(s['lane'])
+            
+            if preferred is not None and preferred not in busy_lanes:
+                return preferred
+            for l in range(5):
+                if l not in busy_lanes: return l
+            return preferred or 0
 
         for idx, block in enumerate(blocks):
             b_name = block['name']; b_dur = block['dur']
             
             # --- LANE 0: Foundation (Heartbeat) ---
             if b_name != 'Outro':
-                # Start during intro to prevent the "silence hole"
                 f_start = current_ms
                 if b_name == 'Intro': f_start += 8000
+                f_dur = b_dur + overlap + 2000
+                lane = find_free_lane(f_start, f_dur, preferred=0)
                 
                 segments.append({
                     'id': main_drum['id'], 'filename': main_drum['filename'], 'file_path': main_drum['file_path'], 'bpm': main_drum['bpm'], 'harmonic_key': main_drum['harmonic_key'],
-                    'start_ms': f_start, 'duration_ms': b_dur + overlap + 2000, 'offset_ms': (main_drum.get('loop_start') or 0)*1000,
-                    'volume': 1.0 if b_name == 'Drop' else 0.8, 'is_primary': True, 'lane': 0,
+                    'start_ms': f_start, 'duration_ms': f_dur, 'offset_ms': (main_drum.get('loop_start') or 0)*1000,
+                    'volume': 1.0 if b_name == 'Drop' else 0.8, 'is_primary': True, 'lane': lane,
                     'fade_in_ms': 4000, 'fade_out_ms': 4000
                 })
 
             # --- LANE 1: Harmonic Body (Bass) ---
             if b_name in ['Verse 1', 'Drop', 'Verse 2']:
+                lane = find_free_lane(current_ms, b_dur + overlap, preferred=1)
                 segments.append({
                     'id': bass_track['id'], 'filename': bass_track['filename'], 'file_path': bass_track['file_path'], 'bpm': bass_track['bpm'], 'harmonic_key': bass_track['harmonic_key'],
                     'start_ms': current_ms, 'duration_ms': b_dur + overlap, 'offset_ms': (bass_track.get('loop_start') or 0)*1000,
-                    'volume': 0.9, 'is_primary': False, 'lane': 1, 'fade_in_ms': 3000, 'fade_out_ms': 3000
+                    'volume': 0.9, 'is_primary': False, 'lane': lane, 'fade_in_ms': 3000, 'fade_out_ms': 3000
                 })
 
             # --- LANE 2/3: Melodic/Atmosphere ---
             if b_name == 'Intro' or b_name == 'Outro':
+                lane = find_free_lane(current_ms, b_dur + overlap, preferred=2)
                 segments.append({
                     'id': -2, 'filename': "NEURAL CLOUD", 'file_path': cloud_path, 'bpm': 120, 'harmonic_key': 'N/A',
                     'start_ms': current_ms, 'duration_ms': b_dur + overlap, 'offset_ms': 0,
-                    'volume': 0.6, 'lane': 2, 'fade_in_ms': 5000, 'fade_out_ms': 5000
+                    'volume': 0.6, 'lane': lane, 'fade_in_ms': 5000, 'fade_out_ms': 5000,
+                    'is_ambient': True
                 })
             else:
                 lead = melodic_leads[idx % len(melodic_leads)]
@@ -282,27 +299,31 @@ class FullMixOrchestrator:
                     sub_durs = [4000, 4000, 2000, 2000, 1000, 1000, 1000, 1000]
                     sub_start = 0
                     for c_idx, sd in enumerate(sub_durs):
+                        lane = find_free_lane(current_ms + sub_start, sd + 200, preferred=2)
                         segments.append({
                             'id': lead['id'], 'filename': f"CHOP {c_idx}", 'file_path': lead['file_path'], 'bpm': lead['bpm'], 'harmonic_key': lead['harmonic_key'],
                             'start_ms': current_ms + sub_start, 'duration_ms': sd + 200, 'offset_ms': (lead.get('loop_start') or 0)*1000,
-                            'volume': 0.7 + (c_idx/len(sub_durs) * 0.3), 'lane': 2, 'pitch_shift': int(c_idx/2), 'low_cut': 200 + (c_idx * 100), 'fade_in_ms': 50, 'fade_out_ms': 50
+                            'volume': 0.7 + (c_idx/len(sub_durs) * 0.3), 'lane': lane, 'pitch_shift': int(c_idx/2), 'low_cut': 200 + (c_idx * 100), 'fade_in_ms': 50, 'fade_out_ms': 50
                         })
                         sub_start += sd
                 else:
                     ps = -2 if b_name == 'Verse 2' else 0
+                    lane = find_free_lane(current_ms, b_dur + overlap, preferred=3)
                     segments.append({
                         'id': lead['id'], 'filename': lead['filename'], 'file_path': lead['file_path'], 'bpm': lead['bpm'], 'harmonic_key': lead['harmonic_key'],
                         'start_ms': current_ms, 'duration_ms': b_dur + overlap, 'offset_ms': (lead.get('loop_start') or 0)*1000,
-                        'volume': 0.7, 'pan': -0.5 if idx % 2 == 0 else 0.5, 'lane': 3, 'pitch_shift': ps, 'low_cut': 400, 'fade_in_ms': 4000, 'fade_out_ms': 4000
+                        'volume': 0.7, 'pan': -0.5 if idx % 2 == 0 else 0.5, 'lane': lane, 'pitch_shift': ps, 'low_cut': 400, 'fade_in_ms': 4000, 'fade_out_ms': 4000
                     })
 
             # --- LANE 4: Atmosphere Glue ---
             if b_name not in ['Intro', 'Outro']:
                 glue = fx_tracks[idx % len(fx_tracks)]
+                lane = find_free_lane(current_ms, b_dur + overlap, preferred=4)
                 segments.append({
                     'id': glue['id'], 'filename': "ATMOS GLUE", 'file_path': glue['file_path'], 'bpm': glue['bpm'], 'harmonic_key': glue['harmonic_key'],
                     'start_ms': current_ms, 'duration_ms': b_dur + overlap, 'offset_ms': 0,
-                    'volume': 0.4, 'lane': 4, 'low_cut': 600, 'high_cut': 8000, 'fade_in_ms': 5000, 'fade_out_ms': 5000
+                    'volume': 0.4, 'lane': lane, 'low_cut': 600, 'high_cut': 8000, 'fade_in_ms': 5000, 'fade_out_ms': 5000,
+                    'is_ambient': True
                 })
 
             current_ms += (b_dur - overlap) 

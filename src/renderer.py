@@ -200,7 +200,9 @@ class FlowRenderer:
             
             seg_np *= (balancing_gain * vol_mult * envelope)
             
-            lc = s.get('low_cut', 20)
+            # Apply Per-Segment Filters
+            is_amb = s.get('is_ambient', False)
+            lc = s.get('low_cut', 400 if is_amb else 20)
             hc = s.get('high_cut', 20000)
             if lc > 25 or hc < 19000:
                 seg_np = self._apply_spectral_ducking(seg_np, self.sr, low_cut=lc, high_cut=hc)
@@ -210,7 +212,8 @@ class FlowRenderer:
             processed_data.append({
                 'samples': seg_np,
                 'start_idx': int(s['start_ms'] * self.sr / 1000.0),
-                'is_primary': s.get('is_primary', False)
+                'is_primary': s.get('is_primary', False),
+                'is_ambient': is_amb
             })
             
             if progress_cb: progress_cb(i + 1)
@@ -234,22 +237,20 @@ class FlowRenderer:
                     
                     if overlap_start < overlap_end:
                         # 1. Apply Spectral Ducking (EQ)
-                        # We process the WHOLE clip to avoid filter clicks at boundaries
                         samples = self._apply_spectral_ducking(samples, self.sr)
                         
                         # 2. Apply Dynamic Sidechain Compression
-                        # Extract the overlapping segment from the PRIMARY (Source)
                         rel_start_o = overlap_start - o_start
                         rel_end_o = overlap_end - o_start
                         source_segment = other['samples'][:, rel_start_o:rel_end_o]
                         
-                        # Extract overlapping segment from TARGET (Background)
                         rel_start_c = overlap_start - start
                         rel_end_c = overlap_end - start
                         target_segment = samples[:, rel_start_c:rel_end_c]
                         
-                        # Apply Sidechain
-                        ducked_segment = self._apply_sidechain(target_segment, source_segment, amount=0.7)
+                        # Ambient tracks duck even more aggressively
+                        duck_amt = 0.85 if current['is_ambient'] else 0.7
+                        ducked_segment = self._apply_sidechain(target_segment, source_segment, amount=duck_amt)
                         
                         # Write back
                         samples[:, rel_start_c:rel_end_c] = ducked_segment

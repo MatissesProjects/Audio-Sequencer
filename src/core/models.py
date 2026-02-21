@@ -22,6 +22,7 @@ class TrackSegment:
         self.pan = 0.0 # -1.0 (Left) to 1.0 (Right)
         self.low_cut = 20 # Hz
         self.high_cut = 20000 # Hz
+        self.is_ambient = False # NEW: Background/Ambient role
         self.lane = lane
         self.is_primary = False
         self.waveform = []
@@ -44,6 +45,7 @@ class TrackSegment:
             'duration_ms': self.duration_ms, 'offset_ms': self.offset_ms, 
             'volume': self.volume, 'pan': self.pan, 
             'low_cut': self.low_cut, 'high_cut': self.high_cut,
+            'is_ambient': self.is_ambient,
             'lane': self.lane, 'is_primary': self.is_primary, 
             'fade_in_ms': self.fade_in_ms, 'fade_out_ms': self.fade_out_ms, 
             'pitch_shift': self.pitch_shift

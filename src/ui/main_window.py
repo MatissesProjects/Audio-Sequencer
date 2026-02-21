@@ -156,7 +156,9 @@ class AudioSequencerApp(QMainWindow):
         vl = QHBoxLayout(); vl.addWidget(QLabel("Vol:")); self.vol_slider = QSlider(Qt.Orientation.Horizontal); self.vol_slider.setRange(0, 150); self.vol_slider.valueChanged.connect(self.on_prop_changed); vl.addWidget(self.vol_slider); pl.addLayout(vl)
         pal = QHBoxLayout(); pal.addWidget(QLabel("Pan:")); self.pan_slider = QSlider(Qt.Orientation.Horizontal); self.pan_slider.setRange(-100, 100); self.pan_slider.setValue(0); self.pan_slider.valueChanged.connect(self.on_prop_changed); pal.addWidget(self.pan_slider); pl.addLayout(pal)
         pil = QHBoxLayout(); pil.addWidget(QLabel("Pitch:")); self.pitch_combo = QComboBox(); [self.pitch_combo.addItem(f"{i:+} st", i) for i in range(-6, 7)]; self.pitch_combo.currentIndexChanged.connect(self.on_prop_changed); pil.addWidget(self.pitch_combo); pl.addLayout(pil)
-        self.prim_check = QCheckBox("Primary Foundation Track"); self.prim_check.stateChanged.connect(self.on_prop_changed); pl.addWidget(self.prim_check); self.prop_group.setVisible(False); rl.addWidget(self.prop_group)
+        self.prim_check = QCheckBox("Primary Foundation Track"); self.prim_check.stateChanged.connect(self.on_prop_changed); pl.addWidget(self.prim_check)
+        self.amb_check = QCheckBox("Ambient Background Track"); self.amb_check.stateChanged.connect(self.on_prop_changed); pl.addWidget(self.amb_check)
+        self.prop_group.setVisible(False); rl.addWidget(self.prop_group)
         rl.addStretch(); top_layout.addWidget(rp, stretch=1)
         
         self.main_splitter.addWidget(top_widget)
@@ -252,11 +254,27 @@ class AudioSequencerApp(QMainWindow):
         self.timeline_widget.update_geometry(); self.update_status()
     def on_segment_selected(self, s):
         if s:
-            self.status_bar.showMessage(f"Selected: {s.filename}"); self.prop_group.setVisible(True); self.vol_slider.blockSignals(True); self.vol_slider.setValue(int(s.volume * 100)); self.vol_slider.blockSignals(False); self.pan_slider.blockSignals(True); self.pan_slider.setValue(int(s.pan * 100)); self.pan_slider.blockSignals(False); self.pitch_combo.blockSignals(True); idx = self.pitch_combo.findData(s.pitch_shift); self.pitch_combo.setCurrentIndex(idx); self.pitch_combo.blockSignals(False); self.prim_check.blockSignals(True); self.prim_check.setChecked(s.is_primary); self.prim_check.blockSignals(False)
-        else: self.prop_group.setVisible(False); self.update_status()
+            self.status_bar.showMessage(f"Selected: {s.filename}")
+            self.prop_group.setVisible(True)
+            self.vol_slider.blockSignals(True); self.vol_slider.setValue(int(s.volume * 100)); self.vol_slider.blockSignals(False)
+            self.pan_slider.blockSignals(True); self.pan_slider.setValue(int(s.pan * 100)); self.pan_slider.blockSignals(False)
+            self.pitch_combo.blockSignals(True); idx = self.pitch_combo.findData(s.pitch_shift); self.pitch_combo.setCurrentIndex(idx); self.pitch_combo.blockSignals(False)
+            self.prim_check.blockSignals(True); self.prim_check.setChecked(s.is_primary); self.prim_check.blockSignals(False)
+            self.amb_check.blockSignals(True); self.amb_check.setChecked(s.is_ambient); self.amb_check.blockSignals(False)
+        else:
+            self.prop_group.setVisible(False); self.update_status()
+
     def on_prop_changed(self):
         sel = self.timeline_widget.selected_segment
-        if sel: self.push_undo(); sel.volume = self.vol_slider.value() / 100.0; sel.pan = self.pan_slider.value() / 100.0; sel.pitch_shift = self.pitch_combo.currentData(); sel.is_primary = self.prim_check.isChecked(); self.timeline_widget.update(); self.update_status()
+        if sel:
+            self.push_undo()
+            sel.volume = self.vol_slider.value() / 100.0
+            sel.pan = self.pan_slider.value() / 100.0
+            sel.pitch_shift = self.pitch_combo.currentData()
+            sel.is_primary = self.prim_check.isChecked()
+            sel.is_ambient = self.amb_check.isChecked()
+            self.timeline_widget.update()
+            self.update_status()
     def duplicate_segment(self, ts):
         td = {'id': ts.id, 'filename': ts.filename, 'file_path': ts.file_path, 'bpm': ts.bpm, 'harmonic_key': ts.key, 'onsets_json': ",".join([str(x/1000.0) for x in ts.onsets])}
         ns = self.timeline_widget.add_track(td, start_ms=ts.start_ms + ts.duration_ms, lane=ts.lane); ns.duration_ms = ts.duration_ms; ns.offset_ms = ts.offset_ms; ns.volume = ts.volume; ns.pitch_shift = ts.pitch_shift; ns.is_primary = ts.is_primary; ns.fade_in_ms = ts.fade_in_ms; ns.fade_out_ms = ts.fade_out_ms; ns.waveform = ts.waveform; self.timeline_widget.update_geometry(); self.timeline_widget.update()
@@ -498,15 +516,26 @@ class AudioSequencerApp(QMainWindow):
             conn.close(); self.loading_overlay.hide_loading(); QMessageBox.information(self, "Complete", "Indexed!")
         except Exception as e: self.loading_overlay.hide_loading(); show_error(self, "AI Error", "Failed.", e)
     def update_recommendations(self, tid):
+        if not self.scorer:
+            self.rec_list.setRowCount(0); return
         try:
-            conn = self.dm.get_conn(); conn.row_factory = sqlite3_factory; cursor = conn.cursor(); cursor.execute("SELECT * FROM tracks WHERE id = ?",(tid,)); target = dict(cursor.fetchone()); te = self.dm.get_embedding(target['clp_embedding_id']) if target['clp_embedding_id'] else None; cursor.execute("SELECT * FROM tracks WHERE id != ?", (tid,)); others = cursor.fetchall(); results = []
+            tid = int(tid)
+            conn = self.dm.get_conn(); conn.row_factory = sqlite3_factory; cursor = conn.cursor()
+            cursor.execute("SELECT * FROM tracks WHERE id = ?",(tid,)); target = dict(cursor.fetchone())
+            te = self.dm.get_embedding(target['clp_embedding_id']) if target['clp_embedding_id'] else None
+            cursor.execute("SELECT * FROM tracks WHERE id != ?", (tid,)); others = cursor.fetchall()
+            results = []
             for o in others:
-                od = dict(o); oe = self.dm.get_embedding(od['clp_embedding_id']) if od['clp_embedding_id'] else None; sd = self.scorer.get_total_score(target, od, te, oe); results.append((sd, od))
+                od = dict(o); oe = self.dm.get_embedding(od['clp_embedding_id']) if od['clp_embedding_id'] else None
+                sd = self.scorer.get_total_score(target, od, te, oe); results.append((sd, od))
             results.sort(key=lambda x: x[0]['total'], reverse=True); self.rec_list.setRowCount(0)
             for sc, ot in results[:15]:
-                ri = self.rec_list.rowCount(); self.rec_list.insertRow(ri); si = QTableWidgetItem(f"{sc['total']}%"); si.setData(Qt.ItemDataRole.UserRole, ot['id']); si.setToolTip(f"BPM: {sc['bpm_score']}% | Har: {sc['harmonic_score']}% | Sem: {sc['semantic_score']}%\nGroove: {sc.get('groove_score', 0)}% | Energy: {sc.get('energy_score', 0)}%"); self.rec_list.setItem(ri, 0, si); ni = QTableWidgetItem(ot['filename']); ni.setForeground(QBrush(QColor(0, 255, 100)) if sc['harmonic_score'] >= 80 else QBrush(QColor(255, 255, 255))); self.rec_list.setItem(ri, 1, ni)
+                ri = self.rec_list.rowCount(); self.rec_list.insertRow(ri); si = QTableWidgetItem(f"{sc['total']}%"); si.setData(Qt.ItemDataRole.UserRole, ot['id'])
+                si.setToolTip(f"BPM: {sc['bpm_score']}% | Har: {sc['harmonic_score']}% | Sem: {sc['semantic_score']}%\nGroove: {sc.get('groove_score', 0)}% | Energy: {sc.get('energy_score', 0)}%")
+                self.rec_list.setItem(ri, 0, si); ni = QTableWidgetItem(ot['filename']); ni.setForeground(QBrush(QColor(0, 255, 100)) if sc['harmonic_score'] >= 80 else QBrush(QColor(255, 255, 255))); self.rec_list.setItem(ri, 1, ni)
             conn.close()
-        except: pass
+        except Exception as e:
+            print(f"[RECS] Error updating recommendations: {e}")
     def play_selected(self):
         if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState: self.player.pause()
         else: self.player.play()
