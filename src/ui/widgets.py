@@ -138,7 +138,25 @@ class TimelineWidget(QWidget):
         self.loop_end_ms = 30000
         self.loop_enabled = False
         self.scorer = CompatibilityScorer()
+        self.silence_regions = []
         self.update_geometry()
+
+    def find_silence_regions(self):
+        """Analyzes timeline to find gaps where no audio is playing."""
+        if not self.segments: return []
+        ss = sorted(self.segments, key=lambda s: s.start_ms)
+        gaps = []
+        if ss[0].start_ms > 500: gaps.append((0, ss[0].start_ms))
+        for i in range(len(ss) - 1):
+            curr_end = ss[i].start_ms + ss[i].duration_ms
+            next_start = ss[i+1].start_ms
+            if next_start > curr_end + 500:
+                is_gap_real = True
+                for other in self.segments:
+                    if other.start_ms < next_start - 100 and (other.start_ms + other.duration_ms) > curr_end + 100:
+                        is_gap_real = False; break
+                if is_gap_real: gaps.append((curr_end, next_start))
+        self.silence_regions = gaps; return gaps
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasText():
@@ -178,6 +196,14 @@ class TimelineWidget(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.fillRect(self.rect(), QColor(25, 25, 25))
         
+        # Draw Silence Guard Warnings
+        for start, end in self.silence_regions:
+            sx = int(start * self.pixels_per_ms)
+            sw = int((end - start) * self.pixels_per_ms)
+            painter.fillRect(sx, 0, sw, 40, QColor(255, 50, 50, 80))
+            painter.setPen(QPen(QColor(255, 50, 50, 150), 1))
+            painter.drawText(sx + 2, 38, "⚠ GAP")
+
         if self.loop_enabled:
             lx = int(self.loop_start_ms * self.pixels_per_ms)
             lw = int((self.loop_end_ms - self.loop_start_ms) * self.pixels_per_ms)

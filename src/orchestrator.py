@@ -205,6 +205,7 @@ class FullMixOrchestrator:
 
     def get_hyper_segments(self, seed_track=None, start_time_ms=0):
         """Returns the segment data for a hyper-mix without rendering it."""
+        import random
         conn = self.dm.get_conn()
         conn.row_factory = lambda cursor, row: {col[0]: row[idx] for idx, col in enumerate(cursor.description)}
         cursor = conn.cursor()
@@ -214,35 +215,41 @@ class FullMixOrchestrator:
 
         if len(all_tracks) < 8: return []
 
-        # Categorize
+        # 1. Randomize and Categorize
+        random.shuffle(all_tracks) # High variety
         all_tracks.sort(key=lambda x: x.get('energy', 0), reverse=True)
-        drums = all_tracks[:3]
-        others = all_tracks[3:]
+        drums = all_tracks[:int(len(all_tracks)*0.3)] # Top 30% are drums
+        others = all_tracks[int(len(all_tracks)*0.3):]
         
+        # Varied Block durations (Multiples of 4s)
+        def rnd_dur(base): return base + (random.randint(-1, 1) * 4000)
+
         blocks = [
             {'name': 'Intro', 'dur': 16000},
-            {'name': 'Verse 1', 'dur': 32000},
+            {'name': 'Verse 1', 'dur': rnd_dur(32000)},
             {'name': 'Build', 'dur': 16000},
-            {'name': 'Drop', 'dur': 32000},
-            {'name': 'Verse 2', 'dur': 32000},
-            {'name': 'Outro', 'dur': 32000}
+            {'name': 'Drop', 'dur': rnd_dur(32000)},
+            {'name': 'Verse 2', 'dur': rnd_dur(32000)},
+            {'name': 'Outro', 'dur': 20000}
         ]
         
         segments = []
         current_ms = start_time_ms
-        main_drum = drums[0]
-        bass_track = next((t for t in others if t['harmonic_key'] == main_drum['harmonic_key']), others[0])
-        melodic_leads = others[1:5]
-        fx_tracks = others[5:8]
+        
+        # Pick main components with randomness
+        main_drum = random.choice(drums)
+        bass_track = random.choice([t for t in others if t['harmonic_key'] == main_drum['harmonic_key']] or [others[0]])
+        random.shuffle(others)
+        melodic_leads = others[:6]
+        fx_tracks = others[6:10]
 
         # Generate Grain Cloud for Intro/Outro
         os.makedirs("generated_assets", exist_ok=True)
-        cloud_path = os.path.abspath(f"generated_assets/grain_cloud_{main_drum['id']}.wav")
+        cloud_path = os.path.abspath(f"generated_assets/grain_cloud_{main_drum['id']}_{random.randint(0,999)}.wav")
         if not os.path.exists(cloud_path):
-            try: self.processor.generate_grain_cloud(melodic_leads[0]['file_path'], cloud_path, duration=20.0)
+            try: self.processor.generate_grain_cloud(random.choice(melodic_leads)['file_path'], cloud_path, duration=20.0)
             except: cloud_path = melodic_leads[0]['file_path']
 
-        # Production Constant: Overlap blocks
         overlap = 4000 
 
         def find_free_lane(start, dur, preferred=None):
@@ -322,7 +329,8 @@ class FullMixOrchestrator:
                 segments.append({
                     'id': glue['id'], 'filename': "ATMOS GLUE", 'file_path': glue['file_path'], 'bpm': glue['bpm'], 'harmonic_key': glue['harmonic_key'],
                     'start_ms': current_ms, 'duration_ms': b_dur + overlap, 'offset_ms': 0,
-                    'volume': 0.4, 'lane': lane, 'low_cut': 600, 'high_cut': 8000, 'fade_in_ms': 5000, 'fade_out_ms': 5000,
+                    'volume': random.uniform(0.3, 0.5), 'lane': lane, 'low_cut': 600, 'high_cut': 8000, 'fade_in_ms': 5000, 'fade_out_ms': 5000,
+                    'pan': random.uniform(-0.4, 0.4),
                     'is_ambient': True
                 })
 

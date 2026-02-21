@@ -371,6 +371,12 @@ class AudioSequencerApp(QMainWindow):
                 if s2.start_ms < (s1.start_ms + s1.duration_ms + 2000):
                     if self.scorer and self.scorer.calculate_harmonic_score(s1.key, s2.key) < 60: fs -= 10
             at += f"<b>Flow Health:</b> {max(0, fs)}%<br>"
+            
+            # Silence Guard Check
+            gaps = self.timeline_widget.find_silence_regions()
+            if gaps:
+                at += f"<br><span style='color: #ff5555;'>⚠ <b>Silence Guard:</b> {len(gaps)} gaps detected!</span>"
+            
             if self.timeline_widget.selected_segment:
                 sel = self.timeline_widget.selected_segment; at += f"<hr><b>Selected Clip:</b><br>{sel.filename[:20]}<br>Key: {sel.key}"
                 if self.scorer:
