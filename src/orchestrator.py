@@ -239,7 +239,7 @@ class FullMixOrchestrator:
         print(f"SUCCESS: Hyper-journey created at {os.path.abspath(output_path)}")
         return output_path
 
-    def get_hyper_segments(self, seed_track=None):
+    def get_hyper_segments(self, seed_track=None, start_time_ms=0):
         """Returns the segment data for a hyper-mix without rendering it."""
         conn = self.dm.get_conn()
         conn.row_factory = lambda cursor, row: {col[0]: row[idx] for idx, col in enumerate(cursor.description)}
@@ -250,6 +250,7 @@ class FullMixOrchestrator:
 
         if len(all_tracks) < 8: return []
 
+        # Use seed if provided to influence selection
         all_tracks.sort(key=lambda x: x.get('energy', 0), reverse=True)
         drums = all_tracks[:3]
         others = all_tracks[3:]
@@ -264,7 +265,7 @@ class FullMixOrchestrator:
         ]
         
         segments = []
-        current_ms = 0
+        current_ms = start_time_ms
         main_drum = drums[0]
         bass_track = next((t for t in others if t['harmonic_key'] == main_drum['harmonic_key']), others[0])
         melodic_leads = others[1:5]

@@ -384,28 +384,69 @@ class AudioSequencerApp(QMainWindow):
     def on_rec_double_clicked(self, i): self.add_track_by_id(self.rec_list.item(i.row(), 0).data(Qt.ItemDataRole.UserRole))
     def auto_populate_timeline(self):
         if not self.ai_enabled: QMessageBox.warning(self, "AI Disabled", "AI Engine Offline."); return
-        if not self.selected_library_track: self.status_bar.showMessage("Select seed track."); return
-        self.push_undo(); self.loading_overlay.show_loading("AI Orchestrating..."); seq = self.orchestrator.find_curated_sequence(max_tracks=8, seed_track=self.selected_library_track)
+        
+        # Use existing timeline state if available
+        seed = self.selected_library_track
+        start_ms = 0
+        
+        if self.timeline_widget.segments:
+            # Find the latest track to continue from it
+            last_seg = max(self.timeline_widget.segments, key=lambda s: s.start_ms + s.duration_ms)
+            start_ms = last_seg.start_ms + last_seg.duration_ms - 8000 # 8s overlap
+            # Use last track as seed if nothing specifically selected in library
+            if not seed:
+                try:
+                    conn = self.dm.get_conn(); conn.row_factory = sqlite3_factory; cursor = conn.cursor()
+                    cursor.execute("SELECT * FROM tracks WHERE id = ?", (last_seg.id,))
+                    seed = dict(cursor.fetchone()); conn.close()
+                except: pass
+
+        if not seed:
+            self.status_bar.showMessage("Select a track in the library to start the path.")
+            return
+
+        self.push_undo(); self.loading_overlay.show_loading("AI Continuing Path...")
+        # Get sequence starting from seed
+        seq = self.orchestrator.find_curated_sequence(max_tracks=4, seed_track=seed)
+        
         if seq:
-            self.timeline_widget.segments = []; cm = 0
+            # If we used the last track as seed, skip it in the sequence to avoid duplicates
+            if self.timeline_widget.segments and seq[0]['id'] == last_seg.id:
+                seq = seq[1:]
+                
+            cm = start_ms
             for i, t in enumerate(seq):
                 is_f = (i % 2 == 0); lane = 0 if is_f else (1 if i % 4 == 1 else 2); dur = 30000 if is_f else 15000; sm = cm
-                if is_f and i > 0: sm -= 8000
-                elif not is_f: sm = cm - 25000
+                # Overlap logic for continuation
+                if i > 0:
+                    if is_f: sm -= 8000
+                    else: sm = cm - 25000
+                
                 seg = self.timeline_widget.add_track(t, start_ms=max(0, sm), lane=lane); seg.duration_ms = dur; seg.is_primary = is_f; seg.fade_in_ms = seg.fade_out_ms = 4000; self.load_waveform_async(seg)
                 if is_f: cm = sm + dur
+            
             self.timeline_widget.update_geometry()
+            self.status_bar.showMessage(f"AI: Added {len(seq)} compatible tracks to the journey.")
+        
         self.loading_overlay.hide_loading()
     def auto_populate_hyper_mix(self):
         if not self.ai_enabled: QMessageBox.warning(self, "AI Disabled", "AI Engine Offline."); return
-        self.push_undo(); self.loading_overlay.show_loading("Synthesizing Hyper-Mix..."); 
+        
+        start_ms = 0
+        if self.timeline_widget.segments:
+            last_seg = max(self.timeline_widget.segments, key=lambda s: s.start_ms + s.duration_ms)
+            start_ms = last_seg.start_ms + last_seg.duration_ms
+            
+        self.push_undo(); self.loading_overlay.show_loading("Synthesizing Hyper-Mix...")
+        
         try:
-            h_segs = self.orchestrator.get_hyper_segments()
+            h_segs = self.orchestrator.get_hyper_segments(seed_track=self.selected_library_track, start_time_ms=start_ms)
             if h_segs:
-                self.timeline_widget.segments = []
+                # We don't clear anymore, we append
                 for sd in h_segs:
-                    seg = self.timeline_widget.add_track(sd, start_ms=sd['start_ms'], lane=sd['lane']); seg.duration_ms = sd['duration_ms']; seg.offset_ms = sd['offset_ms']; seg.volume = sd['volume']; seg.pan = sd.get('pan', 0.0); seg.is_primary = sd.get('is_primary', False); seg.pitch_shift = sd.get('pitch_shift', 0); seg.low_cut = sd.get('low_cut', 20); seg.high_cut = sd.get('high_cut', 20000); seg.fade_in_ms = sd['fade_in_ms']; seg.fade_out_ms = sd['fade_out_ms']; self.load_waveform_async(seg)
-                self.timeline_widget.update_geometry(); self.status_bar.showMessage(f"AI: Generated {len(h_segs)} segments.")
+                    seg = self.timeline_widget.add_track(sd, start_ms=sd['start_ms'], lane=sd['lane'])
+                    seg.duration_ms = sd['duration_ms']; seg.offset_ms = sd['offset_ms']; seg.volume = sd['volume']; seg.pan = sd.get('pan', 0.0); seg.is_primary = sd.get('is_primary', False); seg.pitch_shift = sd.get('pitch_shift', 0); seg.low_cut = sd.get('low_cut', 20); seg.high_cut = sd.get('high_cut', 20000); seg.fade_in_ms = sd['fade_in_ms']; seg.fade_out_ms = sd['fade_out_ms']; self.load_waveform_async(seg)
+                self.timeline_widget.update_geometry(); self.status_bar.showMessage(f"AI: Appended Hyper-Mix structure to the journey.")
             self.loading_overlay.hide_loading()
         except Exception as e: self.loading_overlay.hide_loading(); show_error(self, "Hyper Error", "Failed.", e)
     def render_timeline(self):
