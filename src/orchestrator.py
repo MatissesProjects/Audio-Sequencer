@@ -156,64 +156,61 @@ class FullMixOrchestrator:
             b_name = block['name']
             b_dur = block['dur']
             
-            # --- LANE 0: Rhythmic Foundation ---
-            if b_name != 'Intro':
-                # On 'Build', we might chop the drums
-                if b_name == 'Build':
-                    # Micro-Chopping: 4-bar repeat with rising high-pass
-                    for sub in range(0, b_dur, 4000):
-                        segments.append({
-                            'file_path': main_drum['file_path'], 'bpm': main_drum['bpm'],
-                            'start_ms': current_ms + sub, 'duration_ms': 4000, 'offset_ms': (main_drum.get('loop_start') or 0)*1000,
-                            'volume': 0.9, 'is_primary': True, 'lane': 0,
-                            'low_cut': 100 + (sub/b_dur * 800), # Rising HPF
-                            'fade_in_ms': 100, 'fade_out_ms': 100
-                        })
-                else:
-                    segments.append({
-                        'file_path': main_drum['file_path'], 'bpm': main_drum['bpm'],
-                        'start_ms': current_ms, 'duration_ms': b_dur, 'offset_ms': (main_drum.get('loop_start') or 0)*1000,
-                        'volume': 1.0 if b_name == 'Drop' else 0.8, 'is_primary': True, 'lane': 0,
-                        'fade_in_ms': 2000, 'fade_out_ms': 2000
-                    })
+            # --- LANE 0: Rhythmic Foundation (THE HEART - Never stops) ---
+            # Extend foundation slightly into next block for seamless crossfade
+            segments.append({
+                'id': main_drum['id'], 'filename': main_drum['filename'], 'file_path': main_drum['file_path'], 'bpm': main_drum['bpm'], 'harmonic_key': main_drum['harmonic_key'],
+                'start_ms': current_ms, 'duration_ms': b_dur + 2000, 'offset_ms': (main_drum.get('loop_start') or 0)*1000,
+                'volume': 1.0 if b_name == 'Drop' else 0.8, 'is_primary': True, 'lane': 0,
+                'fade_in_ms': 2000 if blocks.index(block) == 0 else 4000, 
+                'fade_out_ms': 4000
+            })
 
             # --- LANE 1: Harmonic Body (Bass) ---
             if b_name in ['Verse 1', 'Drop', 'Verse 2']:
                 segments.append({
-                    'file_path': bass_track['file_path'], 'bpm': bass_track['bpm'],
+                    'id': bass_track['id'], 'filename': bass_track['filename'], 'file_path': bass_track['file_path'], 'bpm': bass_track['bpm'], 'harmonic_key': bass_track['harmonic_key'],
                     'start_ms': current_ms, 'duration_ms': b_dur, 'offset_ms': (bass_track.get('loop_start') or 0)*1000,
                     'volume': 0.9, 'is_primary': False, 'lane': 1,
                     'fade_in_ms': 3000, 'fade_out_ms': 3000
                 })
 
             # --- LANE 2/3: Atmosphere & Melodic Layers ---
-            # Pick a melodic lead based on block
             lead = melodic_leads[blocks.index(block) % len(melodic_leads)]
-            if b_name != 'Build':
-                # Sectional Pitching: Drop is +1 semitone for energy? No, let's keep harmonic.
-                # Let's do a 'Reprise' in Verse 2 with pitch shift
-                ps = 0
-                if b_name == 'Verse 2': ps = -2 # Change vibe for second verse
-                
+            if b_name == 'Build':
+                # Exponential Micro-Chopping: 4s -> 2s -> 1s -> 0.5s
+                # To make it feel rhythmic and good with background
+                sub_durs = [4000, 4000, 2000, 2000, 1000, 1000, 1000, 1000] # Total 16s
+                sub_start = 0
+                for idx, sd in enumerate(sub_durs):
+                    segments.append({
+                        'id': lead['id'], 'filename': f"CHOP {idx}", 'file_path': lead['file_path'], 'bpm': lead['bpm'], 'harmonic_key': lead['harmonic_key'],
+                        'start_ms': current_ms + sub_start, 'duration_ms': sd, 'offset_ms': (lead.get('loop_start') or 0)*1000,
+                        'volume': 0.7 + (idx/len(sub_durs) * 0.3),
+                        'lane': 2, 'pitch_shift': int(idx/2), # Rising Pitch
+                        'low_cut': 200 + (idx * 100), # Rising HPF
+                        'fade_in_ms': 50, 'fade_out_ms': 50
+                    })
+                    sub_start += sd
+            elif b_name != 'Intro':
+                ps = -2 if b_name == 'Verse 2' else 0
                 segments.append({
-                    'file_path': lead['file_path'], 'bpm': lead['bpm'],
+                    'id': lead['id'], 'filename': lead['filename'], 'file_path': lead['file_path'], 'bpm': lead['bpm'], 'harmonic_key': lead['harmonic_key'],
                     'start_ms': current_ms, 'duration_ms': b_dur, 'offset_ms': (lead.get('loop_start') or 0)*1000,
                     'volume': 0.7, 'pan': -0.5 if blocks.index(block) % 2 == 0 else 0.5,
-                    'is_primary': False, 'lane': 2 + (blocks.index(block) % 2),
-                    'pitch_shift': ps,
-                    'low_cut': 400, # Keep melodic layers out of bass way
-                    'fade_in_ms': 4000, 'fade_out_ms': 4000
+                    'is_primary': False, 'lane': 3, 'pitch_shift': ps,
+                    'low_cut': 400, 'fade_in_ms': 4000, 'fade_out_ms': 4000
                 })
 
-            # --- LANE 4: FX & Transitions ---
-            if b_name == 'Build':
-                # Add an FX riser
-                fx = fx_tracks[0]
-                segments.append({
-                    'file_path': fx['file_path'], 'bpm': fx['bpm'],
-                    'start_ms': current_ms, 'duration_ms': b_dur, 'offset_ms': 0,
-                    'volume': 0.6, 'lane': 4, 'fade_in_ms': b_dur - 1000, 'fade_out_ms': 500
-                })
+            # --- LANE 4: Atmosphere Glue (The Floor) ---
+            # Fill gaps with low-volume FX or atmosphere
+            glue = fx_tracks[blocks.index(block) % len(fx_tracks)]
+            segments.append({
+                'id': glue['id'], 'filename': "ATMOS GLUE", 'file_path': glue['file_path'], 'bpm': glue['bpm'], 'harmonic_key': glue['harmonic_key'],
+                'start_ms': current_ms, 'duration_ms': b_dur + 1000, 'offset_ms': 0,
+                'volume': 0.4, 'lane': 4, 'low_cut': 600, 'high_cut': 8000, # Mid-focused glue
+                'fade_in_ms': 5000, 'fade_out_ms': 5000
+            })
 
             current_ms += b_dur
 
