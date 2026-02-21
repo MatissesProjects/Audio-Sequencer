@@ -24,6 +24,12 @@ from src.ui.dialogs import show_error
 from src.ui.threads import SearchThread, IngestionThread, WaveformLoader, AIInitializerThread
 from src.ui.widgets import TimelineWidget, DraggableTable, LibraryWaveformPreview, LoadingOverlay
 
+def sqlite3_factory(cursor, row):
+    d = {}
+    for idx, col in enumerate(cursor.description):
+        d[col[0]] = row[idx]
+    return d
+
 class AudioSequencerApp(QMainWindow):
     def __init__(self):
         boot_start = time.time()
