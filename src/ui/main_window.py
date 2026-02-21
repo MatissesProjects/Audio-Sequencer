@@ -463,6 +463,13 @@ class AudioSequencerApp(QMainWindow):
         elif event.modifiers() & Qt.KeyboardModifier.ControlModifier:
             if event.key() == Qt.Key.Key_Z: self.undo()
             elif event.key() == Qt.Key.Key_Y: self.redo()
+            elif event.key() == Qt.Key.Key_B:
+                # Blade Tool: Split selected at cursor
+                sel = self.timeline_widget.selected_segment
+                if sel:
+                    cur_x = self.timeline_widget.cursor_pos_ms * self.timeline_widget.pixels_per_ms
+                    self.push_undo()
+                    self.timeline_widget.split_segment(sel, cur_x)
         else: super().keyPressEvent(event)
 
 if __name__ == "__main__":

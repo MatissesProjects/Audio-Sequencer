@@ -95,9 +95,10 @@ class TimelineWidget(QWidget):
         self.segments = []
         self.setMinimumHeight(550)
         self.setAcceptDrops(True)
+        self.setMouseTracking(True) # Enabled for dynamic cursor updates
         self.pixels_per_ms = 0.05
         self.selected_segment = None
-        self.dragging = self.resizing = self.vol_dragging = self.fade_in_dragging = self.fade_out_dragging = self.slipping = self.setting_loop = self.resizing_timeline = False
+        self.dragging = self.resizing = self.resizing_left = self.vol_dragging = self.fade_in_dragging = self.fade_out_dragging = self.slipping = self.setting_loop = self.resizing_timeline = False
         self.drag_start_pos = None
         self.drag_start_ms = self.drag_start_dur = self.drag_start_fade = self.drag_start_offset = 0
         self.drag_start_vol = 1.0
@@ -413,7 +414,9 @@ class TimelineWidget(QWidget):
                 
                 if event.modifiers() & Qt.KeyboardModifier.AltModifier:
                     self.slipping = True
-                elif event.pos().x() > (r.right() - 20):
+                elif event.position().x() < (r.left() + 20): # Left Edge
+                    self.resizing_left = True
+                elif event.position().x() > (r.right() - 20): # Right Edge
                     self.resizing = True
                 elif event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
                     self.vol_dragging = True
@@ -484,6 +487,22 @@ class TimelineWidget(QWidget):
                     self.aiTransitionRequested.emit(event.pos().x())
 
     def mouseMoveEvent(self, event):
+        # Update Cursor based on hover position (if not dragging)
+        if not any([self.dragging, self.resizing, self.resizing_left, self.vol_dragging, self.fade_in_dragging, self.fade_out_dragging, self.slipping]):
+            over_edge = False
+            for seg in self.segments:
+                r = self.get_seg_rect(seg)
+                if r.contains(event.pos()):
+                    if event.position().x() < (r.left() + 20) or event.position().x() > (r.right() - 20):
+                        self.setCursor(Qt.CursorShape.SizeHorCursor)
+                        over_edge = True
+                    else:
+                        self.setCursor(Qt.CursorShape.PointingHandCursor)
+                        over_edge = True
+                    break
+            if not over_edge:
+                self.setCursor(Qt.CursorShape.ArrowCursor)
+
         if self.resizing_timeline:
             self.setMinimumHeight(max(400, self.drag_start_h + (event.pos().y() - self.drag_start_pos.y())))
             self.update_geometry()
@@ -503,6 +522,20 @@ class TimelineWidget(QWidget):
 
         if self.slipping:
             self.selected_segment.offset_ms = max(0, self.drag_start_offset - dx/self.pixels_per_ms)
+        elif self.resizing_left:
+            # Resize from start: adjust both start_ms and offset_ms
+            delta_ms = dx / self.pixels_per_ms
+            if self.snap_to_grid:
+                new_start = round((self.drag_start_ms + delta_ms) / mpb) * mpb
+                actual_delta = new_start - self.drag_start_ms
+            else:
+                actual_delta = delta_ms
+            
+            # Constraints: don't let duration go below 500ms
+            if self.drag_start_dur - actual_delta > 500:
+                self.selected_segment.start_ms = self.drag_start_ms + actual_delta
+                self.selected_segment.offset_ms = max(0, self.drag_start_offset + actual_delta)
+                self.selected_segment.duration_ms = self.drag_start_dur - actual_delta
         elif self.fade_in_dragging:
             rf = self.drag_start_fade + dx/self.pixels_per_ms
             if self.snap_to_grid:
@@ -540,7 +573,7 @@ class TimelineWidget(QWidget):
         self.timelineChanged.emit()
 
     def mouseReleaseEvent(self, event):
-        self.dragging = self.resizing = self.vol_dragging = self.fade_in_dragging = self.fade_out_dragging = self.slipping = self.setting_loop = self.resizing_timeline = False
+        self.dragging = self.resizing = self.resizing_left = self.vol_dragging = self.fade_in_dragging = self.fade_out_dragging = self.slipping = self.setting_loop = self.resizing_timeline = False
         self.update_geometry()
 
     def wheelEvent(self, event):
