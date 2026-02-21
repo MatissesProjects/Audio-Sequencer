@@ -142,21 +142,53 @@ class TimelineWidget(QWidget):
         self.update_geometry()
 
     def find_silence_regions(self):
-        """Analyzes timeline to find gaps where no audio is playing."""
+        """Analyzes timeline energy to find gaps where volume is below threshold."""
         if not self.segments: return []
-        ss = sorted(self.segments, key=lambda s: s.start_ms)
+        
+        # Determine total length to scan
+        total_len = max(s.start_ms + s.duration_ms for s in self.segments)
+        
         gaps = []
-        if ss[0].start_ms > 500: gaps.append((0, ss[0].start_ms))
-        for i in range(len(ss) - 1):
-            curr_end = ss[i].start_ms + ss[i].duration_ms
-            next_start = ss[i+1].start_ms
-            if next_start > curr_end + 500:
-                is_gap_real = True
-                for other in self.segments:
-                    if other.start_ms < next_start - 100 and (other.start_ms + other.duration_ms) > curr_end + 100:
-                        is_gap_real = False; break
-                if is_gap_real: gaps.append((curr_end, next_start))
-        self.silence_regions = gaps; return gaps
+        step_ms = 500 # Scan every 0.5s
+        threshold = 0.15 # 15% combined volume is "quiet"
+        
+        in_gap = False
+        gap_start = 0
+        
+        import math
+        
+        for t in range(0, int(total_len), step_ms):
+            combined_vol = 0.0
+            for s in self.segments:
+                if s.start_ms <= t <= (s.start_ms + s.duration_ms):
+                    # Calculate segment volume at time t
+                    seg_v = s.volume
+                    rel_t = t - s.start_ms
+                    
+                    # Apply Fades (Linear approximation for detector)
+                    if rel_t < s.fade_in_ms and s.fade_in_ms > 0:
+                        seg_v *= (rel_t / s.fade_in_ms)
+                    elif rel_t > (s.duration_ms - s.fade_out_ms) and s.fade_out_ms > 0:
+                        seg_v *= ((s.duration_ms - rel_t) / s.fade_out_ms)
+                    
+                    combined_vol += seg_v
+            
+            if combined_vol < threshold:
+                if not in_gap:
+                    in_gap = True
+                    gap_start = t
+            else:
+                if in_gap:
+                    in_gap = False
+                    if t - gap_start > 500: # Only mark gaps longer than 0.5s
+                        gaps.append((gap_start, t))
+        
+        # Close final gap if it exists
+        if in_gap:
+            gaps.append((gap_start, total_len))
+            
+        self.silence_regions = gaps
+        return gaps
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasText():

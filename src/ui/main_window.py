@@ -153,9 +153,10 @@ class AudioSequencerApp(QMainWindow):
         
         self.prop_group = QFrame(); self.prop_group.setStyleSheet("background-color: #252525; border: 1px solid #444; border-radius: 8px; padding: 15px; margin-top: 10px;")
         pl = QVBoxLayout(self.prop_group); pl.addWidget(QLabel("<h3>🔍 Track Inspector</h3>"))
-        vl = QHBoxLayout(); vl.addWidget(QLabel("Vol:")); self.vol_slider = QSlider(Qt.Orientation.Horizontal); self.vol_slider.setRange(0, 150); self.vol_slider.valueChanged.connect(self.on_prop_changed); vl.addWidget(self.vol_slider); pl.addLayout(vl)
-        pal = QHBoxLayout(); pal.addWidget(QLabel("Pan:")); self.pan_slider = QSlider(Qt.Orientation.Horizontal); self.pan_slider.setRange(-100, 100); self.pan_slider.setValue(0); self.pan_slider.valueChanged.connect(self.on_prop_changed); pal.addWidget(self.pan_slider); pl.addLayout(pal)
-        pil = QHBoxLayout(); pil.addWidget(QLabel("Pitch:")); self.pitch_combo = QComboBox(); [self.pitch_combo.addItem(f"{i:+} st", i) for i in range(-6, 7)]; self.pitch_combo.currentIndexChanged.connect(self.on_prop_changed); pil.addWidget(self.pitch_combo); pl.addLayout(pil)
+        
+        vl = QHBoxLayout(); l_vol = QLabel("<b>Volume:</b>"); l_vol.setFixedWidth(60); vl.addWidget(l_vol); self.vol_slider = QSlider(Qt.Orientation.Horizontal); self.vol_slider.setRange(0, 150); self.vol_slider.valueChanged.connect(self.on_prop_changed); vl.addWidget(self.vol_slider); pl.addLayout(vl)
+        pal = QHBoxLayout(); l_pan = QLabel("<b>Panning:</b>"); l_pan.setFixedWidth(60); pal.addWidget(l_pan); self.pan_slider = QSlider(Qt.Orientation.Horizontal); self.pan_slider.setRange(-100, 100); self.pan_slider.setValue(0); self.pan_slider.valueChanged.connect(self.on_prop_changed); pal.addWidget(self.pan_slider); pl.addLayout(pal)
+        pil = QHBoxLayout(); l_pitch = QLabel("<b>Pitch:</b>"); l_pitch.setFixedWidth(60); pil.addWidget(l_pitch); self.pitch_combo = QComboBox(); [self.pitch_combo.addItem(f"{i:+} st", i) for i in range(-6, 7)]; self.pitch_combo.currentIndexChanged.connect(self.on_prop_changed); pil.addWidget(self.pitch_combo); pl.addLayout(pil)
         self.prim_check = QCheckBox("Primary Foundation Track"); self.prim_check.stateChanged.connect(self.on_prop_changed); pl.addWidget(self.prim_check)
         self.amb_check = QCheckBox("Ambient Background Track"); self.amb_check.stateChanged.connect(self.on_prop_changed); pl.addWidget(self.amb_check)
         self.prop_group.setVisible(False); rl.addWidget(self.prop_group)
