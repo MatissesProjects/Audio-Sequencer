@@ -17,6 +17,12 @@ class DraggableTable(QTableWidget):
                     mime = QMimeData()
                     mime.setText(str(tid))
                     drag.setMimeData(mime)
+                    
+                    # Visual representation of the clip being dragged
+                    pixmap = self.viewport().grab(self.visualItemRect(item))
+                    drag.setPixmap(pixmap)
+                    drag.setHotSpot(QPoint(pixmap.width() // 2, pixmap.height() // 2))
+                    
                     drag.exec(Qt.DropAction.CopyAction)
         super().mousePressEvent(event)
 
@@ -119,7 +125,8 @@ class TimelineWidget(QWidget):
     def dropEvent(self, event):
         try:
             tid = int(event.mimeData().text())
-            self.trackDropped.emit(tid, event.position().x(), event.position().y())
+            pos = event.position()
+            self.trackDropped.emit(tid, int(pos.x()), int(pos.y()))
             event.acceptProposedAction()
         except:
             pass

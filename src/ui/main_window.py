@@ -184,8 +184,13 @@ class AudioSequencerApp(QMainWindow):
         self.setStyleSheet("""QMainWindow { background-color: #121212; color: #e0e0e0; font-family: 'Segoe UI'; } QLabel { color: #ffffff; } QTableWidget { background-color: #1e1e1e; gridline-color: #333; color: white; border: 1px solid #333; } QHeaderView::section { background-color: #333; color: white; border: 1px solid #444; padding: 5px; } QPushButton { background-color: #333; color: #fff; padding: 6px; border-radius: 4px; border: 1px solid #444; } QPushButton:hover { background-color: #444; } QLineEdit { background-color: #222; color: white; border: 1px solid #444; } QComboBox { background-color: #333; color: white; } QCheckBox { color: white; } QScrollBar:vertical { width: 12px; background: #222; } QScrollBar::handle:vertical { background: #444; border-radius: 6px; }""")
 
     def on_track_dropped(self, tid, x, y):
+        # Header is 40px tall, then lanes are (height + spacing)
+        # We use the widget's internal coordinates (x,y)
         lane = max(0, min(4, int((y - 40) // (self.timeline_widget.lane_height + self.timeline_widget.lane_spacing))))
+        print(f"[UI] Track {tid} dropped at x={x}, y={y} -> Lane {lane}")
         self.add_track_by_id(tid, x=x, lane=lane)
+        self.timeline_widget.update_geometry()
+        self.timeline_widget.update()
 
     def load_waveform_async(self, seg):
         l = WaveformLoader(seg, self.processor); l.waveformLoaded.connect(self.on_waveform_loaded); self.waveform_loaders.append(l); l.start()
