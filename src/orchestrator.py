@@ -336,3 +336,44 @@ class FullMixOrchestrator:
 
             current_ms += (b_dur - overlap) 
         return segments
+
+    def find_best_filler_for_gap(self, prev_track_id=None, next_track_id=None):
+        """Finds the most compatible track to fill a gap between two others (or just vibe match)."""
+        conn = self.dm.get_conn()
+        conn.row_factory = lambda cursor, row: {col[0]: row[idx] for idx, col in enumerate(cursor.description)}
+        cursor = conn.cursor()
+        
+        # Get all candidates
+        cursor.execute("SELECT * FROM tracks")
+        all_tracks = cursor.fetchall()
+        
+        prev_track = next((t for t in all_tracks if t['id'] == prev_track_id), None) if prev_track_id else None
+        next_track = next((t for t in all_tracks if t['id'] == next_track_id), None) if next_track_id else None
+        
+        conn.close()
+        if not all_tracks: return None
+
+        scored = []
+        for cand in all_tracks:
+            if prev_track and cand['id'] == prev_track['id']: continue
+            if next_track and cand['id'] == next_track['id']: continue
+            
+            c_emb = self.dm.get_embedding(cand['clp_embedding_id']) if cand['clp_embedding_id'] else None
+            
+            if prev_track and next_track:
+                # Use bridge scoring
+                score = self.scorer.calculate_bridge_score(prev_track, next_track, cand, c_emb=c_emb)
+            elif prev_track:
+                p_emb = self.dm.get_embedding(prev_track['clp_embedding_id']) if prev_track['clp_embedding_id'] else None
+                score = self.scorer.get_total_score(prev_track, cand, p_emb, c_emb)['total']
+            elif next_track:
+                n_emb = self.dm.get_embedding(next_track['clp_embedding_id']) if next_track['clp_embedding_id'] else None
+                score = self.scorer.get_total_score(next_track, cand, n_emb, c_emb)['total']
+            else:
+                # Just pick something energetic
+                score = cand.get('energy', 0) * 100
+                
+            scored.append((score, cand))
+            
+        scored.sort(key=lambda x: x[0], reverse=True)
+        return scored[0][1] if scored else None
