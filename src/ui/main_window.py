@@ -125,6 +125,9 @@ class AudioSequencerApp(QMainWindow):
         sl = QHBoxLayout(); self.search_bar = QLineEdit(); self.search_bar.setPlaceholderText("🔍 Semantic Search..."); self.search_bar.textChanged.connect(self.on_search_text_changed); self.search_bar.returnPressed.connect(self.trigger_semantic_search); sl.addWidget(self.search_bar)
         rsb = QPushButton("↺"); rsb.setFixedWidth(30); rsb.clicked.connect(self.load_library); sl.addWidget(rsb); ll.addLayout(sl)
         self.library_table = DraggableTable(0, 3); self.library_table.setHorizontalHeaderLabels(["Name", "BPM", "Key"]); self.library_table.setColumnWidth(0, 200); self.library_table.itemSelectionChanged.connect(self.on_library_track_selected); ll.addWidget(self.library_table)
+        
+        self.add_btn = QPushButton("➕ Add to Timeline"); self.add_btn.clicked.connect(self.add_selected_to_timeline); ll.addWidget(self.add_btn)
+        
         self.l_preview = LibraryWaveformPreview(); ll.addWidget(self.l_preview); self.l_wave_label = QLabel("Select to preview"); self.l_wave_label.setAlignment(Qt.AlignmentFlag.AlignCenter); self.l_wave_label.setStyleSheet("color: #666; font-size: 10px;"); ll.addWidget(self.l_wave_label)
         top_layout.addWidget(lp)
         
@@ -177,7 +180,12 @@ class AudioSequencerApp(QMainWindow):
         
         self.status_bar = QStatusBar(); self.setStatusBar(self.status_bar)
         self.timeline_widget.segmentSelected.connect(self.on_segment_selected); self.timeline_widget.timelineChanged.connect(self.update_status); self.timeline_widget.undoRequested.connect(self.push_undo); self.timeline_widget.cursorJumped.connect(self.on_cursor_jump); self.timeline_widget.bridgeRequested.connect(self.find_bridge_for_gap); self.timeline_widget.aiTransitionRequested.connect(self.generate_ai_transition); self.timeline_widget.duplicateRequested.connect(self.duplicate_segment); self.timeline_widget.captureRequested.connect(self.capture_segment_to_library); self.timeline_widget.zoomChanged.connect(lambda v: self.zs.setValue(v))
+        self.timeline_widget.trackDropped.connect(self.on_track_dropped)
         self.setStyleSheet("""QMainWindow { background-color: #121212; color: #e0e0e0; font-family: 'Segoe UI'; } QLabel { color: #ffffff; } QTableWidget { background-color: #1e1e1e; gridline-color: #333; color: white; border: 1px solid #333; } QHeaderView::section { background-color: #333; color: white; border: 1px solid #444; padding: 5px; } QPushButton { background-color: #333; color: #fff; padding: 6px; border-radius: 4px; border: 1px solid #444; } QPushButton:hover { background-color: #444; } QLineEdit { background-color: #222; color: white; border: 1px solid #444; } QComboBox { background-color: #333; color: white; } QCheckBox { color: white; } QScrollBar:vertical { width: 12px; background: #222; } QScrollBar::handle:vertical { background: #444; border-radius: 6px; }""")
+
+    def on_track_dropped(self, tid, x, y):
+        lane = max(0, min(4, int((y - 40) // (self.timeline_widget.lane_height + self.timeline_widget.lane_spacing))))
+        self.add_track_by_id(tid, x=x, lane=lane)
 
     def load_waveform_async(self, seg):
         l = WaveformLoader(seg, self.processor); l.waveformLoaded.connect(self.on_waveform_loaded); self.waveform_loaders.append(l); l.start()

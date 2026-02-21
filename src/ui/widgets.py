@@ -82,6 +82,7 @@ class TimelineWidget(QWidget):
     duplicateRequested = pyqtSignal(object) # TrackSegment
     captureRequested = pyqtSignal(object) # TrackSegment
     zoomChanged = pyqtSignal(int)
+    trackDropped = pyqtSignal(int, int, int) # tid, x, y
 
     def __init__(self):
         super().__init__()
@@ -110,6 +111,18 @@ class TimelineWidget(QWidget):
         self.loop_enabled = False
         self.scorer = CompatibilityScorer()
         self.update_geometry()
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasText():
+            event.acceptProposedAction()
+
+    def dropEvent(self, event):
+        try:
+            tid = int(event.mimeData().text())
+            self.trackDropped.emit(tid, event.position().x(), event.position().y())
+            event.acceptProposedAction()
+        except:
+            pass
 
     def update_geometry(self):
         max_ms = 600000
