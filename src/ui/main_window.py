@@ -286,6 +286,11 @@ class AudioSequencerApp(QMainWindow):
         self.agb = QPushButton("🪄 Auto-Generate Path")
         self.agb.clicked.connect(self.auto_populate_timeline)
         th.addWidget(self.agb)
+
+        self.h_mix_btn = QPushButton("💥 AI Hyper-Mix")
+        self.h_mix_btn.setStyleSheet("background-color: #552288; font-weight: bold;")
+        self.h_mix_btn.clicked.connect(self.auto_populate_hyper_mix)
+        th.addWidget(self.h_mix_btn)
         
         self.cb = QPushButton("🗑 Clear")
         self.cb.clicked.connect(self.clear_timeline)
@@ -914,6 +919,41 @@ class AudioSequencerApp(QMainWindow):
             self.timeline_widget.update_geometry()
             
         self.loading_overlay.hide_loading()
+
+    def auto_populate_hyper_mix(self):
+        if not self.ai_enabled:
+            QMessageBox.warning(self, "AI Disabled", "Hyper orchestration requires the AI Engine.")
+            return
+        self.push_undo()
+        self.loading_overlay.show_loading("Synthesizing Hyper-Mix Arrangement...")
+        
+        try:
+            h_segs = self.orchestrator.get_hyper_segments()
+            if h_segs:
+                self.timeline_widget.segments = []
+                for sd in h_segs:
+                    # Map dict data back to TrackSegment (without re-ingesting)
+                    seg = self.timeline_widget.add_track(sd, start_ms=sd['start_ms'], lane=sd['lane'])
+                    seg.duration_ms = sd['duration_ms']
+                    seg.offset_ms = sd['offset_ms']
+                    seg.volume = sd['volume']
+                    seg.pan = sd.get('pan', 0.0)
+                    seg.is_primary = sd.get('is_primary', False)
+                    seg.pitch_shift = sd.get('pitch_shift', 0)
+                    # We can't store low_cut in the segment object yet, let's add it
+                    if hasattr(seg, 'low_cut'): seg.low_cut = sd.get('low_cut', 20)
+                    if hasattr(seg, 'high_cut'): seg.high_cut = sd.get('high_cut', 20000)
+                    seg.fade_in_ms = sd['fade_in_ms']
+                    seg.fade_out_ms = sd['fade_out_ms']
+                    self.load_waveform_async(seg)
+                
+                self.timeline_widget.update_geometry()
+                self.status_bar.showMessage(f"AI: Generated {len(h_segs)} segments across 5 lanes.")
+            
+            self.loading_overlay.hide_loading()
+        except Exception as e:
+            self.loading_overlay.hide_loading()
+            show_error(self, "Hyper Mix Error", "Failed to generate hyper-mix.", e)
 
     def render_timeline(self):
         if not self.timeline_widget.segments:

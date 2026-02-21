@@ -108,8 +108,11 @@ class FullMixOrchestrator:
         print(f"SUCCESS: Curated journey created at {os.path.abspath(output_path)}")
         return output_path
 
-    def generate_layered_journey(self, output_path="layered_journey_mix.mp3", target_bpm=124, seed_track=None):
-        """Creates a long foundation track with other clips layered as interludes with auto-panning."""
+    def generate_hyper_mix(self, output_path="hyper_automated_mix.mp3", target_bpm=124, seed_track=None):
+        """
+        Creates a high-complexity 5-lane arrangement using micro-chopping, 
+        sectional pitch shifting, and automated filter carving.
+        """
         conn = self.dm.get_conn()
         conn.row_factory = lambda cursor, row: {col[0]: row[idx] for idx, col in enumerate(cursor.description)}
         cursor = conn.cursor()
@@ -117,74 +120,174 @@ class FullMixOrchestrator:
         all_tracks = cursor.fetchall()
         conn.close()
 
-        if len(all_tracks) < 5:
-            print("Need at least 5 tracks for a layered journey.")
+        if len(all_tracks) < 8:
+            print("Need at least 8 tracks for a Hyper Mix.")
             return
 
-        # 1. Foundation Selection
-        if seed_track:
-            foundation_track = next((t for t in all_tracks if t['id'] == seed_track['id']), all_tracks[0])
-        else:
-            foundation_track = all_tracks[0]
+        # 1. Component Selection (Categorize by Vibe/Energy)
+        # Sort by energy to find 'Drums/Foundation' vs 'Melodic/Atmosphere'
+        all_tracks.sort(key=lambda x: x.get('energy', 0), reverse=True)
+        drums = all_tracks[:3]
+        others = all_tracks[3:]
         
-        found_emb = self.dm.get_embedding(foundation_track['clp_embedding_id']) if foundation_track['clp_embedding_id'] else None
+        # 2. Arrange into Structural Blocks (Total ~160s)
+        # Block structure: Intro (16s), Verse 1 (32s), Build (16s), Drop (32s), Verse 2 (32s), Outro (32s)
+        blocks = [
+            {'name': 'Intro', 'dur': 16000},
+            {'name': 'Verse 1', 'dur': 32000},
+            {'name': 'Build', 'dur': 16000},
+            {'name': 'Drop', 'dur': 32000},
+            {'name': 'Verse 2', 'dur': 32000},
+            {'name': 'Outro', 'dur': 32000}
+        ]
         
-        candidates = [t for t in all_tracks if t['id'] != foundation_track['id']]
-        scored_candidates = []
-        for c in candidates:
-            c_emb = self.dm.get_embedding(c['clp_embedding_id']) if c['clp_embedding_id'] else None
-            score = self.scorer.get_total_score(foundation_track, c, found_emb, c_emb)['total']
-            scored_candidates.append((score, c))
-        
-        scored_candidates.sort(key=lambda x: x[0], reverse=True)
-        interludes = [x[1] for x in scored_candidates[:6]] # Use more for variety
-
-        print(f"Creating a professional 120s layered journey based on '{foundation_track['filename']}'...")
-        
-        # We will now use the new Timeline Renderer logic for the orchestrator too
         segments = []
+        current_ms = 0
         
-        # Add Foundation (The "Lead")
-        # Use Smart Loop if available
-        f_start_offset = (foundation_track.get('loop_start') or 0) * 1000.0
-        segments.append({
-            'file_path': foundation_track['file_path'],
-            'bpm': foundation_track['bpm'],
-            'start_ms': 0,
-            'duration_ms': 120000,
-            'offset_ms': f_start_offset,
-            'volume': 1.0,
-            'pan': 0.0,
-            'is_primary': True,
-            'lane': 0,
-            'fade_in_ms': 5000,
-            'fade_out_ms': 5000
-        })
+        # Pick main components for the whole journey
+        main_drum = drums[0]
+        bass_track = next((t for t in others if t['harmonic_key'] == main_drum['harmonic_key']), others[0])
+        melodic_leads = others[1:5]
+        fx_tracks = others[5:8]
 
-        # Add Interludes with Auto-Panning
-        # Strategy: Alternate L/R and varying start times
-        start_times = [10000, 25000, 45000, 65000, 85000, 100000]
-        pans = [-0.6, 0.6, -0.4, 0.4, -0.7, 0.7]
-        
-        for i, track in enumerate(interludes):
-            if i >= len(start_times): break
+        print(f"Synthesizing Hyper-Mix structural journey...")
+
+        for block in blocks:
+            b_name = block['name']
+            b_dur = block['dur']
             
-            i_loop_start = (track.get('loop_start') or 0) * 1000.0
-            segments.append({
-                'file_path': track['file_path'],
-                'bpm': track['bpm'],
-                'start_ms': start_times[i],
-                'duration_ms': 20000,
-                'offset_ms': i_loop_start,
-                'volume': 0.8,
-                'pan': pans[i],
-                'is_primary': False,
-                'lane': (i % 3) + 1,
-                'fade_in_ms': 4000,
-                'fade_out_ms': 4000
-            })
+            # --- LANE 0: Rhythmic Foundation ---
+            if b_name != 'Intro':
+                # On 'Build', we might chop the drums
+                if b_name == 'Build':
+                    # Micro-Chopping: 4-bar repeat with rising high-pass
+                    for sub in range(0, b_dur, 4000):
+                        segments.append({
+                            'file_path': main_drum['file_path'], 'bpm': main_drum['bpm'],
+                            'start_ms': current_ms + sub, 'duration_ms': 4000, 'offset_ms': (main_drum.get('loop_start') or 0)*1000,
+                            'volume': 0.9, 'is_primary': True, 'lane': 0,
+                            'low_cut': 100 + (sub/b_dur * 800), # Rising HPF
+                            'fade_in_ms': 100, 'fade_out_ms': 100
+                        })
+                else:
+                    segments.append({
+                        'file_path': main_drum['file_path'], 'bpm': main_drum['bpm'],
+                        'start_ms': current_ms, 'duration_ms': b_dur, 'offset_ms': (main_drum.get('loop_start') or 0)*1000,
+                        'volume': 1.0 if b_name == 'Drop' else 0.8, 'is_primary': True, 'lane': 0,
+                        'fade_in_ms': 2000, 'fade_out_ms': 2000
+                    })
 
-        print("Automated Mixing with Sidechain & Spectral Ducking...")
+            # --- LANE 1: Harmonic Body (Bass) ---
+            if b_name in ['Verse 1', 'Drop', 'Verse 2']:
+                segments.append({
+                    'file_path': bass_track['file_path'], 'bpm': bass_track['bpm'],
+                    'start_ms': current_ms, 'duration_ms': b_dur, 'offset_ms': (bass_track.get('loop_start') or 0)*1000,
+                    'volume': 0.9, 'is_primary': False, 'lane': 1,
+                    'fade_in_ms': 3000, 'fade_out_ms': 3000
+                })
+
+            # --- LANE 2/3: Atmosphere & Melodic Layers ---
+            # Pick a melodic lead based on block
+            lead = melodic_leads[blocks.index(block) % len(melodic_leads)]
+            if b_name != 'Build':
+                # Sectional Pitching: Drop is +1 semitone for energy? No, let's keep harmonic.
+                # Let's do a 'Reprise' in Verse 2 with pitch shift
+                ps = 0
+                if b_name == 'Verse 2': ps = -2 # Change vibe for second verse
+                
+                segments.append({
+                    'file_path': lead['file_path'], 'bpm': lead['bpm'],
+                    'start_ms': current_ms, 'duration_ms': b_dur, 'offset_ms': (lead.get('loop_start') or 0)*1000,
+                    'volume': 0.7, 'pan': -0.5 if blocks.index(block) % 2 == 0 else 0.5,
+                    'is_primary': False, 'lane': 2 + (blocks.index(block) % 2),
+                    'pitch_shift': ps,
+                    'low_cut': 400, # Keep melodic layers out of bass way
+                    'fade_in_ms': 4000, 'fade_out_ms': 4000
+                })
+
+            # --- LANE 4: FX & Transitions ---
+            if b_name == 'Build':
+                # Add an FX riser
+                fx = fx_tracks[0]
+                segments.append({
+                    'file_path': fx['file_path'], 'bpm': fx['bpm'],
+                    'start_ms': current_ms, 'duration_ms': b_dur, 'offset_ms': 0,
+                    'volume': 0.6, 'lane': 4, 'fade_in_ms': b_dur - 1000, 'fade_out_ms': 500
+                })
+
+            current_ms += b_dur
+
+        print(f"Rendering Hyper-Mix with {len(segments)} intelligent segments...")
         self.renderer.render_timeline(segments, output_path, target_bpm=target_bpm)
-        print(f"SUCCESS: Automated journey created at {os.path.abspath(output_path)}")
+        print(f"SUCCESS: Hyper-journey created at {os.path.abspath(output_path)}")
         return output_path
+
+    def get_hyper_segments(self, seed_track=None):
+        """Returns the segment data for a hyper-mix without rendering it."""
+        conn = self.dm.get_conn()
+        conn.row_factory = lambda cursor, row: {col[0]: row[idx] for idx, col in enumerate(cursor.description)}
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM tracks")
+        all_tracks = cursor.fetchall()
+        conn.close()
+
+        if len(all_tracks) < 8: return []
+
+        all_tracks.sort(key=lambda x: x.get('energy', 0), reverse=True)
+        drums = all_tracks[:3]
+        others = all_tracks[3:]
+        
+        blocks = [
+            {'name': 'Intro', 'dur': 16000},
+            {'name': 'Verse 1', 'dur': 32000},
+            {'name': 'Build', 'dur': 16000},
+            {'name': 'Drop', 'dur': 32000},
+            {'name': 'Verse 2', 'dur': 32000},
+            {'name': 'Outro', 'dur': 32000}
+        ]
+        
+        segments = []
+        current_ms = 0
+        main_drum = drums[0]
+        bass_track = next((t for t in others if t['harmonic_key'] == main_drum['harmonic_key']), others[0])
+        melodic_leads = others[1:5]
+        fx_tracks = others[5:8]
+
+        for block in blocks:
+            b_name = block['name']; b_dur = block['dur']
+            if b_name != 'Intro':
+                if b_name == 'Build':
+                    for sub in range(0, b_dur, 4000):
+                        segments.append({
+                            'id': main_drum['id'], 'filename': main_drum['filename'], 'file_path': main_drum['file_path'], 'bpm': main_drum['bpm'], 'harmonic_key': main_drum['harmonic_key'],
+                            'start_ms': current_ms + sub, 'duration_ms': 4000, 'offset_ms': (main_drum.get('loop_start') or 0)*1000,
+                            'volume': 0.9, 'is_primary': True, 'lane': 0, 'low_cut': 100 + (sub/b_dur * 800), 'fade_in_ms': 100, 'fade_out_ms': 100
+                        })
+                else:
+                    segments.append({
+                        'id': main_drum['id'], 'filename': main_drum['filename'], 'file_path': main_drum['file_path'], 'bpm': main_drum['bpm'], 'harmonic_key': main_drum['harmonic_key'],
+                        'start_ms': current_ms, 'duration_ms': b_dur, 'offset_ms': (main_drum.get('loop_start') or 0)*1000,
+                        'volume': 1.0 if b_name == 'Drop' else 0.8, 'is_primary': True, 'lane': 0, 'fade_in_ms': 2000, 'fade_out_ms': 2000
+                    })
+            if b_name in ['Verse 1', 'Drop', 'Verse 2']:
+                segments.append({
+                    'id': bass_track['id'], 'filename': bass_track['filename'], 'file_path': bass_track['file_path'], 'bpm': bass_track['bpm'], 'harmonic_key': bass_track['harmonic_key'],
+                    'start_ms': current_ms, 'duration_ms': b_dur, 'offset_ms': (bass_track.get('loop_start') or 0)*1000,
+                    'volume': 0.9, 'is_primary': False, 'lane': 1, 'fade_in_ms': 3000, 'fade_out_ms': 3000
+                })
+            lead = melodic_leads[blocks.index(block) % len(melodic_leads)]
+            if b_name != 'Build':
+                ps = -2 if b_name == 'Verse 2' else 0
+                segments.append({
+                    'id': lead['id'], 'filename': lead['filename'], 'file_path': lead['file_path'], 'bpm': lead['bpm'], 'harmonic_key': lead['harmonic_key'],
+                    'start_ms': current_ms, 'duration_ms': b_dur, 'offset_ms': (lead.get('loop_start') or 0)*1000,
+                    'volume': 0.7, 'pan': -0.5 if blocks.index(block) % 2 == 0 else 0.5, 'is_primary': False, 'lane': 2 + (blocks.index(block) % 2), 'pitch_shift': ps, 'low_cut': 400, 'fade_in_ms': 4000, 'fade_out_ms': 4000
+                })
+            if b_name == 'Build':
+                fx = fx_tracks[0]
+                segments.append({
+                    'id': fx['id'], 'filename': fx['filename'], 'file_path': fx['file_path'], 'bpm': fx['bpm'], 'harmonic_key': fx['harmonic_key'],
+                    'start_ms': current_ms, 'duration_ms': b_dur, 'offset_ms': 0, 'volume': 0.6, 'lane': 4, 'fade_in_ms': b_dur - 1000, 'fade_out_ms': 500
+                })
+            current_ms += b_dur
+        return segments

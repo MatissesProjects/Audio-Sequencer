@@ -113,11 +113,11 @@ class FlowRenderer:
         samples[1, :] *= r_gain
         return samples
 
-    def _apply_spectral_ducking(self, target_samples, sr):
-        """Applies a high-pass filter to clear mud from background tracks."""
+    def _apply_spectral_ducking(self, target_samples, sr, low_cut=300, high_cut=12000):
+        """Applies filters to clear mud or soften air."""
         board = Pedalboard([
-            HighpassFilter(cutoff_frequency_hz=300), # Clear Bass
-            LowpassFilter(cutoff_frequency_hz=12000) # Soften Air
+            HighpassFilter(cutoff_frequency_hz=low_cut),
+            LowpassFilter(cutoff_frequency_hz=high_cut)
         ])
         return board(target_samples, sr)
 
@@ -205,6 +205,12 @@ class FlowRenderer:
             
             # Combine balancing gain with user volume
             seg_np *= (balancing_gain * vol_mult * envelope)
+            
+            # Apply Per-Segment Filters if specified
+            lc = s.get('low_cut', 20)
+            hc = s.get('high_cut', 20000)
+            if lc > 25 or hc < 19000:
+                seg_np = self._apply_spectral_ducking(seg_np, self.sr, low_cut=lc, high_cut=hc)
             
             # Apply Panning
             seg_np = self._apply_panning(seg_np, s.get('pan', 0.0))
