@@ -2,6 +2,7 @@ import sys
 import os
 import sqlite3
 import json
+import time
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                              QTableWidgetItem, QLineEdit, QLabel, QPushButton, 
                              QFrame, QMessageBox, QScrollArea, QFileDialog,
@@ -20,38 +21,26 @@ from src.renderer import FlowRenderer
 from src.core.models import TrackSegment
 from src.core.undo import UndoManager
 from src.ui.dialogs import show_error
-from src.ui.threads import SearchThread, IngestionThread, WaveformLoader
+from src.ui.threads import SearchThread, IngestionThread, WaveformLoader, AIInitializerThread
 from src.ui.widgets import TimelineWidget, DraggableTable, LibraryWaveformPreview, LoadingOverlay
-
-def sqlite3_factory(cursor, row):
-    d = {}
-    for idx, col in enumerate(cursor.description):
-        d[col[0]] = row[idx]
-    return d
 
 class AudioSequencerApp(QMainWindow):
     def __init__(self):
+        boot_start = time.time()
         super().__init__()
+        print("[BOOT] Main Window Class Initialized")
+        
         self.dm = DataManager()
         self.processor = AudioProcessor()
         self.renderer = FlowRenderer()
         self.undo_manager = UndoManager()
         
-        # Lazy load heavy AI components
-        try:
-            from src.scoring import CompatibilityScorer
-            from src.generator import TransitionGenerator
-            from src.orchestrator import FullMixOrchestrator
-            self.scorer = CompatibilityScorer()
-            self.generator = TransitionGenerator()
-            self.orchestrator = FullMixOrchestrator()
-            self.ai_enabled = True
-        except Exception as e:
-            print(f"AI Loading Error (Check network/models): {e}")
-            self.scorer = None
-            self.generator = None
-            self.orchestrator = None
-            self.ai_enabled = False
+        # Placeholder AI state
+        self.scorer = None
+        self.generator = None
+        self.orchestrator = None
+        self.ai_enabled = False
+        self.ai_loading = True
         
         self.selected_library_track = None
         self.player = QMediaPlayer()
@@ -68,10 +57,41 @@ class AudioSequencerApp(QMainWindow):
         
         self.waveform_loaders = []
         
+        print(f"[BOOT] Core components ready ({time.time() - boot_start:.3f}s)")
+        ui_start = time.time()
         self.init_ui()
+        print(f"[BOOT] UI Layout built ({time.time() - ui_start:.3f}s)")
+        
         self.load_library()
         self.loading_overlay = LoadingOverlay(self.centralWidget())
         self.setAcceptDrops(True)
+        
+        # Start AI in background
+        self.start_ai_warmup()
+        print(f"[BOOT] Total window ready in {time.time() - boot_start:.3f}s")
+
+    def start_ai_warmup(self):
+        """Dispatches AI model loading to background thread."""
+        self.status_bar.showMessage("Warming up AI Engine (Loading Models)...")
+        self.ai_thread = AIInitializerThread()
+        self.ai_thread.finished.connect(self.on_ai_ready)
+        self.ai_thread.error.connect(self.on_ai_error)
+        self.ai_thread.start()
+
+    def on_ai_ready(self, s, g, o):
+        self.scorer = s
+        self.generator = g
+        self.orchestrator = o
+        self.ai_enabled = True
+        self.ai_loading = False
+        self.status_bar.showMessage("AI Engine Online.")
+        print("[BOOT] Background AI load complete.")
+
+    def on_ai_error(self, e):
+        self.ai_enabled = False
+        self.ai_loading = False
+        self.status_bar.showMessage("AI Engine Offline (Check internet/models).")
+        print(f"[BOOT] AI background error: {e}")
         
     def init_ui(self):
         self.setWindowTitle("AudioSequencer AI - The Pro Flow")
@@ -149,7 +169,7 @@ class AudioSequencerApp(QMainWindow):
         main_layout.addWidget(self.main_splitter)
         self.main_splitter.setSizes([500, 500])
         
-        self.status_bar = QStatusBar(); self.setStatusBar(self.status_bar); self.status_bar.showMessage("AI Engine Online." if self.ai_enabled else "AI Engine Offline.")
+        self.status_bar = QStatusBar(); self.setStatusBar(self.status_bar)
         self.timeline_widget.segmentSelected.connect(self.on_segment_selected); self.timeline_widget.timelineChanged.connect(self.update_status); self.timeline_widget.undoRequested.connect(self.push_undo); self.timeline_widget.cursorJumped.connect(self.on_cursor_jump); self.timeline_widget.bridgeRequested.connect(self.find_bridge_for_gap); self.timeline_widget.aiTransitionRequested.connect(self.generate_ai_transition); self.timeline_widget.duplicateRequested.connect(self.duplicate_segment); self.timeline_widget.captureRequested.connect(self.capture_segment_to_library); self.timeline_widget.zoomChanged.connect(lambda v: self.zs.setValue(v))
         self.setStyleSheet("""QMainWindow { background-color: #121212; color: #e0e0e0; font-family: 'Segoe UI'; } QLabel { color: #ffffff; } QTableWidget { background-color: #1e1e1e; gridline-color: #333; color: white; border: 1px solid #333; } QHeaderView::section { background-color: #333; color: white; border: 1px solid #444; padding: 5px; } QPushButton { background-color: #333; color: #fff; padding: 6px; border-radius: 4px; border: 1px solid #444; } QPushButton:hover { background-color: #444; } QLineEdit { background-color: #222; color: white; border: 1px solid #444; } QComboBox { background-color: #333; color: white; } QCheckBox { color: white; } QScrollBar:vertical { width: 12px; background: #222; } QScrollBar::handle:vertical { background: #444; border-radius: 6px; }""")
 

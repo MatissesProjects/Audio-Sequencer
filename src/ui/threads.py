@@ -1,7 +1,6 @@
 from PyQt6.QtCore import QThread, pyqtSignal
 import os
-from src.embeddings import EmbeddingEngine
-from src.ingestion import IngestionEngine
+import time
 
 class SearchThread(QThread):
     resultsFound = pyqtSignal(list)
@@ -14,12 +13,36 @@ class SearchThread(QThread):
         
     def run(self):
         try:
+            from src.embeddings import EmbeddingEngine
             engine = EmbeddingEngine()
             text_emb = engine.get_text_embedding(self.query)
             results = self.dm.search_embeddings(text_emb, n_results=20)
             self.resultsFound.emit(results)
         except Exception as e:
             self.errorOccurred.emit(str(e))
+
+class AIInitializerThread(QThread):
+    """Background thread to warm up heavy AI models without blocking UI."""
+    finished = pyqtSignal(object, object, object) # scorer, generator, orchestrator
+    error = pyqtSignal(str)
+    
+    def run(self):
+        try:
+            print("[BOOT] AI Warm-up started in background...")
+            start = time.time()
+            from src.scoring import CompatibilityScorer
+            from src.generator import TransitionGenerator
+            from src.orchestrator import FullMixOrchestrator
+            
+            s = CompatibilityScorer()
+            g = TransitionGenerator()
+            o = FullMixOrchestrator()
+            
+            elapsed = time.time() - start
+            print(f"[BOOT] AI Engine Ready ({elapsed:.2f}s)")
+            self.finished.emit(s, g, o)
+        except Exception as e:
+            self.error.emit(str(e))
 
 class WaveformLoader(QThread):
     waveformLoaded = pyqtSignal(object, list)
@@ -46,6 +69,7 @@ class IngestionThread(QThread):
         
     def run(self):
         try:
+            from src.ingestion import IngestionEngine
             ie = IngestionEngine(db_path=self.dm.db_path)
             for p in self.paths:
                 if os.path.isdir(p):
