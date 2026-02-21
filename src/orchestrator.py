@@ -150,6 +150,16 @@ class FullMixOrchestrator:
         melodic_leads = others[1:5]
         fx_tracks = others[5:8]
 
+        # Generate Grain Cloud for Intro/Outro (One-time asset)
+        # Using the first melodic lead as source
+        os.makedirs("generated_assets", exist_ok=True)
+        cloud_path = os.path.abspath(f"generated_assets/grain_cloud_{main_drum['id']}.wav")
+        if not os.path.exists(cloud_path):
+            try:
+                self.processor.generate_grain_cloud(melodic_leads[0]['file_path'], cloud_path, duration=16.0)
+            except:
+                cloud_path = melodic_leads[0]['file_path'] # Fallback
+
         print(f"Synthesizing Hyper-Mix structural journey...")
 
         for block in blocks:
@@ -157,14 +167,15 @@ class FullMixOrchestrator:
             b_dur = block['dur']
             
             # --- LANE 0: Rhythmic Foundation (THE HEART - Never stops) ---
-            # Extend foundation slightly into next block for seamless crossfade
-            segments.append({
-                'id': main_drum['id'], 'filename': main_drum['filename'], 'file_path': main_drum['file_path'], 'bpm': main_drum['bpm'], 'harmonic_key': main_drum['harmonic_key'],
-                'start_ms': current_ms, 'duration_ms': b_dur + 2000, 'offset_ms': (main_drum.get('loop_start') or 0)*1000,
-                'volume': 1.0 if b_name == 'Drop' else 0.8, 'is_primary': True, 'lane': 0,
-                'fade_in_ms': 2000 if blocks.index(block) == 0 else 4000, 
-                'fade_out_ms': 4000
-            })
+            if b_name != 'Intro':
+                # Extend foundation slightly into next block for seamless crossfade
+                segments.append({
+                    'id': main_drum['id'], 'filename': main_drum['filename'], 'file_path': main_drum['file_path'], 'bpm': main_drum['bpm'], 'harmonic_key': main_drum['harmonic_key'],
+                    'start_ms': current_ms, 'duration_ms': b_dur + 2000, 'offset_ms': (main_drum.get('loop_start') or 0)*1000,
+                    'volume': 1.0 if b_name == 'Drop' else 0.8, 'is_primary': True, 'lane': 0,
+                    'fade_in_ms': 2000 if blocks.index(block) == 1 else 4000, 
+                    'fade_out_ms': 4000
+                })
 
             # --- LANE 1: Harmonic Body (Bass) ---
             if b_name in ['Verse 1', 'Drop', 'Verse 2']:
@@ -176,41 +187,50 @@ class FullMixOrchestrator:
                 })
 
             # --- LANE 2/3: Atmosphere & Melodic Layers ---
-            lead = melodic_leads[blocks.index(block) % len(melodic_leads)]
-            if b_name == 'Build':
-                # Exponential Micro-Chopping: 4s -> 2s -> 1s -> 0.5s
-                # To make it feel rhythmic and good with background
-                sub_durs = [4000, 4000, 2000, 2000, 1000, 1000, 1000, 1000] # Total 16s
-                sub_start = 0
-                for idx, sd in enumerate(sub_durs):
-                    segments.append({
-                        'id': lead['id'], 'filename': f"CHOP {idx}", 'file_path': lead['file_path'], 'bpm': lead['bpm'], 'harmonic_key': lead['harmonic_key'],
-                        'start_ms': current_ms + sub_start, 'duration_ms': sd, 'offset_ms': (lead.get('loop_start') or 0)*1000,
-                        'volume': 0.7 + (idx/len(sub_durs) * 0.3),
-                        'lane': 2, 'pitch_shift': int(idx/2), # Rising Pitch
-                        'low_cut': 200 + (idx * 100), # Rising HPF
-                        'fade_in_ms': 50, 'fade_out_ms': 50
-                    })
-                    sub_start += sd
-            elif b_name != 'Intro':
-                ps = -2 if b_name == 'Verse 2' else 0
+            if b_name == 'Intro' or b_name == 'Outro':
+                # Use the Grain Cloud for Intro/Outro
                 segments.append({
-                    'id': lead['id'], 'filename': lead['filename'], 'file_path': lead['file_path'], 'bpm': lead['bpm'], 'harmonic_key': lead['harmonic_key'],
-                    'start_ms': current_ms, 'duration_ms': b_dur, 'offset_ms': (lead.get('loop_start') or 0)*1000,
-                    'volume': 0.7, 'pan': -0.5 if blocks.index(block) % 2 == 0 else 0.5,
-                    'is_primary': False, 'lane': 3, 'pitch_shift': ps,
-                    'low_cut': 400, 'fade_in_ms': 4000, 'fade_out_ms': 4000
+                    'id': -2, 'filename': "NEURAL CLOUD", 'file_path': cloud_path, 'bpm': 120, 'harmonic_key': 'N/A',
+                    'start_ms': current_ms, 'duration_ms': b_dur, 'offset_ms': 0,
+                    'volume': 0.6, 'lane': 2, 'pan': 0.0,
+                    'fade_in_ms': 5000, 'fade_out_ms': 5000
                 })
+            else:
+                lead = melodic_leads[blocks.index(block) % len(melodic_leads)]
+                if b_name == 'Build':
+                    # Exponential Micro-Chopping: 4s -> 2s -> 1s -> 0.5s
+                    sub_durs = [4000, 4000, 2000, 2000, 1000, 1000, 1000, 1000] # Total 16s
+                    sub_start = 0
+                    for idx, sd in enumerate(sub_durs):
+                        segments.append({
+                            'id': lead['id'], 'filename': f"CHOP {idx}", 'file_path': lead['file_path'], 'bpm': lead['bpm'], 'harmonic_key': lead['harmonic_key'],
+                            'start_ms': current_ms + sub_start, 'duration_ms': sd, 'offset_ms': (lead.get('loop_start') or 0)*1000,
+                            'volume': 0.7 + (idx/len(sub_durs) * 0.3),
+                            'lane': 2, 'pitch_shift': int(idx/2), # Rising Pitch
+                            'low_cut': 200 + (idx * 100), # Rising HPF
+                            'fade_in_ms': 50, 'fade_out_ms': 50
+                        })
+                        sub_start += sd
+                elif b_name != 'Intro':
+                    ps = -2 if b_name == 'Verse 2' else 0
+                    segments.append({
+                        'id': lead['id'], 'filename': lead['filename'], 'file_path': lead['file_path'], 'bpm': lead['bpm'], 'harmonic_key': lead['harmonic_key'],
+                        'start_ms': current_ms, 'duration_ms': b_dur, 'offset_ms': (lead.get('loop_start') or 0)*1000,
+                        'volume': 0.7, 'pan': -0.5 if blocks.index(block) % 2 == 0 else 0.5,
+                        'is_primary': False, 'lane': 3, 'pitch_shift': ps,
+                        'low_cut': 400, 'fade_in_ms': 4000, 'fade_out_ms': 4000
+                    })
 
             # --- LANE 4: Atmosphere Glue (The Floor) ---
-            # Fill gaps with low-volume FX or atmosphere
-            glue = fx_tracks[blocks.index(block) % len(fx_tracks)]
-            segments.append({
-                'id': glue['id'], 'filename': "ATMOS GLUE", 'file_path': glue['file_path'], 'bpm': glue['bpm'], 'harmonic_key': glue['harmonic_key'],
-                'start_ms': current_ms, 'duration_ms': b_dur + 1000, 'offset_ms': 0,
-                'volume': 0.4, 'lane': 4, 'low_cut': 600, 'high_cut': 8000, # Mid-focused glue
-                'fade_in_ms': 5000, 'fade_out_ms': 5000
-            })
+            # Fill gaps with low-volume FX or atmosphere (Skip intro/outro as they have clouds)
+            if b_name not in ['Intro', 'Outro']:
+                glue = fx_tracks[blocks.index(block) % len(fx_tracks)]
+                segments.append({
+                    'id': glue['id'], 'filename': "ATMOS GLUE", 'file_path': glue['file_path'], 'bpm': glue['bpm'], 'harmonic_key': glue['harmonic_key'],
+                    'start_ms': current_ms, 'duration_ms': b_dur + 1000, 'offset_ms': 0,
+                    'volume': 0.4, 'lane': 4, 'low_cut': 600, 'high_cut': 8000, # Mid-focused glue
+                    'fade_in_ms': 5000, 'fade_out_ms': 5000
+                })
 
             current_ms += b_dur
 

@@ -106,3 +106,54 @@ class AudioProcessor:
         except:
             return []
 
+    def generate_grain_cloud(self, input_path, output_path, duration=10.0, pitch_shift=0):
+        """
+        Creates an atmospheric textural pad using granular synthesis.
+        Perfect for intros, outros, and glue layers.
+        """
+        y, sr = librosa.load(input_path, sr=self.sr)
+        
+        # Grain parameters
+        grain_size = int(sr * 0.15) # 150ms grains
+        overlap = 0.75
+        hop = int(grain_size * (1 - overlap))
+        num_grains = int((duration * sr) / hop)
+        
+        output = np.zeros(int(duration * sr) + grain_size)
+        
+        # Window function (Hanning)
+        window = np.hanning(grain_size)
+        
+        # Create cloud
+        for i in range(num_grains):
+            # Random start point in source file
+            start = np.random.randint(0, len(y) - grain_size)
+            grain = y[start : start + grain_size] * window
+            
+            # Pitch shift grain if needed (slow but effective)
+            if pitch_shift != 0:
+                grain = librosa.effects.pitch_shift(grain, sr=sr, n_steps=pitch_shift)
+                if len(grain) != grain_size: # Handle length change
+                    grain = np.resize(grain, grain_size) * window
+            
+            # Placement
+            pos = i * hop
+            output[pos : pos + grain_size] += grain
+            
+        # Normalize
+        peak = np.max(np.abs(output))
+        if peak > 0: output /= peak
+        
+        # Apply intense reverb/blur using pedalboard
+        board = pedalboard.Pedalboard([
+            pedalboard.Reverb(room_size=0.9, wet_level=0.8, dry_level=0.2),
+            pedalboard.Delay(delay_seconds=0.5, feedback=0.6, mix=0.4),
+            pedalboard.LowpassFilter(cutoff_frequency_hz=3000)
+        ])
+        
+        output = output.astype(np.float32)
+        output = board(output, sr)
+        
+        sf.write(output_path, output, sr)
+        return output_path
+
