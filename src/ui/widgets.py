@@ -1,4 +1,4 @@
-from PyQt6.QtWidgets import QWidget, QTableWidget, QFrame, QLabel, QVBoxLayout, QMenu, QApplication
+from PyQt6.QtWidgets import QWidget, QTableWidget, QFrame, QLabel, QVBoxLayout, QMenu, QApplication, QProgressBar
 from PyQt6.QtCore import Qt, QRect, pyqtSignal, QPoint, QMimeData
 from PyQt6.QtGui import QPainter, QColor, QBrush, QPen, QFont, QDrag
 
@@ -53,19 +53,6 @@ class LibraryWaveformPreview(QWidget):
             if idx < pts:
                 v = self.waveform[idx] * mh
                 p.drawLine(i, int(mid - v), i, int(mid + v))
-
-from PyQt6.QtWidgets import QWidget, QTableWidget, QFrame, QLabel, QVBoxLayout, QMenu, QApplication, QProgressBar
-from PyQt6.QtCore import Qt, QRect, pyqtSignal, QPoint, QMimeData
-from PyQt6.QtGui import QPainter, QColor, QBrush, QPen, QFont, QDrag
-
-from src.scoring import CompatibilityScorer
-from src.core.models import TrackSegment
-
-class DraggableTable(QTableWidget):
-    # ... (remains same)
-
-class LibraryWaveformPreview(QWidget):
-    # ... (remains same)
 
 class LoadingOverlay(QWidget):
     def __init__(self, parent=None):
