@@ -221,10 +221,16 @@ class AudioSequencerApp(QMainWindow):
             if self.preview_dirty: self.render_preview_for_playback()
             self.player.setPosition(int(self.timeline_widget.cursor_pos_ms)); self.player.play(); self.play_timer.start(); self.is_playing = True; self.ptb.setText("⏸ Pause Preview")
     def render_preview_for_playback(self):
-        self.loading_overlay.show_loading("Building Preview..."); 
+        ss = sorted(self.timeline_widget.segments, key=lambda s: s.start_ms)
+        self.loading_overlay.show_loading("Building Sonic Preview...", total=len(ss))
         try:
-            ss = sorted(self.timeline_widget.segments, key=lambda s: s.start_ms); tb = float(self.tbe.text()) if self.tbe.text() else 124.0
-            rd = [s.to_dict() for s in ss]; self.renderer.render_timeline(rd, self.preview_path, target_bpm=tb, mutes=self.timeline_widget.mutes, solos=self.timeline_widget.solos); self.player.setSource(QUrl.fromLocalFile(os.path.abspath(self.preview_path))); self.preview_dirty = False
+            tb = float(self.tbe.text()) if self.tbe.text() else 124.0
+            rd = [s.to_dict() for s in ss]
+            self.renderer.render_timeline(rd, self.preview_path, target_bpm=tb, 
+                                          mutes=self.timeline_widget.mutes, solos=self.timeline_widget.solos,
+                                          progress_cb=self.loading_overlay.set_progress)
+            self.player.setSource(QUrl.fromLocalFile(os.path.abspath(self.preview_path)))
+            self.preview_dirty = False
         except Exception as e: show_error(self, "Preview Error", "Failed to build audio.", e)
         finally: self.loading_overlay.hide_loading()
     def jump_to_start(self):
@@ -451,17 +457,31 @@ class AudioSequencerApp(QMainWindow):
         except Exception as e: self.loading_overlay.hide_loading(); show_error(self, "Hyper Error", "Failed.", e)
     def render_timeline(self):
         if not self.timeline_widget.segments: return
-        ss = sorted(self.timeline_widget.segments, key=lambda s: s.start_ms); tb = float(self.tbe.text()) if self.tbe.text() else 124.0; self.loading_overlay.show_loading("Rendering Mix..."); 
+        ss = sorted(self.timeline_widget.segments, key=lambda s: s.start_ms)
+        self.loading_overlay.show_loading("Rendering Final Mix...", total=len(ss))
         try:
-            out = "timeline_mix.mp3"; rd = [s.to_dict() for s in ss]; self.renderer.render_timeline(rd, out, target_bpm=tb, mutes=self.timeline_widget.mutes, solos=self.timeline_widget.solos); self.loading_overlay.hide_loading(); QMessageBox.information(self, "Success", f"Mix rendered: {out}"); os.startfile(out)
+            tb = float(self.tbe.text()) if self.tbe.text() else 124.0
+            rd = [s.to_dict() for s in ss]
+            self.renderer.render_timeline(rd, "timeline_mix.mp3", target_bpm=tb, 
+                                          mutes=self.timeline_widget.mutes, solos=self.timeline_widget.solos,
+                                          progress_cb=self.loading_overlay.set_progress)
+            self.loading_overlay.hide_loading()
+            QMessageBox.information(self, "Success", "Mix rendered: timeline_mix.mp3")
+            os.startfile("timeline_mix.mp3")
         except Exception as e: self.loading_overlay.hide_loading(); show_error(self, "Render Error", "Failed.", e)
     def export_stems(self):
         if not self.timeline_widget.segments: return
-        folder = QFileDialog.getExistingDirectory(self, "Select Folder"); 
+        folder = QFileDialog.getExistingDirectory(self, "Select Folder")
         if not folder: return
-        tb = float(self.tbe.text()) if self.tbe.text() else 124.0; self.loading_overlay.show_loading("Exporting..."); 
+        
+        self.loading_overlay.show_loading("Exporting Multi-Lane Stems...", total=len(self.timeline_widget.segments))
         try:
-            rd = [s.to_dict() for s in self.timeline_widget.segments]; self.renderer.render_stems(rd, folder, target_bpm=tb); self.loading_overlay.hide_loading(); QMessageBox.information(self, "Exported", f"Stems exported to:\\n{folder}"); os.startfile(folder)
+            tb = float(self.tbe.text()) if self.tbe.text() else 124.0
+            rd = [s.to_dict() for s in self.timeline_widget.segments]
+            self.renderer.render_stems(rd, folder, target_bpm=tb, progress_cb=self.loading_overlay.set_progress)
+            self.loading_overlay.hide_loading()
+            QMessageBox.information(self, "Exported", f"Stems exported to:\\n{folder}")
+            os.startfile(folder)
         except Exception as e: self.loading_overlay.hide_loading(); show_error(self, "Export Error", "Failed.", e)
     def scan_folder(self):
         f = QFileDialog.getExistingDirectory(self, "Select Folder")

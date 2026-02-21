@@ -45,11 +45,10 @@ class FlowRenderer:
         combined.export(output_path, format="mp3", bitrate="320k")
         return output_path
 
-    def render_timeline(self, segments, output_path, target_bpm=124, mutes=None, solos=None):
-        return self._render_internal(segments, output_path, target_bpm, mutes, solos)
+    def render_timeline(self, segments, output_path, target_bpm=124, mutes=None, solos=None, progress_cb=None):
+        return self._render_internal(segments, output_path, target_bpm, mutes, solos, progress_cb)
 
-    def render_stems(self, segments, output_folder, target_bpm=124):
-        # ... (render_stems implementation)
+    def render_stems(self, segments, output_folder, target_bpm=124, progress_cb=None):
         if not os.path.exists(output_folder):
             os.makedirs(output_folder)
             
@@ -60,10 +59,17 @@ class FlowRenderer:
             lanes[l].append(s)
             
         stem_paths = []
+        global_processed = 0
         for lane_id, lane_segs in lanes.items():
             path = os.path.join(output_folder, f"lane_{lane_id+1}.mp3")
             print(f"Exporting Stem: Lane {lane_id+1}...")
-            self._render_internal(lane_segs, path, target_bpm)
+            
+            # Closure to capture current total and pass to internal
+            def stem_cb(count, current_lane_total=global_processed):
+                if progress_cb: progress_cb(current_lane_total + count)
+                
+            self._render_internal(lane_segs, path, target_bpm, progress_cb=stem_cb)
+            global_processed += len(lane_segs)
             stem_paths.append(path)
             
         return stem_paths
@@ -121,14 +127,14 @@ class FlowRenderer:
         ])
         return board(target_samples, sr)
 
-    def _render_internal(self, segments, output_path, target_bpm=124, mutes=None, solos=None):
+    def _render_internal(self, segments, output_path, target_bpm=124, mutes=None, solos=None, progress_cb=None):
         """
         Internal rendering logic shared by full mix and stems.
         """
         if not segments:
             return None
             
-        # Filter segments based on Mute/Solo
+        # ... (filter logic remains same)
         active_segments = []
         any_solo = any(solos) if solos else False
         for s in segments:
@@ -142,31 +148,27 @@ class FlowRenderer:
                 active_segments.append(s)
         
         if not active_segments:
-            # Return silent file?
             dur = max(s['start_ms'] + s['duration_ms'] for s in segments) + 1000
             silence = np.zeros((2, int(self.sr * dur / 1000.0)), dtype=np.float32)
             self.numpy_to_segment(silence, self.sr).export(output_path, format="mp3")
             return output_path
 
-        # Calculate master buffer size
         total_duration_ms = max(s['start_ms'] + s['duration_ms'] for s in active_segments) + 2000 
         master_samples = np.zeros((2, int(self.sr * total_duration_ms / 1000.0)), dtype=np.float32)
 
         print(f"Sonic Rendering: {len(active_segments)} segments...")
+        if progress_cb: progress_cb(0)
 
         processed_data = []
-
-        # Phase 1: Process each segment individually
-        for i, s in enumerate(tqdm(active_segments, desc="Processing Clips")):
+        for i, s in enumerate(active_segments):
+            # ... processing logic ...
             from src.processor import AudioProcessor
             proc = AudioProcessor()
             
-            # 1. Loop/Trim to raw requirement
             required_raw_dur = (s['duration_ms'] + s['offset_ms']) / 1000.0
             tmp_loop = f"temp_render_{i}.wav"
             proc.loop_track(s['file_path'], required_raw_dur + 1.0, [], tmp_loop)
             
-            # 2. Stretch & Pitch
             y_sync = proc.stretch_to_bpm(tmp_loop, s['bpm'], target_bpm)
             ps = s.get('pitch_shift', 0)
             if ps != 0:
@@ -175,20 +177,13 @@ class FlowRenderer:
             
             if os.path.exists(tmp_loop): os.remove(tmp_loop)
 
-            # 3. Trim to Offset and Duration
-            # Convert to AudioSegment temporarily for easy trimming
             seg_audio = self.numpy_to_segment(y_sync, self.sr)
             seg_audio = seg_audio[s['offset_ms'] : s['offset_ms'] + s['duration_ms']]
-            
-            # Convert to stereo numpy for final blending
             seg_np = self.segment_to_numpy(seg_audio)
             num_samples = seg_np.shape[1]
 
-            # 4. RMS Balancing & S-Curve Envelopes
-            # Balance based on RMS energy if provided in track metadata (future)
-            # For now, we apply user volume and then normalize the clip energy
             clip_rms = np.sqrt(np.mean(seg_np**2)) + 1e-9
-            target_rms = 0.15 # Reference level
+            target_rms = 0.15 
             balancing_gain = target_rms / clip_rms
             
             vol_mult = s.get('volume', 1.0)
@@ -203,16 +198,13 @@ class FlowRenderer:
                 t_out = np.linspace(0, 1, min(fo_s, num_samples))
                 envelope[-len(t_out):] *= 0.5 * (1 + np.cos(np.pi * t_out))
             
-            # Combine balancing gain with user volume
             seg_np *= (balancing_gain * vol_mult * envelope)
             
-            # Apply Per-Segment Filters if specified
             lc = s.get('low_cut', 20)
             hc = s.get('high_cut', 20000)
             if lc > 25 or hc < 19000:
                 seg_np = self._apply_spectral_ducking(seg_np, self.sr, low_cut=lc, high_cut=hc)
             
-            # Apply Panning
             seg_np = self._apply_panning(seg_np, s.get('pan', 0.0))
             
             processed_data.append({
@@ -220,6 +212,8 @@ class FlowRenderer:
                 'start_idx': int(s['start_ms'] * self.sr / 1000.0),
                 'is_primary': s.get('is_primary', False)
             })
+            
+            if progress_cb: progress_cb(i + 1)
 
         # Phase 2: Advanced Blending (Lead Focus Ducking)
         for i, current in enumerate(processed_data):

@@ -54,25 +54,59 @@ class LibraryWaveformPreview(QWidget):
                 v = self.waveform[idx] * mh
                 p.drawLine(i, int(mid - v), i, int(mid + v))
 
+from PyQt6.QtWidgets import QWidget, QTableWidget, QFrame, QLabel, QVBoxLayout, QMenu, QApplication, QProgressBar
+from PyQt6.QtCore import Qt, QRect, pyqtSignal, QPoint, QMimeData
+from PyQt6.QtGui import QPainter, QColor, QBrush, QPen, QFont, QDrag
+
+from src.scoring import CompatibilityScorer
+from src.core.models import TrackSegment
+
+class DraggableTable(QTableWidget):
+    # ... (remains same)
+
+class LibraryWaveformPreview(QWidget):
+    # ... (remains same)
+
 class LoadingOverlay(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-        self.message = "Processing Journey..."
+        self.layout = QVBoxLayout(self)
+        self.layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        self.message_label = QLabel("Processing Journey...")
+        self.message_label.setStyleSheet("color: white; font-size: 20px; font-weight: bold;")
+        self.message_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.layout.addWidget(self.message_label)
+        
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setFixedWidth(400)
+        self.progress_bar.setStyleSheet("""
+            QProgressBar { border: 2px solid #444; border-radius: 5px; text-align: center; color: white; background: #111; }
+            QProgressBar::chunk { background-color: #007acc; width: 20px; }
+        """)
+        self.layout.addWidget(self.progress_bar)
         self.hide()
         
     def paintEvent(self, event):
         p = QPainter(self)
-        p.fillRect(self.rect(), QColor(0, 0, 0, 180))
-        p.setPen(Qt.GlobalColor.white)
-        p.setFont(QFont("Segoe UI", 20, QFont.Weight.Bold))
-        p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, self.message)
+        p.fillRect(self.rect(), QColor(0, 0, 0, 200))
         
-    def show_loading(self, m="Processing..."):
-        self.message = m
+    def show_loading(self, m="Processing...", total=0):
+        self.message_label.setText(m)
+        self.progress_bar.setValue(0)
+        if total > 0:
+            self.progress_bar.setRange(0, total)
+        else:
+            self.progress_bar.setRange(0, 0) # Indeterminate
+        
         self.setGeometry(self.parent().rect())
         self.raise_()
         self.show()
+        QApplication.processEvents()
+        
+    def set_progress(self, value):
+        self.progress_bar.setValue(value)
         QApplication.processEvents()
         
     def hide_loading(self):
