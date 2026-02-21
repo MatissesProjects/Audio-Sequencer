@@ -475,14 +475,32 @@ class AudioSequencerApp(QMainWindow):
         except Exception as e: self.loading_overlay.hide_loading(); show_error(self, "Hyper Error", "Failed.", e)
     def render_timeline(self):
         if not self.timeline_widget.segments: return
+        
+        # Check if we should render a specific region
+        time_range = None
+        if self.timeline_widget.loop_enabled:
+            msg = QMessageBox(self)
+            msg.setWindowTitle("Render Options")
+            msg.setText("Would you like to render the entire journey or just the selected loop region?")
+            full_btn = msg.addButton("Entire Journey", QMessageBox.ButtonRole.ActionRole)
+            sel_btn = msg.addButton("Selected Region", QMessageBox.ButtonRole.ActionRole)
+            msg.addButton(QMessageBox.StandardButton.Cancel)
+            msg.exec()
+            
+            if msg.clickedButton() == sel_btn:
+                time_range = (self.timeline_widget.loop_start_ms, self.timeline_widget.loop_end_ms)
+            elif msg.clickedButton() != full_btn:
+                return # Cancelled
+
         ss = sorted(self.timeline_widget.segments, key=lambda s: s.start_ms)
-        self.loading_overlay.show_loading("Rendering Final Mix...", total=len(ss))
+        self.loading_overlay.show_loading("Rendering Mix...", total=len(ss))
         try:
             tb = float(self.tbe.text()) if self.tbe.text() else 124.0
             rd = [s.to_dict() for s in ss]
             self.renderer.render_timeline(rd, "timeline_mix.mp3", target_bpm=tb, 
                                           mutes=self.timeline_widget.mutes, solos=self.timeline_widget.solos,
-                                          progress_cb=self.loading_overlay.set_progress)
+                                          progress_cb=self.loading_overlay.set_progress,
+                                          time_range=time_range)
             self.loading_overlay.hide_loading()
             QMessageBox.information(self, "Success", "Mix rendered: timeline_mix.mp3")
             os.startfile("timeline_mix.mp3")

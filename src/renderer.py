@@ -45,10 +45,10 @@ class FlowRenderer:
         combined.export(output_path, format="mp3", bitrate="320k")
         return output_path
 
-    def render_timeline(self, segments, output_path, target_bpm=124, mutes=None, solos=None, progress_cb=None):
-        return self._render_internal(segments, output_path, target_bpm, mutes, solos, progress_cb)
+    def render_timeline(self, segments, output_path, target_bpm=124, mutes=None, solos=None, progress_cb=None, time_range=None):
+        return self._render_internal(segments, output_path, target_bpm, mutes, solos, progress_cb, time_range)
 
-    def render_stems(self, segments, output_folder, target_bpm=124, progress_cb=None):
+    def render_stems(self, segments, output_folder, target_bpm=124, progress_cb=None, time_range=None):
         if not os.path.exists(output_folder):
             os.makedirs(output_folder)
             
@@ -68,7 +68,7 @@ class FlowRenderer:
             def stem_cb(count, current_lane_total=global_processed):
                 if progress_cb: progress_cb(current_lane_total + count)
                 
-            self._render_internal(lane_segs, path, target_bpm, progress_cb=stem_cb)
+            self._render_internal(lane_segs, path, target_bpm, progress_cb=stem_cb, time_range=time_range)
             global_processed += len(lane_segs)
             stem_paths.append(path)
             
@@ -107,14 +107,8 @@ class FlowRenderer:
         pan: -1.0 (Full Left) to 1.0 (Full Right)
         """
         if pan == 0: return samples
-        
-        # Linear Panning (Equal Power would be better, but linear is simpler for now)
-        # Left Gain: (1 - pan) / 2
-        # Right Gain: (1 + pan) / 2
-        # Actually standard DAW linear pan is different but this works well:
         l_gain = max(0.0, min(1.0, 1.0 - pan))
         r_gain = max(0.0, min(1.0, 1.0 + pan))
-        
         samples[0, :] *= l_gain
         samples[1, :] *= r_gain
         return samples
@@ -127,17 +121,26 @@ class FlowRenderer:
         ])
         return board(target_samples, sr)
 
-    def _render_internal(self, segments, output_path, target_bpm=124, mutes=None, solos=None, progress_cb=None):
+    def _render_internal(self, segments, output_path, target_bpm=124, mutes=None, solos=None, progress_cb=None, time_range=None):
         """
         Internal rendering logic shared by full mix and stems.
         """
         if not segments:
             return None
             
-        # ... (filter logic remains same)
+        range_start, range_end = (0, 0)
+        if time_range:
+            range_start, range_end = time_range
+
+        # Filter segments based on Mute/Solo and Time Range
         active_segments = []
         any_solo = any(solos) if solos else False
         for s in segments:
+            if time_range:
+                s_end = s['start_ms'] + s['duration_ms']
+                if s_end <= range_start or s['start_ms'] >= range_end:
+                    continue
+
             l = s.get('lane', 0)
             is_muted = mutes[l] if mutes and l < len(mutes) else False
             is_soloed = solos[l] if solos and l < len(solos) else False
@@ -148,24 +151,47 @@ class FlowRenderer:
                 active_segments.append(s)
         
         if not active_segments:
-            dur = max(s['start_ms'] + s['duration_ms'] for s in segments) + 1000
-            silence = np.zeros((2, int(self.sr * dur / 1000.0)), dtype=np.float32)
+            dur = (range_end - range_start) if time_range else 1000
+            silence = np.zeros((2, int(self.sr * max(1000, dur) / 1000.0)), dtype=np.float32)
             self.numpy_to_segment(silence, self.sr).export(output_path, format="mp3")
             return output_path
 
-        total_duration_ms = max(s['start_ms'] + s['duration_ms'] for s in active_segments) + 2000 
+        # Calculate master buffer size
+        if time_range:
+            total_duration_ms = range_end - range_start
+        else:
+            total_duration_ms = max(s['start_ms'] + s['duration_ms'] for s in active_segments) + 2000 
+            
         master_samples = np.zeros((2, int(self.sr * total_duration_ms / 1000.0)), dtype=np.float32)
 
-        print(f"Sonic Rendering: {len(active_segments)} segments...")
+        print(f"Sonic Rendering ({'Region' if time_range else 'Full'}): {len(active_segments)} segments...")
         if progress_cb: progress_cb(0)
 
         processed_data = []
         for i, s in enumerate(active_segments):
-            # ... processing logic ...
+            s_start = s['start_ms']
+            s_dur = s['duration_ms']
+            s_off = s['offset_ms']
+            
+            render_start_ms = s_start
+            render_end_ms = s_start + s_dur
+            render_offset_ms = s_off
+            
+            if time_range:
+                if render_start_ms < range_start:
+                    diff = range_start - render_start_ms
+                    render_offset_ms += diff
+                    render_start_ms = range_start
+                if render_end_ms > range_end:
+                    render_end_ms = range_end
+            
+            effective_dur = render_end_ms - render_start_ms
+            if effective_dur <= 0: continue
+
             from src.processor import AudioProcessor
             proc = AudioProcessor()
             
-            required_raw_dur = (s['duration_ms'] + s['offset_ms']) / 1000.0
+            required_raw_dur = (effective_dur + render_offset_ms) / 1000.0
             tmp_loop = f"temp_render_{i}.wav"
             proc.loop_track(s['file_path'], required_raw_dur + 1.0, [], tmp_loop)
             
@@ -178,18 +204,20 @@ class FlowRenderer:
             if os.path.exists(tmp_loop): os.remove(tmp_loop)
 
             seg_audio = self.numpy_to_segment(y_sync, self.sr)
-            seg_audio = seg_audio[s['offset_ms'] : s['offset_ms'] + s['duration_ms']]
+            seg_audio = seg_audio[int(render_offset_ms) : int(render_offset_ms + effective_dur)]
             seg_np = self.segment_to_numpy(seg_audio)
             num_samples = seg_np.shape[1]
 
             clip_rms = np.sqrt(np.mean(seg_np**2)) + 1e-9
             target_rms = 0.15 
             balancing_gain = target_rms / clip_rms
-            
             vol_mult = s.get('volume', 1.0)
+            
             fi_s = int(s.get('fade_in_ms', 2000) * self.sr / 1000.0)
             fo_s = int(s.get('fade_out_ms', 2000) * self.sr / 1000.0)
-            
+            if time_range and s_start < range_start: fi_s = 0
+            if time_range and (s_start + s_dur) > range_end: fo_s = 0
+
             envelope = np.ones(num_samples, dtype=np.float32)
             if fi_s > 0:
                 t_in = np.linspace(0, 1, min(fi_s, num_samples))
@@ -200,7 +228,6 @@ class FlowRenderer:
             
             seg_np *= (balancing_gain * vol_mult * envelope)
             
-            # Apply Per-Segment Filters
             is_amb = s.get('is_ambient', False)
             lc = s.get('low_cut', 400 if is_amb else 20)
             hc = s.get('high_cut', 20000)
@@ -211,70 +238,36 @@ class FlowRenderer:
             
             processed_data.append({
                 'samples': seg_np,
-                'start_idx': int(s['start_ms'] * self.sr / 1000.0),
+                'start_idx': int((render_start_ms - range_start) * self.sr / 1000.0) if time_range else int(render_start_ms * self.sr / 1000.0),
                 'is_primary': s.get('is_primary', False),
                 'is_ambient': is_amb
             })
             
             if progress_cb: progress_cb(i + 1)
 
-        # Phase 2: Advanced Blending (Lead Focus Ducking)
         for i, current in enumerate(processed_data):
-            samples = current['samples']
-            start = current['start_idx']
-            end = start + samples.shape[1]
-            
-            # Ducking check: if NOT primary, check if we overlap a primary
+            samples = current['samples']; start = current['start_idx']; end = start + samples.shape[1]
             if not current['is_primary']:
                 for other in processed_data:
                     if (other is current) or not other['is_primary']: continue
-                    o_start = other['start_idx']
-                    o_end = o_start + other['samples'].shape[1]
-                    
-                    # Detect overlap
-                    overlap_start = max(start, o_start)
-                    overlap_end = min(end, o_end)
-                    
+                    o_start = other['start_idx']; o_end = o_start + other['samples'].shape[1]
+                    overlap_start = max(start, o_start); overlap_end = min(end, o_end)
                     if overlap_start < overlap_end:
-                        # 1. Apply Spectral Ducking (EQ)
                         samples = self._apply_spectral_ducking(samples, self.sr)
-                        
-                        # 2. Apply Dynamic Sidechain Compression
-                        rel_start_o = overlap_start - o_start
-                        rel_end_o = overlap_end - o_start
+                        rel_start_o = overlap_start - o_start; rel_end_o = overlap_end - o_start
                         source_segment = other['samples'][:, rel_start_o:rel_end_o]
-                        
-                        rel_start_c = overlap_start - start
-                        rel_end_c = overlap_end - start
+                        rel_start_c = overlap_start - start; rel_end_c = overlap_end - start
                         target_segment = samples[:, rel_start_c:rel_end_c]
-                        
-                        # Ambient tracks duck even more aggressively
                         duck_amt = 0.85 if current['is_ambient'] else 0.7
                         ducked_segment = self._apply_sidechain(target_segment, source_segment, amount=duck_amt)
-                        
-                        # Write back
                         samples[:, rel_start_c:rel_end_c] = ducked_segment
-                        
-                        # Only duck for one primary to avoid double-processing
                         break
-            
-            # Add to master buffer
-            master_samples[:, start:end] += samples
+            render_end = min(master_samples.shape[1], end); render_len = render_end - start
+            if render_len > 0: master_samples[:, start:render_end] += samples[:, :render_len]
 
-        # Phase 3: Master Bus (Compression & Limiting)
         print("Finalizing Master Bus...")
-        master_bus = Pedalboard([
-            Compressor(threshold_db=-14, ratio=2.5),
-            Limiter(threshold_db=-0.1)
-        ])
-        
+        master_bus = Pedalboard([Compressor(threshold_db=-14, ratio=2.5), Limiter(threshold_db=-0.1)])
         final_y = master_bus(master_samples, self.sr)
-        
-        # Export
         final_seg = self.numpy_to_segment(final_y, self.sr)
-        fmt = "wav" if output_path.lower().endswith(".wav") else "mp3"
-        if fmt == "wav":
-            final_seg.export(output_path, format="wav")
-        else:
-            final_seg.export(output_path, format="mp3", bitrate="320k")
+        final_seg.export(output_path, format="mp3", bitrate="320k")
         return output_path
