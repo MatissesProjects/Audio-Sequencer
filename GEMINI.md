@@ -16,18 +16,28 @@ Always attempt to build anything that needs to be built
 ### Audio Analysis & MIR
 - **Beat Onsets are Critical:** Accurate looping depends on using detected beat onsets as loop points. Simple duration-based looping causes rhythmic drift and "jumping."
 - **BPM/Key Accuracy:** `librosa` is highly reliable for 30s clips, but storing these mathematical properties in SQLite is essential to avoid redundant analysis.
+- **Smart Loop Detection:** Automatically finding the most energetic 4-bar section (using RMS energy over a sliding window) provides a better default starting point for loops than the absolute start of a file.
+- **Rhythmic Density (Groove):** Onset density (beats per second) is a critical factor for "Groove Lock." Matching tracks with similar densities prevents rhythmic clashing.
 
 ### DSP & Rendering Refinements
-- **Eliminating "Jumping":** Crossfading is mandatory at loop points. A **500ms equal-power crossfade** (using sin/cos curves) provides a seamless transition without volume dips or clicks.
-- **Buttery Smooth Transitions:** Linear ramps feel unnatural. **S-Curve (Sinusoidal) Easing** follows human loudness perception more closely and eliminates the sensation of "skipping" during track changes.
-- **The "Bass Swap" Technique:** To prevent muddy mixes, use parallel filter blending. Progressively High-pass the outgoing track and Low-pass the incoming one during overlaps.
-- **Gain Staging:** Always normalize tracks to a consistent RMS level before mixing. Use a professional **Limiter** (e.g., `pedalboard.Limiter`) on the master bus to prevent clipping during complex layers.
+- **Dynamic Sidechain Ducking:** Implementing "Fake Sidechain" by calculating the RMS envelope of a lead track and applying the inverse to background tracks creates professional "pumping" and clarity.
+- **Spectral Masking (Auto-EQ):** Automatically applying a 300Hz-400Hz High-Pass Filter to background/ambient tracks clears critical room for the lead track's bass and kick.
+- **Dual-Edge Trimming:** When trimming the start (left edge) of a clip, you must adjust both the `start_ms` and the internal `offset_ms` in inverse directions to keep the audio anchored in place while changing its boundary.
+- **S-Curve (Sinusoidal) Easing:** Essential for natural loudness perception. Sinusoidal curves prevent the "linear volume dip" feel at the center of crossfades.
 
 ### AI Integration
-- **Semantic Discovery (CLAP):** Vector-based similarity using local CLAP embeddings allows for "vibe-based" sequencing that math-only analysis (BPM/Key) misses.
-- **Gemini Orchestration:** The `google-genai` library is superior for orchestrating transition parameters (noise types, filter cutoffs) based on track metadata.
-- **Multi-Dimensional Scoring:** Combining BPM proximity, Harmonic compatibility (Circle of Fifths), and Semantic vibe into a single weighted score creates the most musical sequences.
+- **Neural Grain Clouds:** Granular synthesis (chopping into 150ms grains with randomization) is a powerful way to transform rhythmic material into cinematic atmospheric pads for intros and outros.
+- **Stochastic Orchestration:** Purely deterministic AI arrangements feel repetitive. Introducing randomness in section lengths, panning distributions, and track selection (weighted by vibe) makes automated music feel "human."
+- **Stochastic Production Edits:** Applying micro-chopping (4-bar -> 2-bar -> 1-bar) with rising pitch and high-pass filters generates genuine tension for builds.
+
+### UI/UX & Workflow
+- **Zero-Wait Startup:** Heavy AI libraries (`torch`, `laion-clap`) must be initialized in a background thread *after* the UI is shown. Use **Lazy-Import Isolation** (moving imports inside methods) to prevent the main thread from stalling.
+- **Visual Feedback:** Drag-and-drop operations need a visual "ghost" (pixmap) of the item being moved to feel responsive.
+- **Silence Guard:** Real-time "Energy Scanning" (sampling combined volume every 500ms) is more effective than simple block-checking for detecting "dead air" or quiet transitions.
+- **Draggable Splitters:** In high-density layouts (Library + Mixer + Timeline), using `QSplitter` is mandatory to prevent automatic layout "shrinking" and allow users to manually balance their workspace.
 
 ### Architectural Best Practices
-- **Parallel Filter Blending:** Instead of chunked processing (which can click), apply constant filters to entire overlapping segments and blend the *wet/dry signals* using automation curves.
-- **Foundation + Layers:** Professional "flow" is often better achieved by extending a core "Foundation" track and intelligently ducking it to let shorter "Interlude" layers breathe.
+- **Signal/Slot Decoupling:** Large UI components (like a Timeline) should never call `self.window()`. Instead, they should emit signals (`undoRequested`, `trackDropped`) that the Controller/Main Window handles. This enables modular testing.
+- **Model/View Separation:** Keep audio data structures (`TrackSegment`) in a dedicated `models.py` separate from the painting logic to allow for headless rendering or CLI automation.
+- **Data Robustness:** When adding new analysis fields to a database, always use the `value or 0` (fallback) pattern when loading to ensure compatibility with older tracks that have `NULL` values.
+- **Identity-Based Comparison:** When dealing with dictionaries that contain Numpy arrays, never use `==` (which triggers expensive sample-wise broadcasting). Always use `is` or ID checks.
