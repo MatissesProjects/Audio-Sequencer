@@ -323,86 +323,86 @@ class AudioSequencerApp(QMainWindow):
         except Exception as e: self.loading_overlay.hide_loading(); show_error(self, "Bridge Error", "Failed.", e)
     def new_project(self):
         if QMessageBox.question(self, "New Project", "Discard current journey?") == QMessageBox.StandardButton.Yes: self.push_undo(); self.timeline_widget.segments = []; self.timeline_widget.cursor_pos_ms = 0; self.timeline_widget.loop_enabled = False; self.preview_dirty = True; self.timeline_widget.update_geometry(); self.update_status()
-        def smart_fill_all_gaps(self):
-            if not self.ai_enabled: QMessageBox.warning(self, "AI Disabled", "AI Gap Filling requires the AI Engine."); return
-            if not self.timeline_widget.segments: return
-            
-            self.push_undo(); self.loading_overlay.show_loading("AI Healing Gaps...")
-            
-            try:
-                gaps = self.timeline_widget.find_silence_regions()
-                if not gaps:
-                    self.loading_overlay.hide_loading()
-                    self.status_bar.showMessage("No significant gaps detected.")
-                    return
-                    
-                # Determine the absolute end of the arrangement
-                abs_end = max(s.start_ms + s.duration_ms for s in self.timeline_widget.segments)
+    def smart_fill_all_gaps(self):
+        if not self.ai_enabled: QMessageBox.warning(self, "AI Disabled", "AI Gap Filling requires the AI Engine."); return
+        if not self.timeline_widget.segments: return
+        
+        self.push_undo(); self.loading_overlay.show_loading("AI Healing Gaps...")
+        
+        try:
+            gaps = self.timeline_widget.find_silence_regions()
+            if not gaps:
+                self.loading_overlay.hide_loading()
+                self.status_bar.showMessage("No significant gaps detected.")
+                return
                 
-                filled_count = 0
-                for start, end in gaps:
-                    # Rule: Don't fill if the gap is at the very end (taper out)
-                    if end >= abs_end - 500: continue
+            # Determine the absolute end of the arrangement
+            abs_end = max(s.start_ms + s.duration_ms for s in self.timeline_widget.segments)
+            
+            filled_count = 0
+            for start, end in gaps:
+                # Rule: Don't fill if the gap is at the very end (taper out)
+                if end >= abs_end - 500: continue
+                
+                # Find surrounding tracks for context
+                prev_track = None
+                next_track = None
+                
+                for s in self.timeline_widget.segments:
+                    if s.start_ms + s.duration_ms <= start + 500:
+                        if not prev_track or (s.start_ms + s.duration_ms > prev_track.start_ms + prev_track.duration_ms):
+                            prev_track = s
+                    if s.start_ms >= end - 500:
+                        if not next_track or s.start_ms < next_track.start_ms:
+                            next_track = s
+                
+                # Find best filler
+                filler_data = self.orchestrator.find_best_filler_for_gap(
+                    prev_track_id=prev_track.id if prev_track else None,
+                    next_track_id=next_track.id if next_track else None
+                )
+                
+                if filler_data:
+                    # Place filler to cover gap + 2s overlap on each side
+                    f_dur = (end - start) + 4000
+                    f_start = start - 2000
                     
-                    # Find surrounding tracks for context
-                    prev_track = None
-                    next_track = None
-                    
+                    # Ensure start is not negative
+                    if f_start < 0:
+                        f_dur += f_start
+                        f_start = 0
+                        
+                    # Find a free lane or use lane 4
+                    busy_lanes = set()
                     for s in self.timeline_widget.segments:
-                        if s.start_ms + s.duration_ms <= start + 500:
-                            if not prev_track or (s.start_ms + s.duration_ms > prev_track.start_ms + prev_track.duration_ms):
-                                prev_track = s
-                        if s.start_ms >= end - 500:
-                            if not next_track or s.start_ms < next_track.start_ms:
-                                next_track = s
+                        if max(f_start, s.start_ms) < min(f_start + f_dur, s.start_ms + s.duration_ms):
+                            busy_lanes.add(s.lane)
                     
-                    # Find best filler
-                    filler_data = self.orchestrator.find_best_filler_for_gap(
-                        prev_track_id=prev_track.id if prev_track else None,
-                        next_track_id=next_track.id if next_track else None
-                    )
-                    
-                    if filler_data:
-                        # Place filler to cover gap + 2s overlap on each side
-                        f_dur = (end - start) + 4000
-                        f_start = start - 2000
-                        
-                        # Ensure start is not negative
-                        if f_start < 0:
-                            f_dur += f_start
-                            f_start = 0
+                    lane = 4
+                    for l in [4, 3, 2, 1]: # Prefer higher lanes for fill
+                        if l not in busy_lanes:
+                            lane = l; break
                             
-                        # Find a free lane or use lane 4
-                        busy_lanes = set()
-                        for s in self.timeline_widget.segments:
-                            if max(f_start, s.start_ms) < min(f_start + f_dur, s.start_ms + s.duration_ms):
-                                busy_lanes.add(s.lane)
-                        
-                        lane = 4
-                        for l in [4, 3, 2, 1]: # Prefer higher lanes for fill
-                            if l not in busy_lanes:
-                                lane = l; break
-                                
-                        seg = self.timeline_widget.add_track(filler_data, start_ms=f_start, lane=lane)
-                        seg.duration_ms = f_dur
-                        seg.volume = 0.5 # Default ducked
-                        seg.is_ambient = True
-                        seg.fade_in_ms = 2000
-                        seg.fade_out_ms = 2000
-                        self.load_waveform_async(seg)
-                        filled_count += 1
-                
-                self.timeline_widget.update_geometry()
-                self.timeline_widget.find_silence_regions() # Refresh warnings
-                self.loading_overlay.hide_loading()
-                self.status_bar.showMessage(f"AI: Healed {filled_count} energy gaps.")
-                
-            except Exception as e:
-                self.loading_overlay.hide_loading()
-                show_error(self, "Gap Fill Error", "Failed to fill gaps.", e)
+                    seg = self.timeline_widget.add_track(filler_data, start_ms=f_start, lane=lane)
+                    seg.duration_ms = f_dur
+                    seg.volume = 0.5 # Default ducked
+                    seg.is_ambient = True
+                    seg.fade_in_ms = 2000
+                    seg.fade_out_ms = 2000
+                    self.load_waveform_async(seg)
+                    filled_count += 1
+            
+            self.timeline_widget.update_geometry()
+            self.timeline_widget.find_silence_regions() # Refresh warnings
+            self.loading_overlay.hide_loading()
+            self.status_bar.showMessage(f"AI: Healed {filled_count} energy gaps.")
+            
+        except Exception as e:
+            self.loading_overlay.hide_loading()
+            show_error(self, "Gap Fill Error", "Failed to fill gaps.", e)
     
-        def on_vzoom_changed(self, v):
-     self.timeline_widget.lane_height = v; self.timeline_widget.update_geometry()
+    def on_vzoom_changed(self, v):
+        self.timeline_widget.lane_height = v; self.timeline_widget.update_geometry()
     def on_zoom_changed(self, v): self.timeline_widget.pixels_per_ms = v / 1000.0; self.timeline_widget.update_geometry()
     def clear_timeline(self):
         if QMessageBox.question(self, "Clear", "Clear journey?") == QMessageBox.StandardButton.Yes: self.push_undo(); self.timeline_widget.segments = []; self.timeline_widget.update_geometry(); self.update_status()
