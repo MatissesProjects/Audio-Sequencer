@@ -267,49 +267,51 @@ class FullMixOrchestrator:
 
         for idx, block in enumerate(blocks):
             b_name = block['name']; b_dur = block['dur']
+            is_drop = (b_name == 'Drop')
+            is_build = (b_name == 'Build')
             
             # --- LANE 0: Foundation (Heartbeat) ---
-            # Ensure drums/bass are playing during Neural Cloud for transition context
-            if b_name != 'Outro' or b_name == 'Outro': # Always have something for Outro too
+            if b_name != 'Outro' or b_name == 'Outro':
                 f_start = current_ms
                 f_dur = b_dur + overlap
-                if b_name == 'Intro': 
-                    f_start += 6000 # Neural cloud starts first, but drums come in after 6s
+                if b_name == 'Intro': f_start += 6000
                 
                 lane = find_free_lane(f_start, f_dur, preferred=0)
                 segments.append({
                     'id': main_drum['id'], 'filename': main_drum['filename'], 'file_path': main_drum['file_path'], 'bpm': main_drum['bpm'], 'harmonic_key': main_drum['harmonic_key'],
                     'start_ms': f_start, 'duration_ms': f_dur, 'offset_ms': (main_drum.get('loop_start') or 0)*1000,
-                    'volume': 1.0 if b_name == 'Drop' else 0.8, 'is_primary': True, 'lane': lane,
-                    'fade_in_ms': 4000, 'fade_out_ms': 4000
+                    'volume': 1.0 if is_drop else 0.8, 'is_primary': True, 'lane': lane,
+                    'fade_in_ms': 4000, 'fade_out_ms': 4000,
+                    'drum_vol': 1.2 if is_drop else 1.0, 'instr_vol': 0.5 if is_drop else 0.8, # Emphasize drums in drop
+                    'ducking_depth': 0.4 # Foundation shouldn't duck much
                 })
 
             # --- LANE 1: Harmonic Body (Bass) ---
             if b_name in ['Intro', 'Verse 1', 'Drop', 'Verse 2', 'Outro']:
-                # For Intro/Outro, ensure bass overlaps with Neural Cloud
                 lane = find_free_lane(current_ms, b_dur + overlap, preferred=1)
                 segments.append({
                     'id': bass_track['id'], 'filename': bass_track['filename'], 'file_path': bass_track['file_path'], 'bpm': bass_track['bpm'], 'harmonic_key': bass_track['harmonic_key'],
                     'start_ms': current_ms, 'duration_ms': b_dur + overlap, 'offset_ms': (bass_track.get('loop_start') or 0)*1000,
-                    'volume': 0.9, 'is_primary': False, 'lane': lane, 'fade_in_ms': 3000, 'fade_out_ms': 3000
+                    'volume': 0.9, 'is_primary': False, 'lane': lane, 'fade_in_ms': 3000, 'fade_out_ms': 3000,
+                    'instr_vol': 1.1 if is_drop else 0.9, 'vocal_vol': 0.0, # Bass track focus
+                    'ducking_depth': 0.8 if is_drop else 0.6 # Bass gets out of the way of kick
                 })
 
             # --- LANE 2/3/5/6: Melodic/Atmosphere ---
             if b_name == 'Intro' or b_name == 'Outro':
-                # Neural Cloud: ensure it's shorter than the block so context audio (drums/bass) wraps it
-                # It starts at current_ms + 2000 and ends 2000 before block ends
                 c_dur = max(4000, b_dur - 4000)
                 lane = find_free_lane(current_ms + 2000, c_dur, preferred=2)
                 segments.append({
                     'id': -2, 'filename': "NEURAL CLOUD", 'file_path': cloud_path, 'bpm': 120, 'harmonic_key': 'N/A',
                     'start_ms': current_ms + 2000, 'duration_ms': c_dur, 'offset_ms': 0,
                     'volume': 0.6, 'lane': lane, 'fade_in_ms': 3000, 'fade_out_ms': 3000,
-                    'is_ambient': True
+                    'is_ambient': True, 'ducking_depth': 0.9, # Atmosphere should duck heavily
+                    'reverb': 0.5
                 })
             
             if b_name not in ['Intro', 'Outro']:
                 lead = melodic_leads[idx % len(melodic_leads)]
-                if b_name == 'Build':
+                if is_build:
                     sub_durs = [4000, 4000, 2000, 2000, 1000, 1000, 1000, 1000]
                     sub_start = 0
                     for c_idx, sd in enumerate(sub_durs):
@@ -317,17 +319,28 @@ class FullMixOrchestrator:
                         segments.append({
                             'id': lead['id'], 'filename': f"CHOP {c_idx}", 'file_path': lead['file_path'], 'bpm': lead['bpm'], 'harmonic_key': lead['harmonic_key'],
                             'start_ms': current_ms + sub_start, 'duration_ms': sd + 200, 'offset_ms': (lead.get('loop_start') or 0)*1000,
-                            'volume': 0.7 + (c_idx/len(sub_durs) * 0.3), 'lane': lane, 'pitch_shift': int(c_idx/2), 'low_cut': 200 + (c_idx * 100), 'fade_in_ms': 50, 'fade_out_ms': 50
+                            'volume': 0.7 + (c_idx/len(sub_durs) * 0.3), 'lane': lane, 'pitch_shift': int(c_idx/2), 'low_cut': 200 + (c_idx * 100), 'fade_in_ms': 50, 'fade_out_ms': 50,
+                            'harmony_level': 0.3 + (c_idx/len(sub_durs) * 0.5), # Increasing harmonic rhythm in build
+                            'vocal_vol': 1.2, 'instr_vol': 0.4
                         })
                         sub_start += sd
                 else:
                     ps = -2 if b_name == 'Verse 2' else 0
                     preferred_mel_lane = 3 if idx % 2 == 0 else 6
                     lane = find_free_lane(current_ms, b_dur + overlap, preferred=preferred_mel_lane)
+                    
+                    v_energy = lead.get('vocal_energy', 0.0)
+                    is_vocal_heavy = v_energy > 0.2
+                    
                     segments.append({
                         'id': lead['id'], 'filename': lead['filename'], 'file_path': lead['file_path'], 'bpm': lead['bpm'], 'harmonic_key': lead['harmonic_key'],
                         'start_ms': current_ms, 'duration_ms': b_dur + overlap, 'offset_ms': (lead.get('loop_start') or 0)*1000,
-                        'volume': 0.7, 'pan': -0.5 if idx % 2 == 0 else 0.5, 'lane': lane, 'pitch_shift': ps, 'low_cut': 400, 'fade_in_ms': 4000, 'fade_out_ms': 4000
+                        'volume': 0.8 if is_vocal_heavy else 0.7, 'pan': -0.5 if idx % 2 == 0 else 0.5, 'lane': lane, 'pitch_shift': ps, 'low_cut': 400, 'fade_in_ms': 4000, 'fade_out_ms': 4000,
+                        'vocal_vol': 1.1 if is_vocal_heavy else 0.8,
+                        'instr_vol': 0.6 if is_vocal_heavy else 1.0,
+                        'vocal_shift': 12 if is_drop and is_vocal_heavy else 0, # Octave vocal jump in drops
+                        'ducking_depth': 0.5 if is_vocal_heavy else 0.7, # Lead vocals shouldn't be ducked too hard
+                        'harmony_level': 0.4 if is_drop else 0.1
                     })
 
             # --- LANE 4/7: Atmosphere Glue ---
@@ -339,8 +352,10 @@ class FullMixOrchestrator:
                     'start_ms': current_ms, 'duration_ms': b_dur + overlap, 'offset_ms': 0,
                     'volume': random.uniform(0.3, 0.5), 'lane': lane, 'low_cut': 600, 'high_cut': 8000, 'fade_in_ms': 5000, 'fade_out_ms': 5000,
                     'pan': random.uniform(-0.4, 0.4),
-                    'is_ambient': True
+                    'is_ambient': True, 'ducking_depth': 0.95, # Glue should duck ALMOST COMPLETELY when drums/vocals hit
+                    'reverb': 0.6
                 })
+
 
 
             current_ms += (b_dur - overlap) 
