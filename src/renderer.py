@@ -172,6 +172,7 @@ class FlowRenderer:
             s_start = s['start_ms']
             s_dur = s['duration_ms']
             s_off = s['offset_ms']
+            stems_dir = s.get('stems_path')
             
             render_start_ms = s_start
             render_end_ms = s_start + s_dur
@@ -192,20 +193,67 @@ class FlowRenderer:
             proc = AudioProcessor()
             
             required_raw_dur = (effective_dur + render_offset_ms) / 1000.0
-            tmp_loop = f"temp_render_{i}.wav"
-            proc.loop_track(s['file_path'], required_raw_dur + 1.0, [], tmp_loop)
             
-            y_sync = proc.stretch_to_bpm(tmp_loop, s['bpm'], target_bpm)
-            ps = s.get('pitch_shift', 0)
-            if ps != 0:
-                import librosa
-                y_sync = librosa.effects.pitch_shift(y_sync, sr=self.sr, n_steps=ps)
-            
-            if os.path.exists(tmp_loop): os.remove(tmp_loop)
+            # --- STEM PROCESSING ---
+            if stems_dir and os.path.exists(stems_dir):
+                # Process individual stems
+                combined_seg_np = None
+                stem_types = ["vocals", "drums", "other"]
+                
+                for stype in stem_types:
+                    stem_file = os.path.join(stems_dir, f"{stype}.wav")
+                    if not os.path.exists(stem_file): continue
+                    
+                    tmp_loop = f"temp_render_{i}_{stype}.wav"
+                    proc.loop_track(stem_file, required_raw_dur + 1.0, [], tmp_loop)
+                    y_sync = proc.stretch_to_bpm(tmp_loop, s['bpm'], target_bpm)
+                    
+                    ps = s.get('pitch_shift', 0)
+                    if ps != 0:
+                        import librosa
+                        y_sync = librosa.effects.pitch_shift(y_sync, sr=self.sr, n_steps=ps)
+                    
+                    if os.path.exists(tmp_loop): os.remove(tmp_loop)
+                    
+                    # Back to numpy
+                    stem_audio = self.numpy_to_segment(y_sync, self.sr)
+                    stem_audio = stem_audio[int(render_offset_ms) : int(render_offset_ms + effective_dur)]
+                    stem_np = self.segment_to_numpy(stem_audio)
+                    
+                    # Apply Vocal Specific Harmonics
+                    if stype == "vocals":
+                        # Auto-harmonics for vocals as requested
+                        # Combine user harmonics + auto-vocal-boost
+                        vocal_harm = 0.4 + (s.get('harmonics', 0.0) * 0.6)
+                        stem_np = Pedalboard([Distortion(drive_db=vocal_harm * 12)])(stem_np, self.sr)
+                    
+                    if combined_seg_np is None:
+                        combined_seg_np = stem_np
+                    else:
+                        # Stem-aware ducking: if this is 'other' (instruments), 
+                        # and we already have vocals/drums, duck 'other'
+                        if stype == "other" and combined_seg_np is not None:
+                            # Use sidechain logic to duck instruments based on already mixed stems
+                            stem_np = self._apply_sidechain(stem_np, combined_seg_np, amount=0.5)
+                        
+                        min_l = min(combined_seg_np.shape[1], stem_np.shape[1])
+                        combined_seg_np[:, :min_l] += stem_np[:, :min_l]
+                
+                seg_np = combined_seg_np
+            else:
+                # Fallback to single file processing
+                tmp_loop = f"temp_render_{i}.wav"
+                proc.loop_track(s['file_path'], required_raw_dur + 1.0, [], tmp_loop)
+                y_sync = proc.stretch_to_bpm(tmp_loop, s['bpm'], target_bpm)
+                ps = s.get('pitch_shift', 0)
+                if ps != 0:
+                    import librosa
+                    y_sync = librosa.effects.pitch_shift(y_sync, sr=self.sr, n_steps=ps)
+                if os.path.exists(tmp_loop): os.remove(tmp_loop)
+                seg_audio = self.numpy_to_segment(y_sync, self.sr)
+                seg_audio = seg_audio[int(render_offset_ms) : int(render_offset_ms + effective_dur)]
+                seg_np = self.segment_to_numpy(seg_audio)
 
-            seg_audio = self.numpy_to_segment(y_sync, self.sr)
-            seg_audio = seg_audio[int(render_offset_ms) : int(render_offset_ms + effective_dur)]
-            seg_np = self.segment_to_numpy(seg_audio)
             num_samples = seg_np.shape[1]
 
             clip_rms = np.sqrt(np.mean(seg_np**2)) + 1e-9
@@ -257,7 +305,8 @@ class FlowRenderer:
                 'samples': seg_np,
                 'start_idx': int((render_start_ms - range_start) * self.sr / 1000.0) if time_range else int(render_start_ms * self.sr / 1000.0),
                 'is_primary': s.get('is_primary', False),
-                'is_ambient': is_amb
+                'is_ambient': is_amb,
+                'vocal_energy': s.get('vocal_energy', 0.0)
             })
             
             if progress_cb: progress_cb(i + 1)
@@ -275,7 +324,11 @@ class FlowRenderer:
                         source_segment = other['samples'][:, rel_start_o:rel_end_o]
                         rel_start_c = overlap_start - start; rel_end_c = overlap_end - start
                         target_segment = samples[:, rel_start_c:rel_end_c]
-                        duck_amt = 0.85 if current['is_ambient'] else 0.7
+                        
+                        # Vocal-aware ducking amount
+                        is_vocal = other.get('vocal_energy', 0) > 0.2
+                        duck_amt = 0.9 if is_vocal else (0.85 if current['is_ambient'] else 0.7)
+                        
                         ducked_segment = self._apply_sidechain(target_segment, source_segment, amount=duck_amt)
                         samples[:, rel_start_c:rel_end_c] = ducked_segment
                         break
