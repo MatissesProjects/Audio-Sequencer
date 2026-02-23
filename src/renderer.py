@@ -50,6 +50,7 @@ def _process_single_segment(s, i, target_bpm, sr, time_range):
                 'samples': seg_np,
                 'start_idx': int((render_start_ms - range_start) * sr / 1000.0) if time_range else int(render_start_ms * sr / 1000.0),
                 'is_primary': s.get('is_primary', False),
+                'is_ambient': s.get('is_ambient', False),
                 'vocal_energy': s.get('vocal_energy', 0.0)
             }
         except: pass
@@ -201,6 +202,7 @@ def _process_single_segment(s, i, target_bpm, sr, time_range):
         'samples': seg_np,
         'start_idx': int((render_start_ms - range_start) * sr / 1000.0) if time_range else int(render_start_ms * sr / 1000.0),
         'is_primary': s.get('is_primary', False),
+        'is_ambient': s.get('is_ambient', False),
         'vocal_energy': s.get('vocal_energy', 0.0)
     }
 
@@ -401,37 +403,6 @@ class FlowRenderer:
                         samples[:, rel_start_c:rel_end_c] = ducked_segment
                         break
             
-            render_end = min(master_samples.shape[1], end); render_len = render_end - start
-            if render_len > 0: master_samples[:, start:render_end] += samples[:, :render_len]
-
-        print("Finalizing Master Bus...")
-        master_bus = Pedalboard([Compressor(threshold_db=-14, ratio=2.5), Limiter(threshold_db=-0.1)])
-        final_y = master_bus(master_samples, self.sr)
-        final_seg = self.numpy_to_segment(final_y, self.sr)
-        final_seg.export(output_path, format="mp3", bitrate="320k")
-        return output_path
-
-        for i, current in enumerate(processed_data):
-            samples = current['samples']; start = current['start_idx']; end = start + samples.shape[1]
-            if not current['is_primary']:
-                for other in processed_data:
-                    if (other is current) or not other['is_primary']: continue
-                    o_start = other['start_idx']; o_end = o_start + other['samples'].shape[1]
-                    overlap_start = max(start, o_start); overlap_end = min(end, o_end)
-                    if overlap_start < overlap_end:
-                        samples = self._apply_spectral_ducking(samples, self.sr)
-                        rel_start_o = overlap_start - o_start; rel_end_o = overlap_end - o_start
-                        source_segment = other['samples'][:, rel_start_o:rel_end_o]
-                        rel_start_c = overlap_start - start; rel_end_c = overlap_end - start
-                        target_segment = samples[:, rel_start_c:rel_end_c]
-                        
-                        # Vocal-aware ducking amount
-                        is_vocal = other.get('vocal_energy', 0) > 0.2
-                        duck_amt = 0.9 if is_vocal else (0.85 if current['is_ambient'] else 0.7)
-                        
-                        ducked_segment = self._apply_sidechain(target_segment, source_segment, amount=duck_amt)
-                        samples[:, rel_start_c:rel_end_c] = ducked_segment
-                        break
             render_end = min(master_samples.shape[1], end); render_len = render_end - start
             if render_len > 0: master_samples[:, start:render_end] += samples[:, :render_len]
 
