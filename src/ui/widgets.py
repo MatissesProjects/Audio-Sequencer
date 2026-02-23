@@ -172,7 +172,7 @@ class TimelineWidget(QWidget):
     duplicateRequested = pyqtSignal(object) # TrackSegment
     captureRequested = pyqtSignal(object) # TrackSegment
     zoomChanged = pyqtSignal(int)
-    trackDropped = pyqtSignal(int, int, int) # tid, x, y
+    trackDropped = pyqtSignal(object, int, int) # tid_str, x, y
     fillRangeRequested = pyqtSignal(float, float) # start_ms, end_ms
 
     def __init__(self):
@@ -632,7 +632,7 @@ class TimelineWidget(QWidget):
                 ba = m.addAction("🪄 Find Bridge Track here")
                 ta = m.addAction("✨ Generate AI Transition")
                 
-                fa = None
+                fa = fs = fe = None
                 if self.loop_enabled and (self.loop_end_ms - self.loop_start_ms) > 1000:
                     m.addSeparator()
                     fa = m.addAction("🩹 AI: Fill Selected Range")
