@@ -27,15 +27,69 @@ class DraggableTable(QTableWidget):
         super().mousePressEvent(event)
 
 class LibraryWaveformPreview(QWidget):
+    selectionChanged = pyqtSignal(float, float) # start_pct, end_pct
+    dragStarted = pyqtSignal(float, float) # start_pct, end_pct
+
     def __init__(self):
         super().__init__()
         self.waveform = []
-        self.setFixedHeight(60)
+        self.setFixedHeight(100)
+        self.selection_start = None
+        self.selection_end = None
+        self.is_selecting = False
+        self.setMouseTracking(True)
         
     def set_waveform(self, w):
         self.waveform = w
+        self.selection_start = None
+        self.selection_end = None
         self.update()
         
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.RightButton:
+            self.selection_start = None
+            self.selection_end = None
+            self.selectionChanged.emit(0.0, 1.0)
+            self.update()
+            return
+
+        if event.button() == Qt.MouseButton.LeftButton:
+            x_pct = event.position().x() / self.width()
+            # If we click inside an existing selection, start a drag
+            if self.selection_start is not None and self.selection_end is not None:
+                if self.selection_start <= x_pct <= self.selection_end:
+                    self.start_drag()
+                    return
+
+            self.selection_start = x_pct
+            self.selection_end = self.selection_start
+            self.is_selecting = True
+            self.update()
+
+    def mouseMoveEvent(self, event):
+        if self.is_selecting:
+            self.selection_end = event.position().x() / self.width()
+            self.update()
+            
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.is_selecting = False
+            s = min(self.selection_start, self.selection_end)
+            e = max(self.selection_start, self.selection_end)
+            if e - s < 0.01: # Single click reset
+                self.selection_start = None
+                self.selection_end = None
+                self.selectionChanged.emit(0.0, 1.0)
+            else:
+                self.selection_start = s
+                self.selection_end = e
+                self.selectionChanged.emit(s, e)
+            self.update()
+            
+    def start_drag(self):
+        if self.selection_start is not None and self.selection_end is not None:
+            self.dragStarted.emit(self.selection_start, self.selection_end)
+
     def paintEvent(self, event):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -43,6 +97,15 @@ class LibraryWaveformPreview(QWidget):
         if not self.waveform:
             return
             
+        # Draw Selection
+        if self.selection_start is not None and self.selection_end is not None:
+            s = int(min(self.selection_start, self.selection_end) * self.width())
+            e = int(max(self.selection_start, self.selection_end) * self.width())
+            p.fillRect(s, 0, e - s, self.height(), QColor(0, 200, 255, 60))
+            p.setPen(QPen(QColor(0, 200, 255, 150), 1))
+            p.drawLine(s, 0, s, self.height())
+            p.drawLine(e, 0, e, self.height())
+
         p.setPen(QPen(QColor(0, 255, 200, 180), 1))
         pts = len(self.waveform)
         mid = self.height() // 2
@@ -196,9 +259,9 @@ class TimelineWidget(QWidget):
 
     def dropEvent(self, event):
         try:
-            tid = int(event.mimeData().text())
+            tid_str = event.mimeData().text()
             pos = event.position()
-            self.trackDropped.emit(tid, int(pos.x()), int(pos.y()))
+            self.trackDropped.emit(tid_str, int(pos.x()), int(pos.y()))
             event.acceptProposedAction()
         except:
             pass

@@ -8,8 +8,8 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QFrame, QMessageBox, QScrollArea, QFileDialog,
                              QSlider, QComboBox, QCheckBox, QStatusBar, QApplication,
                              QSplitter)
-from PyQt6.QtCore import Qt, QSize, QTimer, QUrl
-from PyQt6.QtGui import QBrush, QColor
+from PyQt6.QtCore import Qt, QSize, QTimer, QUrl, QMimeData
+from PyQt6.QtGui import QBrush, QColor, QDrag
 from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
 
 # Project Imports (Lightweight)
@@ -62,6 +62,8 @@ class AudioSequencerApp(QMainWindow):
         self.is_playing = False
         
         self.waveform_loaders = []
+        self.copy_buffer = None
+        self.is_library_preview = False
         
         print(f"[BOOT] Core components ready ({time.time() - boot_start:.3f}s)")
         ui_start = time.time()
@@ -126,9 +128,12 @@ class AudioSequencerApp(QMainWindow):
         rsb = QPushButton("↺"); rsb.setFixedWidth(30); rsb.clicked.connect(self.load_library); sl.addWidget(rsb); ll.addLayout(sl)
         self.library_table = DraggableTable(0, 3); self.library_table.setHorizontalHeaderLabels(["Name", "BPM", "Key"]); self.library_table.setColumnWidth(0, 200); self.library_table.itemSelectionChanged.connect(self.on_library_track_selected); ll.addWidget(self.library_table)
         
-        self.add_btn = QPushButton("➕ Add to Timeline"); self.add_btn.clicked.connect(self.add_selected_to_timeline); ll.addWidget(self.add_btn)
+        pl_btn_layout = QHBoxLayout()
+        self.add_btn = QPushButton("➕ Add"); self.add_btn.clicked.connect(self.add_selected_to_timeline); pl_btn_layout.addWidget(self.add_btn)
+        self.preview_clip_btn = QPushButton("▶ Preview Clip"); self.preview_clip_btn.clicked.connect(self.play_library_preview); pl_btn_layout.addWidget(self.preview_clip_btn)
+        ll.addLayout(pl_btn_layout)
         
-        self.l_preview = LibraryWaveformPreview(); ll.addWidget(self.l_preview); self.l_wave_label = QLabel("Select to preview"); self.l_wave_label.setAlignment(Qt.AlignmentFlag.AlignCenter); self.l_wave_label.setStyleSheet("color: #666; font-size: 10px;"); ll.addWidget(self.l_wave_label)
+        self.l_preview = LibraryWaveformPreview(); self.l_preview.dragStarted.connect(self.on_library_preview_drag); ll.addWidget(self.l_preview); self.l_wave_label = QLabel("Select range to drag specific section"); self.l_wave_label.setAlignment(Qt.AlignmentFlag.AlignCenter); self.l_wave_label.setStyleSheet("color: #666; font-size: 10px;"); ll.addWidget(self.l_wave_label)
         top_layout.addWidget(lp)
         
         # 2. Production Mixer & Analytics (Middle)
@@ -194,12 +199,19 @@ class AudioSequencerApp(QMainWindow):
         self.timeline_widget.trackDropped.connect(self.on_track_dropped)
         self.setStyleSheet("""QMainWindow { background-color: #121212; color: #e0e0e0; font-family: 'Segoe UI'; } QLabel { color: #ffffff; } QTableWidget { background-color: #1e1e1e; gridline-color: #333; color: white; border: 1px solid #333; } QHeaderView::section { background-color: #333; color: white; border: 1px solid #444; padding: 5px; } QPushButton { background-color: #333; color: #fff; padding: 6px; border-radius: 4px; border: 1px solid #444; } QPushButton:hover { background-color: #444; } QLineEdit { background-color: #222; color: white; border: 1px solid #444; } QComboBox { background-color: #333; color: white; } QCheckBox { color: white; } QScrollBar:vertical { width: 12px; background: #222; } QScrollBar::handle:vertical { background: #444; border-radius: 6px; }""")
 
-    def on_track_dropped(self, tid, x, y):
+    def on_track_dropped(self, tid_str, x, y):
+        # tid_str might be "tid" or "tid:start:end"
+        parts = str(tid_str).split(':')
+        tid = int(parts[0])
+        selection_range = None
+        if len(parts) == 3:
+            selection_range = (float(parts[1]), float(parts[2]))
+
         # Header is 40px tall, then lanes are (height + spacing)
         # We use the widget's internal coordinates (x,y)
         lane = max(0, min(7, int((y - 40) // (self.timeline_widget.lane_height + self.timeline_widget.lane_spacing))))
-        print(f"[UI] Track {tid} dropped at x={x}, y={y} -> Lane {lane}")
-        self.add_track_by_id(tid, x=x, lane=lane)
+        print(f"[UI] Track {tid} dropped at x={x}, y={y} -> Lane {lane} (Range: {selection_range})")
+        self.add_track_by_id(tid, x=x, lane=lane, selection_range=selection_range)
         self.timeline_widget.update_geometry()
         self.timeline_widget.update()
 
@@ -214,6 +226,21 @@ class AudioSequencerApp(QMainWindow):
         if paths: self.loading_overlay.show_loading("Ingesting Files..."); self.it = IngestionThread(paths, self.dm); self.it.finished.connect(self.on_ingestion_finished); self.it.start()
     def on_ingestion_finished(self): self.load_library(); self.loading_overlay.hide_loading(); self.status_bar.showMessage("Ingestion complete.")
     def update_playback_cursor(self):
+        if self.is_library_preview:
+            p = self.player.position()
+            if self.l_preview.selection_end is not None:
+                dur = self.player.duration()
+                end_ms = int(self.l_preview.selection_end * dur)
+                if p >= end_ms:
+                    self.player.pause()
+                    self.is_library_preview = False
+                    self.play_timer.stop()
+            elif p >= self.player.duration() and self.player.duration() > 0:
+                self.player.stop()
+                self.is_library_preview = False
+                self.play_timer.stop()
+            return
+
         if self.is_playing:
             p = self.player.position()
             if self.timeline_widget.loop_enabled and p >= self.timeline_widget.loop_end_ms: self.player.setPosition(int(self.timeline_widget.loop_start_ms)); p = self.timeline_widget.loop_start_ms
@@ -227,6 +254,7 @@ class AudioSequencerApp(QMainWindow):
     def stop_playback(self): self.player.stop(); self.play_timer.stop(); self.is_playing = False; self.ptb.setText("▶ Play Journey"); self.status_bar.showMessage("Stopped.")
     def toggle_playback(self):
         if not self.timeline_widget.segments: return
+        self.is_library_preview = False
         if self.is_playing: self.player.pause(); self.play_timer.stop(); self.is_playing = False; self.ptb.setText("▶ Play Journey")
         else:
             if self.preview_dirty: self.render_preview_for_playback()
@@ -491,16 +519,86 @@ class AudioSequencerApp(QMainWindow):
             try:
                 conn = self.dm.get_conn(); cursor = conn.cursor(); cursor.execute("SELECT file_path FROM tracks WHERE id = ?", (tid,)); fp = cursor.fetchone()[0]; conn.close(); w = self.processor.get_waveform_envelope(fp); self.l_preview.set_waveform(w); self.l_wave_label.setText(os.path.basename(fp)); self.player.setSource(QUrl.fromLocalFile(os.path.abspath(fp)))
             except: pass
-    def add_track_by_id(self, tid, x=None, only_update_recs=False, lane=0):
+
+    def play_library_preview(self):
+        if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+            self.player.pause()
+            self.play_timer.stop()
+            self.is_library_preview = False
+        else:
+            self.is_library_preview = True
+            if self.l_preview.selection_start is not None:
+                dur = self.player.duration()
+                if dur > 0:
+                    start_ms = int(self.l_preview.selection_start * dur)
+                    self.player.setPosition(start_ms)
+            self.player.play()
+            self.play_timer.start()
+
+    def on_library_preview_drag(self, start_pct, end_pct):
+        si = self.library_table.selectedItems()
+        if si:
+            tid = self.library_table.item(si[0].row(), 0).data(Qt.ItemDataRole.UserRole)
+            # Standard Qt Drag
+            drag = QDrag(self)
+            mime = QMimeData()
+            # Special format for range: tid:start_pct:end_pct
+            mime.setText(f"{tid}:{start_pct}:{end_pct}")
+            drag.setMimeData(mime)
+            drag.exec(Qt.DropAction.CopyAction)
+
+    def add_track_by_id(self, tid, x=None, only_update_recs=False, lane=0, selection_range=None):
         try:
             conn = self.dm.get_conn(); conn.row_factory = sqlite3_factory; cursor = conn.cursor(); cursor.execute("SELECT * FROM tracks WHERE id = ?", (tid,)); track = dict(cursor.fetchone()); conn.close()
             if not only_update_recs:
                 self.push_undo(); sm = x / self.timeline_widget.pixels_per_ms if x is not None else None; seg = self.timeline_widget.add_track(track, start_ms=sm); loop_dur = track.get('loop_duration') or 0; loop_start = track.get('loop_start') or 0
                 if loop_dur > 0: seg.offset_ms = loop_start * 1000.0; seg.duration_ms = loop_dur * 1000.0
+                
+                # Apply selection range if provided
+                if selection_range:
+                    s_pct, e_pct = selection_range
+                    full_dur = 30000.0 # Assumed default or we should get real dur
+                    # For simplicity, if it's a new track, we use 30s as base or track dur
+                    # Better: use the loop_duration if it exists
+                    base_dur = seg.duration_ms
+                    seg.offset_ms = s_pct * base_dur
+                    seg.duration_ms = (e_pct - s_pct) * base_dur
+
                 if x is not None: seg.lane = lane
                 self.load_waveform_async(seg); self.timeline_widget.update()
             self.selected_library_track = track; self.update_recommendations(tid)
         except Exception as e: show_error(self, "Data Error", "Failed.", e)
+
+    def copy_selected_segment(self):
+        sel = self.timeline_widget.selected_segment
+        if sel:
+            self.copy_buffer = sel.to_dict()
+            self.status_bar.showMessage(f"Copied: {sel.filename}")
+
+    def paste_segment(self):
+        if self.copy_buffer:
+            self.push_undo()
+            # Paste at cursor position
+            start_ms = self.timeline_widget.cursor_pos_ms
+            # Find a free lane at this position or use lane 0
+            lane = 0
+            # Logic to find best lane could be added here
+            
+            seg = self.timeline_widget.add_track(self.copy_buffer, start_ms=start_ms, lane=lane)
+            # Restore properties from buffer
+            seg.duration_ms = self.copy_buffer['duration_ms']
+            seg.offset_ms = self.copy_buffer['offset_ms']
+            seg.volume = self.copy_buffer['volume']
+            seg.pan = self.copy_buffer.get('pan', 0.0)
+            seg.pitch_shift = self.copy_buffer.get('pitch_shift', 0)
+            seg.reverb = self.copy_buffer.get('reverb', 0.0)
+            seg.harmonics = self.copy_buffer.get('harmonics', 0.0)
+            seg.is_primary = self.copy_buffer['is_primary']
+            seg.is_ambient = self.copy_buffer.get('is_ambient', False)
+            
+            self.load_waveform_async(seg)
+            self.timeline_widget.update()
+            self.status_bar.showMessage(f"Pasted: {seg.filename}")
     def add_selected_to_timeline(self):
         if self.selected_library_track: self.add_track_by_id(self.selected_library_track['id'])
     def on_rec_double_clicked(self, i): self.add_track_by_id(self.rec_list.item(i.row(), 0).data(Qt.ItemDataRole.UserRole))
@@ -669,6 +767,8 @@ class AudioSequencerApp(QMainWindow):
         elif event.modifiers() & Qt.KeyboardModifier.ControlModifier:
             if event.key() == Qt.Key.Key_Z: self.undo()
             elif event.key() == Qt.Key.Key_Y: self.redo()
+            elif event.key() == Qt.Key.Key_C: self.copy_selected_segment()
+            elif event.key() == Qt.Key.Key_V or event.key() == Qt.Key.Key_P: self.paste_segment()
             elif event.key() == Qt.Key.Key_B:
                 # Blade Tool: Split selected at cursor
                 sel = self.timeline_widget.selected_segment
