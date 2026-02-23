@@ -37,7 +37,9 @@ class DataManager:
                 onsets_json TEXT, -- JSON string of beat timestamps
                 date_added DATETIME DEFAULT CURRENT_TIMESTAMP,
                 last_analyzed DATETIME,
-                clp_embedding_id TEXT -- Link to vector database ID
+                clp_embedding_id TEXT, -- Link to vector database ID
+                stems_path TEXT, -- New: Path to directory containing extracted stems
+                vocal_energy REAL -- New: Detected vocal prominence
             )
         ''')
         
@@ -50,6 +52,12 @@ class DataManager:
         except sqlite3.OperationalError: pass
         try:
             cursor.execute("ALTER TABLE tracks ADD COLUMN loop_duration REAL")
+        except sqlite3.OperationalError: pass
+        try:
+            cursor.execute("ALTER TABLE tracks ADD COLUMN stems_path TEXT")
+        except sqlite3.OperationalError: pass
+        try:
+            cursor.execute("ALTER TABLE tracks ADD COLUMN vocal_energy REAL")
         except sqlite3.OperationalError: pass
         
         conn.commit()

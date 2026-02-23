@@ -157,3 +157,39 @@ class AudioProcessor:
         sf.write(output_path, output, sr)
         return output_path
 
+    def separate_stems(self, input_path, output_dir):
+        """
+        Extracts basic stems using HPSS and frequency filtering.
+        In a full pro environment, this would use Demucs/Spleeter.
+        """
+        os.makedirs(output_dir, exist_ok=True)
+        y, sr = librosa.load(input_path, sr=self.sr)
+        
+        # 1. Harmonic / Percussive Separation (Librosa)
+        harmonic, percussive = librosa.effects.hpss(y)
+        
+        # 2. Pseudo-Vocal extraction (Bandpass 300Hz - 3kHz on Harmonic)
+        # This is a very rough approximation
+        board = pedalboard.Pedalboard([
+            pedalboard.HighpassFilter(cutoff_frequency_hz=300),
+            pedalboard.LowpassFilter(cutoff_frequency_hz=3000)
+        ])
+        vocal_candidate = board(harmonic.astype(np.float32), sr)
+        
+        # Subtract vocal from harmonic to get "instruments"
+        instr_harmonic = harmonic - vocal_candidate
+        
+        stems = {
+            "drums": percussive,
+            "vocals": vocal_candidate,
+            "other": instr_harmonic
+        }
+        
+        paths = {}
+        for name, data in stems.items():
+            path = os.path.join(output_dir, f"{name}.wav")
+            sf.write(path, data, sr)
+            paths[name] = path
+            
+        return paths
+
