@@ -33,6 +33,8 @@ class TrackSegment:
         self.harmonics = 0.0 # 0.0 to 1.0 (Saturation/Harmonic excitement)
         self.stems_path = track_data.get('stems_path')
         self.vocal_energy = track_data.get('vocal_energy', 0.0)
+        self.vocal_shift = 0 # Independent pitch shift for vocals
+        self.harmony_level = 0.0 # 0.0 to 1.0 (Mix of rhythmic harmonic layer)
         base_color = self.KEY_COLORS.get(self.key, QColor(70, 130, 180))
         self.color = QColor(base_color.red(), base_color.green(), base_color.blue(), 200)
         self.onsets = []
@@ -55,7 +57,9 @@ class TrackSegment:
             'pitch_shift': self.pitch_shift,
             'reverb': self.reverb, 'harmonics': self.harmonics,
             'stems_path': self.stems_path,
-            'vocal_energy': self.vocal_energy
+            'vocal_energy': self.vocal_energy,
+            'vocal_shift': self.vocal_shift,
+            'harmony_level': self.harmony_level
         }
         d['onsets_json'] = ",".join([str(x/1000.0) for x in self.onsets])
         return d

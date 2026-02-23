@@ -75,25 +75,44 @@ def _process_single_segment(s, i, target_bpm, sr, time_range):
             y_sync = proc.stretch_numpy(y_looped, sr, s['bpm'], target_bpm)
             
             # 3. Pitch Shift
-            ps = s.get('pitch_shift', 0)
-            if ps != 0:
-                y_sync = proc.shift_pitch_numpy(y_sync, sr, ps)
+            # Use independent vocal shift if it's a vocal stem
+            if stype == "vocals":
+                v_ps = s.get('pitch_shift', 0) + s.get('vocal_shift', 0)
+                if v_ps != 0:
+                    y_sync = proc.shift_pitch_numpy(y_sync, sr, v_ps)
+            else:
+                ps = s.get('pitch_shift', 0)
+                if ps != 0:
+                    y_sync = proc.shift_pitch_numpy(y_sync, sr, ps)
             
             # 4. Trim to exactly what we need
             start_sample = int(render_offset_ms * sr / 1000.0)
             end_sample = int((render_offset_ms + effective_dur) * sr / 1000.0)
             y_sync = y_sync[start_sample : end_sample]
             
-            # 5. Convert to Stereo (Pedalboard/Renderer expects 2 channels)
+            # 5. Convert to Stereo
             if len(y_sync.shape) == 1:
                 stem_np = np.stack([y_sync, y_sync])
             else:
                 stem_np = y_sync
 
-            # Apply Vocal Specific Harmonics
+            # Apply Vocal Specific Harmonics & Harmonic Rhythms
             if stype == "vocals":
+                # Auto-harmonics
                 vocal_harm = 0.4 + (s.get('harmonics', 0.0) * 0.6)
                 stem_np = Pedalboard([Distortion(drive_db=vocal_harm * 12)])(stem_np, sr)
+                
+                # CREATIVE: Harmonic Rhythm / Stutter
+                h_level = s.get('harmony_level', 0.0)
+                if h_level > 0:
+                    # 1. Create duplicate harmonic layer (e.g. +7st)
+                    h_layer = proc.shift_pitch_numpy(y_sync, sr, 7)
+                    if len(h_layer.shape) == 1: h_layer = np.stack([h_layer, h_layer])
+                    # 2. Apply rhythmic gate
+                    h_layer = proc.apply_rhythmic_gate(h_layer, sr, target_bpm, pattern="1/8")
+                    # 3. Mix
+                    min_l = min(stem_np.shape[1], h_layer.shape[1])
+                    stem_np[:, :min_l] += (h_layer[:, :min_l] * h_level * 0.7)
             
             if combined_seg_np is None:
                 combined_seg_np = stem_np

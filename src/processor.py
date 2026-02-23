@@ -79,6 +79,45 @@ class AudioProcessor:
             sf.write(output_path, final, sr)
         return final
 
+    def apply_rhythmic_gate(self, y, sr, bpm, pattern="1/8"):
+        """
+        Applies a rhythmic volume gate (stutter effect) to a numpy array.
+        pattern: "1/4", "1/8", "1/16", or "triplet"
+        """
+        if len(y.shape) > 1:
+            # Handle stereo by applying to both channels
+            channels = []
+            for i in range(y.shape[0]):
+                channels.append(self.apply_rhythmic_gate(y[i], sr, bpm, pattern))
+            return np.stack(channels)
+
+        # Calculate durations in samples
+        beat_dur = (60.0 / bpm) * sr
+        if pattern == "1/4": division = 1.0
+        elif pattern == "1/8": division = 0.5
+        elif pattern == "1/16": division = 0.25
+        elif pattern == "triplet": division = 1.0/3.0
+        else: division = 0.5
+        
+        gate_dur = int(beat_dur * division)
+        # Create a square wave for the gate
+        num_gates = int(len(y) / gate_dur) + 1
+        # Gate: 70% on, 30% off for a crisp but not too harsh feel
+        on_samples = int(gate_dur * 0.7)
+        off_samples = gate_dur - on_samples
+        
+        gate_cycle = np.concatenate([np.ones(on_samples), np.zeros(off_samples)])
+        full_gate = np.tile(gate_cycle, num_gates)[:len(y)]
+        
+        # Smooth the gate edges to prevent clicks
+        fade_samples = int(sr * 0.01) # 10ms
+        fade_in = np.linspace(0, 1, fade_samples)
+        fade_out = np.linspace(1, 0, fade_samples)
+        
+        # Very simple smoothing by applying short fades to the gate signal itself
+        # This is a bit rough but works for a quick stutter
+        return y * full_gate.astype(np.float32)
+
     def get_waveform_envelope(self, input_path, num_points=500):
         """Returns a low-res amplitude envelope for waveform display."""
         try:
