@@ -329,7 +329,7 @@ class FullMixOrchestrator:
                     preferred_mel_lane = 3 if idx % 2 == 0 else 6
                     lane = find_free_lane(current_ms, b_dur + overlap, preferred=preferred_mel_lane)
                     
-                    v_energy = lead.get('vocal_energy', 0.0)
+                    v_energy = lead.get('vocal_energy') or 0.0
                     is_vocal_heavy = v_energy > 0.2
                     
                     segments.append({
