@@ -35,6 +35,10 @@ class TrackSegment:
         self.vocal_energy = track_data.get('vocal_energy', 0.0)
         self.vocal_shift = 0 # Independent pitch shift for vocals
         self.harmony_level = 0.0 # 0.0 to 1.0 (Mix of rhythmic harmonic layer)
+        self.vocal_vol = 1.0
+        self.drum_vol = 1.0
+        self.instr_vol = 1.0
+        self.ducking_depth = 0.7 # How much this track is ducked by others (0.0 to 1.0)
         base_color = self.KEY_COLORS.get(self.key, QColor(70, 130, 180))
         self.color = QColor(base_color.red(), base_color.green(), base_color.blue(), 200)
         self.onsets = []
@@ -59,7 +63,11 @@ class TrackSegment:
             'stems_path': self.stems_path,
             'vocal_energy': self.vocal_energy,
             'vocal_shift': self.vocal_shift,
-            'harmony_level': self.harmony_level
+            'harmony_level': self.harmony_level,
+            'vocal_vol': self.vocal_vol,
+            'drum_vol': self.drum_vol,
+            'instr_vol': self.instr_vol,
+            'ducking_depth': self.ducking_depth
         }
         d['onsets_json'] = ",".join([str(x/1000.0) for x in self.onsets])
         return d

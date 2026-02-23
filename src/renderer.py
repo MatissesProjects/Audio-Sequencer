@@ -38,8 +38,8 @@ def _process_single_segment(s, i, target_bpm, sr, time_range):
     cache_dir = "render_cache"
     os.makedirs(cache_dir, exist_ok=True)
     # Create unique hash for this segment's heavy processing
-    # (file + bpm + pitch + duration + offset)
-    key_str = f"{s['file_path']}_{s['bpm']}_{target_bpm}_{s.get('pitch_shift',0)}_{s_dur}_{s_off}_{stems_dir}"
+    # (file + bpm + pitch + duration + offset + stem mix + harmony)
+    key_str = f"{s['file_path']}_{s['bpm']}_{target_bpm}_{s.get('pitch_shift',0)}_{s_dur}_{s_off}_{stems_dir}_{s.get('vocal_shift',0)}_{s.get('harmony_level',0)}_{s.get('vocal_vol',1.0)}_{s.get('drum_vol',1.0)}_{s.get('instr_vol',1.0)}"
     cache_hash = hashlib.md5(key_str.encode()).hexdigest()
     cache_file = os.path.join(cache_dir, f"{cache_hash}.npy")
     
@@ -51,7 +51,8 @@ def _process_single_segment(s, i, target_bpm, sr, time_range):
                 'start_idx': int((render_start_ms - range_start) * sr / 1000.0) if time_range else int(render_start_ms * sr / 1000.0),
                 'is_primary': s.get('is_primary', False),
                 'is_ambient': s.get('is_ambient', False),
-                'vocal_energy': s.get('vocal_energy', 0.0)
+                'vocal_energy': s.get('vocal_energy', 0.0),
+                'ducking_depth': s.get('ducking_depth', 0.7)
             }
         except: pass
 
@@ -76,7 +77,6 @@ def _process_single_segment(s, i, target_bpm, sr, time_range):
             y_sync = proc.stretch_numpy(y_looped, sr, s['bpm'], target_bpm)
             
             # 3. Pitch Shift
-            # Use independent vocal shift if it's a vocal stem
             if stype == "vocals":
                 v_ps = s.get('pitch_shift', 0) + s.get('vocal_shift', 0)
                 if v_ps != 0:
@@ -102,25 +102,24 @@ def _process_single_segment(s, i, target_bpm, sr, time_range):
                 # Auto-harmonics
                 vocal_harm = 0.4 + (s.get('harmonics', 0.0) * 0.6)
                 stem_np = Pedalboard([Distortion(drive_db=vocal_harm * 12)])(stem_np, sr)
-                
-                # CREATIVE: Harmonic Rhythm / Stutter
+                stem_np *= s.get('vocal_vol', 1.0)
+
                 h_level = s.get('harmony_level', 0.0)
                 if h_level > 0:
-                    # 1. Create duplicate harmonic layer (e.g. +7st)
                     h_layer = proc.shift_pitch_numpy(y_sync, sr, 7)
                     if len(h_layer.shape) == 1: h_layer = np.stack([h_layer, h_layer])
-                    # 2. Apply rhythmic gate
                     h_layer = proc.apply_rhythmic_gate(h_layer, sr, target_bpm, pattern="1/8")
-                    # 3. Mix
                     min_l = min(stem_np.shape[1], h_layer.shape[1])
                     stem_np[:, :min_l] += (h_layer[:, :min_l] * h_level * 0.7)
+            elif stype == "drums":
+                stem_np *= s.get('drum_vol', 1.0)
+            elif stype == "other":
+                stem_np *= s.get('instr_vol', 1.0)
             
             if combined_seg_np is None:
                 combined_seg_np = stem_np
             else:
                 if stype == "other":
-                    # Sidechain-style blend stems
-                    # Calculate envelope of vocals/drums
                     rms = np.sqrt(np.mean(combined_seg_np**2, axis=0))
                     envelope = np.repeat(rms[::512], 512)[:combined_seg_np.shape[1]]
                     if len(envelope) < combined_seg_np.shape[1]:
@@ -203,7 +202,8 @@ def _process_single_segment(s, i, target_bpm, sr, time_range):
         'start_idx': int((render_start_ms - range_start) * sr / 1000.0) if time_range else int(render_start_ms * sr / 1000.0),
         'is_primary': s.get('is_primary', False),
         'is_ambient': s.get('is_ambient', False),
-        'vocal_energy': s.get('vocal_energy', 0.0)
+        'vocal_energy': s.get('vocal_energy', 0.0),
+        'ducking_depth': s.get('ducking_depth', 0.7)
     }
 
 class FlowRenderer:
@@ -395,11 +395,15 @@ class FlowRenderer:
                         rel_start_c = overlap_start - start; rel_end_c = overlap_end - start
                         target_segment = samples[:, rel_start_c:rel_end_c]
                         
-                        # Vocal-aware ducking amount
+                        # Vocal-aware ducking base amount
                         is_vocal = other.get('vocal_energy', 0) > 0.2
-                        duck_amt = 0.9 if is_vocal else (0.85 if current['is_ambient'] else 0.7)
+                        base_duck = 0.9 if is_vocal else (0.85 if current['is_ambient'] else 0.7)
                         
-                        ducked_segment = self._apply_sidechain(target_segment, source_segment, amount=duck_amt)
+                        # Apply user-defined ducking depth preference
+                        depth = current.get('ducking_depth', 0.7)
+                        final_duck_amt = base_duck * (depth / 0.7) # Scale based on 0.7 being "normal"
+                        
+                        ducked_segment = self._apply_sidechain(target_segment, source_segment, amount=min(0.95, final_duck_amt))
                         samples[:, rel_start_c:rel_end_c] = ducked_segment
                         break
             

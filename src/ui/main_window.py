@@ -169,6 +169,16 @@ class AudioSequencerApp(QMainWindow):
         vpl = QHBoxLayout(); l_vsh = QLabel("<b>Vocal Shft:</b>"); l_vsh.setFixedWidth(60); vpl.addWidget(l_vsh); self.vocal_shift_combo = QComboBox(); [self.vocal_shift_combo.addItem(f"{i:+} st", i) for i in range(-12, 13)]; self.vocal_shift_combo.setCurrentIndex(12); self.vocal_shift_combo.currentIndexChanged.connect(self.on_prop_changed); vpl.addWidget(self.vocal_shift_combo); pl.addLayout(vpl)
         hrel = QHBoxLayout(); l_hry = QLabel("<b>Harm Rhy:</b>"); l_hry.setFixedWidth(60); hrel.addWidget(l_hry); self.harmony_slider = QSlider(Qt.Orientation.Horizontal); self.harmony_slider.setRange(0, 100); self.harmony_slider.valueChanged.connect(self.on_prop_changed); hrel.addWidget(self.harmony_slider); pl.addLayout(hrel)
         
+        # --- Stem Mixers ---
+        pl.addWidget(QLabel("<b>🎛 Stem Mix</b>"))
+        vvl = QHBoxLayout(); vvl.addWidget(QLabel("Voc:")); self.v_vol_s = QSlider(Qt.Orientation.Horizontal); self.v_vol_s.setRange(0, 150); self.v_vol_s.setValue(100); self.v_vol_s.valueChanged.connect(self.on_prop_changed); vvl.addWidget(self.v_vol_s); pl.addLayout(vvl)
+        dvl = QHBoxLayout(); dvl.addWidget(QLabel("Drm:")); self.d_vol_s = QSlider(Qt.Orientation.Horizontal); self.d_vol_s.setRange(0, 150); self.d_vol_s.setValue(100); self.d_vol_s.valueChanged.connect(self.on_prop_changed); dvl.addWidget(self.d_vol_s); pl.addLayout(dvl)
+        ivl = QHBoxLayout(); ivl.addWidget(QLabel("Ins:")); self.i_vol_s = QSlider(Qt.Orientation.Horizontal); self.i_vol_s.setRange(0, 150); self.i_vol_s.setValue(100); self.i_vol_s.valueChanged.connect(self.on_prop_changed); ivl.addWidget(self.i_vol_s); pl.addLayout(ivl)
+        
+        # --- Ducking ---
+        pl.addWidget(QLabel("<b>🌊 Smart Ducking</b>"))
+        ddl = QHBoxLayout(); ddl.addWidget(QLabel("Depth:")); self.duck_depth_s = QSlider(Qt.Orientation.Horizontal); self.duck_depth_s.setRange(0, 100); self.duck_depth_s.setValue(70); self.duck_depth_s.valueChanged.connect(self.on_prop_changed); ddl.addWidget(self.duck_depth_s); pl.addLayout(ddl)
+
         self.prim_check = QCheckBox("Primary Foundation Track"); self.prim_check.stateChanged.connect(self.on_prop_changed); pl.addWidget(self.prim_check)
         self.amb_check = QCheckBox("Ambient Background Track"); self.amb_check.stateChanged.connect(self.on_prop_changed); pl.addWidget(self.amb_check)
         self.prop_group.setVisible(False); rl.addWidget(self.prop_group)
@@ -291,7 +301,9 @@ class AudioSequencerApp(QMainWindow):
         self.timeline_widget.segments = []
         for sj in sl:
             s = json.loads(sj); td = {'id': s['id'], 'filename': s['filename'], 'file_path': s['file_path'], 'bpm': s['bpm'], 'harmonic_key': s['key'], 'onsets_json': s.get('onsets_json', "")}
-            seg = TrackSegment(td, start_ms=s['start_ms'], duration_ms=s['duration_ms'], lane=s['lane'], offset_ms=s['offset_ms']); seg.volume = s['volume']; seg.pan = s.get('pan', 0.0); seg.is_primary = s['is_primary']; seg.fade_in_ms = s['fade_in_ms']; seg.fade_out_ms = s['fade_out_ms']; seg.pitch_shift = s.get('pitch_shift', 0); seg.reverb = s.get('reverb', 0.0); seg.harmonics = s.get('harmonics', 0.0); seg.vocal_shift = s.get('vocal_shift', 0); seg.harmony_level = s.get('harmony_level', 0.0); self.load_waveform_async(seg); self.timeline_widget.segments.append(seg)
+            seg = TrackSegment(td, start_ms=s['start_ms'], duration_ms=s['duration_ms'], lane=s['lane'], offset_ms=s['offset_ms']); seg.volume = s['volume']; seg.pan = s.get('pan', 0.0); seg.is_primary = s['is_primary']; seg.fade_in_ms = s['fade_in_ms']; seg.fade_out_ms = s['fade_out_ms']; seg.pitch_shift = s.get('pitch_shift', 0); seg.reverb = s.get('reverb', 0.0); seg.harmonics = s.get('harmonics', 0.0); seg.vocal_shift = s.get('vocal_shift', 0); seg.harmony_level = s.get('harmony_level', 0.0)
+            seg.vocal_vol = s.get('vocal_vol', 1.0); seg.drum_vol = s.get('drum_vol', 1.0); seg.instr_vol = s.get('instr_vol', 1.0); seg.ducking_depth = s.get('ducking_depth', 0.7)
+            self.load_waveform_async(seg); self.timeline_widget.segments.append(seg)
         self.timeline_widget.update_geometry(); self.update_status()
     def on_segment_selected(self, s):
         if s:
@@ -304,6 +316,12 @@ class AudioSequencerApp(QMainWindow):
             self.harm_slider.blockSignals(True); self.harm_slider.setValue(int(s.harmonics * 100)); self.harm_slider.blockSignals(False)
             self.vocal_shift_combo.blockSignals(True); idx = self.vocal_shift_combo.findData(s.vocal_shift); self.vocal_shift_combo.setCurrentIndex(idx); self.vocal_shift_combo.blockSignals(False)
             self.harmony_slider.blockSignals(True); self.harmony_slider.setValue(int(s.harmony_level * 100)); self.harmony_slider.blockSignals(False)
+            
+            self.v_vol_s.blockSignals(True); self.v_vol_s.setValue(int(s.vocal_vol * 100)); self.v_vol_s.blockSignals(False)
+            self.d_vol_s.blockSignals(True); self.d_vol_s.setValue(int(s.drum_vol * 100)); self.d_vol_s.blockSignals(False)
+            self.i_vol_s.blockSignals(True); self.i_vol_s.setValue(int(s.instr_vol * 100)); self.i_vol_s.blockSignals(False)
+            self.duck_depth_s.blockSignals(True); self.duck_depth_s.setValue(int(s.ducking_depth * 100)); self.duck_depth_s.blockSignals(False)
+            
             self.prim_check.blockSignals(True); self.prim_check.setChecked(s.is_primary); self.prim_check.blockSignals(False)
             self.amb_check.blockSignals(True); self.amb_check.setChecked(s.is_ambient); self.amb_check.blockSignals(False)
         else:
@@ -320,6 +338,12 @@ class AudioSequencerApp(QMainWindow):
             sel.harmonics = self.harm_slider.value() / 100.0
             sel.vocal_shift = self.vocal_shift_combo.currentData()
             sel.harmony_level = self.harmony_slider.value() / 100.0
+            
+            sel.vocal_vol = self.v_vol_s.value() / 100.0
+            sel.drum_vol = self.d_vol_s.value() / 100.0
+            sel.instr_vol = self.i_vol_s.value() / 100.0
+            sel.ducking_depth = self.duck_depth_s.value() / 100.0
+            
             sel.is_primary = self.prim_check.isChecked()
             sel.is_ambient = self.amb_check.isChecked()
             self.timeline_widget.update()
@@ -490,7 +514,9 @@ class AudioSequencerApp(QMainWindow):
             with open(p, 'r') as f: data = json.load(f)
             self.timeline_widget.segments = []; self.tbe.setText(str(data['target_bpm']))
             for s in data['segments']:
-                td = {'id': s['id'], 'filename': s['filename'], 'file_path': s['file_path'], 'bpm': s['bpm'], 'harmonic_key': s['key'], 'onsets_json': s.get('onsets_json', "")}; seg = TrackSegment(td, start_ms=s['start_ms'], duration_ms=s['duration_ms'], lane=s['lane'], offset_ms=s['offset_ms']); seg.volume = s['volume']; seg.pan = s.get('pan', 0.0); seg.is_primary = s['is_primary']; seg.fade_in_ms = s['fade_in_ms']; seg.fade_out_ms = s['fade_out_ms']; seg.pitch_shift = s.get('pitch_shift', 0); seg.reverb = s.get('reverb', 0.0); seg.harmonics = s.get('harmonics', 0.0); seg.vocal_shift = s.get('vocal_shift', 0); seg.harmony_level = s.get('harmony_level', 0.0); self.load_waveform_async(seg); self.timeline_widget.segments.append(seg)
+                td = {'id': s['id'], 'filename': s['filename'], 'file_path': s['file_path'], 'bpm': s['bpm'], 'harmonic_key': s['key'], 'onsets_json': s.get('onsets_json', "")}; seg = TrackSegment(td, start_ms=s['start_ms'], duration_ms=s['duration_ms'], lane=s['lane'], offset_ms=s['offset_ms']); seg.volume = s['volume']; seg.pan = s.get('pan', 0.0); seg.is_primary = s['is_primary']; seg.fade_in_ms = s['fade_in_ms']; seg.fade_out_ms = s['fade_out_ms']; seg.pitch_shift = s.get('pitch_shift', 0); seg.reverb = s.get('reverb', 0.0); seg.harmonics = s.get('harmonics', 0.0); seg.vocal_shift = s.get('vocal_shift', 0); seg.harmony_level = s.get('harmony_level', 0.0)
+                seg.vocal_vol = s.get('vocal_vol', 1.0); seg.drum_vol = s.get('drum_vol', 1.0); seg.instr_vol = s.get('instr_vol', 1.0); seg.ducking_depth = s.get('ducking_depth', 0.7)
+                self.load_waveform_async(seg); self.timeline_widget.segments.append(seg)
             self.timeline_widget.update_geometry(); self.update_status()
     def on_bpm_changed(self, t):
         try: self.timeline_widget.target_bpm = float(t); self.preview_dirty = True; self.timeline_widget.update(); self.update_status()
@@ -618,6 +644,10 @@ class AudioSequencerApp(QMainWindow):
             seg.harmonics = self.copy_buffer.get('harmonics', 0.0)
             seg.vocal_shift = self.copy_buffer.get('vocal_shift', 0)
             seg.harmony_level = self.copy_buffer.get('harmony_level', 0.0)
+            seg.vocal_vol = self.copy_buffer.get('vocal_vol', 1.0)
+            seg.drum_vol = self.copy_buffer.get('drum_vol', 1.0)
+            seg.instr_vol = self.copy_buffer.get('instr_vol', 1.0)
+            seg.ducking_depth = self.copy_buffer.get('ducking_depth', 0.7)
             seg.is_primary = self.copy_buffer['is_primary']
             seg.is_ambient = self.copy_buffer.get('is_ambient', False)
             
