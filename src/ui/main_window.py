@@ -157,6 +157,10 @@ class AudioSequencerApp(QMainWindow):
         vl = QHBoxLayout(); l_vol = QLabel("<b>Volume:</b>"); l_vol.setFixedWidth(60); vl.addWidget(l_vol); self.vol_slider = QSlider(Qt.Orientation.Horizontal); self.vol_slider.setRange(0, 150); self.vol_slider.valueChanged.connect(self.on_prop_changed); vl.addWidget(self.vol_slider); pl.addLayout(vl)
         pal = QHBoxLayout(); l_pan = QLabel("<b>Panning:</b>"); l_pan.setFixedWidth(60); pal.addWidget(l_pan); self.pan_slider = QSlider(Qt.Orientation.Horizontal); self.pan_slider.setRange(-100, 100); self.pan_slider.setValue(0); self.pan_slider.valueChanged.connect(self.on_prop_changed); pal.addWidget(self.pan_slider); pl.addLayout(pal)
         pil = QHBoxLayout(); l_pitch = QLabel("<b>Pitch:</b>"); l_pitch.setFixedWidth(60); pil.addWidget(l_pitch); self.pitch_combo = QComboBox(); [self.pitch_combo.addItem(f"{i:+} st", i) for i in range(-6, 7)]; self.pitch_combo.currentIndexChanged.connect(self.on_prop_changed); pil.addWidget(self.pitch_combo); pl.addLayout(pil)
+        
+        rel = QHBoxLayout(); l_rev = QLabel("<b>Reverb:</b>"); l_rev.setFixedWidth(60); rel.addWidget(l_rev); self.rev_slider = QSlider(Qt.Orientation.Horizontal); self.rev_slider.setRange(0, 100); self.rev_slider.valueChanged.connect(self.on_prop_changed); rel.addWidget(self.rev_slider); pl.addLayout(rel)
+        hel = QHBoxLayout(); l_harm = QLabel("<b>Harmonics:</b>"); l_harm.setFixedWidth(60); hel.addWidget(l_harm); self.harm_slider = QSlider(Qt.Orientation.Horizontal); self.harm_slider.setRange(0, 100); self.harm_slider.valueChanged.connect(self.on_prop_changed); hel.addWidget(self.harm_slider); pl.addLayout(hel)
+        
         self.prim_check = QCheckBox("Primary Foundation Track"); self.prim_check.stateChanged.connect(self.on_prop_changed); pl.addWidget(self.prim_check)
         self.amb_check = QCheckBox("Ambient Background Track"); self.amb_check.stateChanged.connect(self.on_prop_changed); pl.addWidget(self.amb_check)
         self.prop_group.setVisible(False); rl.addWidget(self.prop_group)
@@ -193,7 +197,7 @@ class AudioSequencerApp(QMainWindow):
     def on_track_dropped(self, tid, x, y):
         # Header is 40px tall, then lanes are (height + spacing)
         # We use the widget's internal coordinates (x,y)
-        lane = max(0, min(4, int((y - 40) // (self.timeline_widget.lane_height + self.timeline_widget.lane_spacing))))
+        lane = max(0, min(7, int((y - 40) // (self.timeline_widget.lane_height + self.timeline_widget.lane_spacing))))
         print(f"[UI] Track {tid} dropped at x={x}, y={y} -> Lane {lane}")
         self.add_track_by_id(tid, x=x, lane=lane)
         self.timeline_widget.update_geometry()
@@ -255,7 +259,7 @@ class AudioSequencerApp(QMainWindow):
         self.timeline_widget.segments = []
         for sj in sl:
             s = json.loads(sj); td = {'id': s['id'], 'filename': s['filename'], 'file_path': s['file_path'], 'bpm': s['bpm'], 'harmonic_key': s['key'], 'onsets_json': s.get('onsets_json', "")}
-            seg = TrackSegment(td, start_ms=s['start_ms'], duration_ms=s['duration_ms'], lane=s['lane'], offset_ms=s['offset_ms']); seg.volume = s['volume']; seg.pan = s.get('pan', 0.0); seg.is_primary = s['is_primary']; seg.fade_in_ms = s['fade_in_ms']; seg.fade_out_ms = s['fade_out_ms']; seg.pitch_shift = s.get('pitch_shift', 0); self.load_waveform_async(seg); self.timeline_widget.segments.append(seg)
+            seg = TrackSegment(td, start_ms=s['start_ms'], duration_ms=s['duration_ms'], lane=s['lane'], offset_ms=s['offset_ms']); seg.volume = s['volume']; seg.pan = s.get('pan', 0.0); seg.is_primary = s['is_primary']; seg.fade_in_ms = s['fade_in_ms']; seg.fade_out_ms = s['fade_out_ms']; seg.pitch_shift = s.get('pitch_shift', 0); seg.reverb = s.get('reverb', 0.0); seg.harmonics = s.get('harmonics', 0.0); self.load_waveform_async(seg); self.timeline_widget.segments.append(seg)
         self.timeline_widget.update_geometry(); self.update_status()
     def on_segment_selected(self, s):
         if s:
@@ -264,6 +268,8 @@ class AudioSequencerApp(QMainWindow):
             self.vol_slider.blockSignals(True); self.vol_slider.setValue(int(s.volume * 100)); self.vol_slider.blockSignals(False)
             self.pan_slider.blockSignals(True); self.pan_slider.setValue(int(s.pan * 100)); self.pan_slider.blockSignals(False)
             self.pitch_combo.blockSignals(True); idx = self.pitch_combo.findData(s.pitch_shift); self.pitch_combo.setCurrentIndex(idx); self.pitch_combo.blockSignals(False)
+            self.rev_slider.blockSignals(True); self.rev_slider.setValue(int(s.reverb * 100)); self.rev_slider.blockSignals(False)
+            self.harm_slider.blockSignals(True); self.harm_slider.setValue(int(s.harmonics * 100)); self.harm_slider.blockSignals(False)
             self.prim_check.blockSignals(True); self.prim_check.setChecked(s.is_primary); self.prim_check.blockSignals(False)
             self.amb_check.blockSignals(True); self.amb_check.setChecked(s.is_ambient); self.amb_check.blockSignals(False)
         else:
@@ -276,6 +282,8 @@ class AudioSequencerApp(QMainWindow):
             sel.volume = self.vol_slider.value() / 100.0
             sel.pan = self.pan_slider.value() / 100.0
             sel.pitch_shift = self.pitch_combo.currentData()
+            sel.reverb = self.rev_slider.value() / 100.0
+            sel.harmonics = self.harm_slider.value() / 100.0
             sel.is_primary = self.prim_check.isChecked()
             sel.is_ambient = self.amb_check.isChecked()
             self.timeline_widget.update()
@@ -372,14 +380,14 @@ class AudioSequencerApp(QMainWindow):
                         f_dur += f_start
                         f_start = 0
                         
-                    # Find a free lane or use lane 4
+                    # Find a free lane or use lane 7
                     busy_lanes = set()
                     for s in self.timeline_widget.segments:
                         if max(f_start, s.start_ms) < min(f_start + f_dur, s.start_ms + s.duration_ms):
                             busy_lanes.add(s.lane)
                     
-                    lane = 4
-                    for l in [4, 3, 2, 1]: # Prefer higher lanes for fill
+                    lane = 7
+                    for l in [7, 6, 5, 4, 3, 2, 1]: # Prefer higher lanes for fill
                         if l not in busy_lanes:
                             lane = l; break
                             
@@ -436,7 +444,7 @@ class AudioSequencerApp(QMainWindow):
             with open(p, 'r') as f: data = json.load(f)
             self.timeline_widget.segments = []; self.tbe.setText(str(data['target_bpm']))
             for s in data['segments']:
-                td = {'id': s['id'], 'filename': s['filename'], 'file_path': s['file_path'], 'bpm': s['bpm'], 'harmonic_key': s['key'], 'onsets_json': s.get('onsets_json', "")}; seg = TrackSegment(td, start_ms=s['start_ms'], duration_ms=s['duration_ms'], lane=s['lane'], offset_ms=s['offset_ms']); seg.volume = s['volume']; seg.pan = s.get('pan', 0.0); seg.is_primary = s['is_primary']; seg.fade_in_ms = s['fade_in_ms']; seg.fade_out_ms = s['fade_out_ms']; seg.pitch_shift = s.get('pitch_shift', 0); self.load_waveform_async(seg); self.timeline_widget.segments.append(seg)
+                td = {'id': s['id'], 'filename': s['filename'], 'file_path': s['file_path'], 'bpm': s['bpm'], 'harmonic_key': s['key'], 'onsets_json': s.get('onsets_json', "")}; seg = TrackSegment(td, start_ms=s['start_ms'], duration_ms=s['duration_ms'], lane=s['lane'], offset_ms=s['offset_ms']); seg.volume = s['volume']; seg.pan = s.get('pan', 0.0); seg.is_primary = s['is_primary']; seg.fade_in_ms = s['fade_in_ms']; seg.fade_out_ms = s['fade_out_ms']; seg.pitch_shift = s.get('pitch_shift', 0); seg.reverb = s.get('reverb', 0.0); seg.harmonics = s.get('harmonics', 0.0); self.load_waveform_async(seg); self.timeline_widget.segments.append(seg)
             self.timeline_widget.update_geometry(); self.update_status()
     def on_bpm_changed(self, t):
         try: self.timeline_widget.target_bpm = float(t); self.preview_dirty = True; self.timeline_widget.update(); self.update_status()

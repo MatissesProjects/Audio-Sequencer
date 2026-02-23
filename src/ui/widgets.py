@@ -132,8 +132,8 @@ class TimelineWidget(QWidget):
         self.cursor_pos_ms = 0
         self.show_waveforms = True
         self.snap_to_grid = True
-        self.mutes = [False] * 5
-        self.solos = [False] * 5
+        self.mutes = [False] * 8
+        self.solos = [False] * 8
         self.loop_start_ms = 0
         self.loop_end_ms = 30000
         self.loop_enabled = False
@@ -209,7 +209,7 @@ class TimelineWidget(QWidget):
             max_ms = max(max_ms, max(s.start_ms + s.duration_ms for s in self.segments) + 60000)
         self.setMinimumWidth(int(max_ms * self.pixels_per_ms))
         
-        total_h = 5 * (self.lane_height + self.lane_spacing) + 100
+        total_h = 8 * (self.lane_height + self.lane_spacing) + 100
         self.setMinimumHeight(total_h)
         self.update()
 
@@ -245,7 +245,7 @@ class TimelineWidget(QWidget):
             painter.drawLine(lx + lw, 0, lx + lw, 40)
             
         any_solo = any(self.solos)
-        for i in range(5): 
+        for i in range(8): 
             y = i * (self.lane_height + self.lane_spacing) + 40
             bg = QColor(32, 32, 32)
             if self.solos[i]:
@@ -369,6 +369,14 @@ class TimelineWidget(QWidget):
             painter.setPen(Qt.PenStyle.NoPen)
             painter.drawEllipse(rect.left() + fi_w - 4, rect.top() - 4, 8, 8)
             painter.drawEllipse(rect.right() - fo_w - 4, rect.top() - 4, 8, 8)
+            
+            # --- Visual FX Indicators ---
+            if hasattr(seg, 'reverb') and seg.reverb > 0:
+                painter.setBrush(QBrush(QColor(0, 200, 255, int(255 * seg.reverb))))
+                painter.drawEllipse(rect.right() - 25, rect.bottom() - 25, 12, 12)
+            if hasattr(seg, 'harmonics') and seg.harmonics > 0:
+                painter.setBrush(QBrush(QColor(255, 150, 0, int(255 * seg.harmonics))))
+                painter.drawEllipse(rect.right() - 45, rect.bottom() - 25, 12, 12)
             
             painter.setPen(Qt.GlobalColor.white)
             painter.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))

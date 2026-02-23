@@ -261,7 +261,7 @@ class FullMixOrchestrator:
             
             if preferred is not None and preferred not in busy_lanes:
                 return preferred
-            for l in range(5):
+            for l in range(8): # Increased to 8 lanes for richer layering
                 if l not in busy_lanes: return l
             return preferred or 0
 
@@ -269,12 +269,14 @@ class FullMixOrchestrator:
             b_name = block['name']; b_dur = block['dur']
             
             # --- LANE 0: Foundation (Heartbeat) ---
-            if b_name != 'Outro':
+            # Ensure drums/bass are playing during Neural Cloud for transition context
+            if b_name != 'Outro' or b_name == 'Outro': # Always have something for Outro too
                 f_start = current_ms
-                if b_name == 'Intro': f_start += 8000
-                f_dur = b_dur + overlap + 2000
-                lane = find_free_lane(f_start, f_dur, preferred=0)
+                f_dur = b_dur + overlap
+                if b_name == 'Intro': 
+                    f_start += 6000 # Neural cloud starts first, but drums come in after 6s
                 
+                lane = find_free_lane(f_start, f_dur, preferred=0)
                 segments.append({
                     'id': main_drum['id'], 'filename': main_drum['filename'], 'file_path': main_drum['file_path'], 'bpm': main_drum['bpm'], 'harmonic_key': main_drum['harmonic_key'],
                     'start_ms': f_start, 'duration_ms': f_dur, 'offset_ms': (main_drum.get('loop_start') or 0)*1000,
@@ -283,7 +285,8 @@ class FullMixOrchestrator:
                 })
 
             # --- LANE 1: Harmonic Body (Bass) ---
-            if b_name in ['Verse 1', 'Drop', 'Verse 2']:
+            if b_name in ['Intro', 'Verse 1', 'Drop', 'Verse 2', 'Outro']:
+                # For Intro/Outro, ensure bass overlaps with Neural Cloud
                 lane = find_free_lane(current_ms, b_dur + overlap, preferred=1)
                 segments.append({
                     'id': bass_track['id'], 'filename': bass_track['filename'], 'file_path': bass_track['file_path'], 'bpm': bass_track['bpm'], 'harmonic_key': bass_track['harmonic_key'],
@@ -291,22 +294,26 @@ class FullMixOrchestrator:
                     'volume': 0.9, 'is_primary': False, 'lane': lane, 'fade_in_ms': 3000, 'fade_out_ms': 3000
                 })
 
-            # --- LANE 2/3: Melodic/Atmosphere ---
+            # --- LANE 2/3/5/6: Melodic/Atmosphere ---
             if b_name == 'Intro' or b_name == 'Outro':
-                lane = find_free_lane(current_ms, b_dur + overlap, preferred=2)
+                # Neural Cloud: ensure it's shorter than the block so context audio (drums/bass) wraps it
+                # It starts at current_ms + 2000 and ends 2000 before block ends
+                c_dur = max(4000, b_dur - 4000)
+                lane = find_free_lane(current_ms + 2000, c_dur, preferred=2)
                 segments.append({
                     'id': -2, 'filename': "NEURAL CLOUD", 'file_path': cloud_path, 'bpm': 120, 'harmonic_key': 'N/A',
-                    'start_ms': current_ms, 'duration_ms': b_dur + overlap, 'offset_ms': 0,
-                    'volume': 0.6, 'lane': lane, 'fade_in_ms': 5000, 'fade_out_ms': 5000,
+                    'start_ms': current_ms + 2000, 'duration_ms': c_dur, 'offset_ms': 0,
+                    'volume': 0.6, 'lane': lane, 'fade_in_ms': 3000, 'fade_out_ms': 3000,
                     'is_ambient': True
                 })
-            else:
+            
+            if b_name not in ['Intro', 'Outro']:
                 lead = melodic_leads[idx % len(melodic_leads)]
                 if b_name == 'Build':
                     sub_durs = [4000, 4000, 2000, 2000, 1000, 1000, 1000, 1000]
                     sub_start = 0
                     for c_idx, sd in enumerate(sub_durs):
-                        lane = find_free_lane(current_ms + sub_start, sd + 200, preferred=2)
+                        lane = find_free_lane(current_ms + sub_start, sd + 200, preferred=2 if c_idx % 2 == 0 else 5)
                         segments.append({
                             'id': lead['id'], 'filename': f"CHOP {c_idx}", 'file_path': lead['file_path'], 'bpm': lead['bpm'], 'harmonic_key': lead['harmonic_key'],
                             'start_ms': current_ms + sub_start, 'duration_ms': sd + 200, 'offset_ms': (lead.get('loop_start') or 0)*1000,
@@ -315,17 +322,18 @@ class FullMixOrchestrator:
                         sub_start += sd
                 else:
                     ps = -2 if b_name == 'Verse 2' else 0
-                    lane = find_free_lane(current_ms, b_dur + overlap, preferred=3)
+                    preferred_mel_lane = 3 if idx % 2 == 0 else 6
+                    lane = find_free_lane(current_ms, b_dur + overlap, preferred=preferred_mel_lane)
                     segments.append({
                         'id': lead['id'], 'filename': lead['filename'], 'file_path': lead['file_path'], 'bpm': lead['bpm'], 'harmonic_key': lead['harmonic_key'],
                         'start_ms': current_ms, 'duration_ms': b_dur + overlap, 'offset_ms': (lead.get('loop_start') or 0)*1000,
                         'volume': 0.7, 'pan': -0.5 if idx % 2 == 0 else 0.5, 'lane': lane, 'pitch_shift': ps, 'low_cut': 400, 'fade_in_ms': 4000, 'fade_out_ms': 4000
                     })
 
-            # --- LANE 4: Atmosphere Glue ---
-            if b_name not in ['Intro', 'Outro']:
+            # --- LANE 4/7: Atmosphere Glue ---
+            if b_name not in ['Intro', 'Outro'] or random.random() > 0.5:
                 glue = fx_tracks[idx % len(fx_tracks)]
-                lane = find_free_lane(current_ms, b_dur + overlap, preferred=4)
+                lane = find_free_lane(current_ms, b_dur + overlap, preferred=4 if idx % 2 == 0 else 7)
                 segments.append({
                     'id': glue['id'], 'filename': "ATMOS GLUE", 'file_path': glue['file_path'], 'bpm': glue['bpm'], 'harmonic_key': glue['harmonic_key'],
                     'start_ms': current_ms, 'duration_ms': b_dur + overlap, 'offset_ms': 0,
@@ -333,6 +341,7 @@ class FullMixOrchestrator:
                     'pan': random.uniform(-0.4, 0.4),
                     'is_ambient': True
                 })
+
 
             current_ms += (b_dur - overlap) 
         return segments
