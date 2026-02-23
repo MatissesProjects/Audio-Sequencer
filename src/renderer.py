@@ -2,8 +2,188 @@ from pydub import AudioSegment, effects
 import os
 import numpy as np
 import pedalboard
+import hashlib
+import librosa
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pedalboard import Pedalboard, HighpassFilter, LowpassFilter, Limiter, Compressor, Reverb, Phaser, Chorus, Distortion
 from tqdm import tqdm
+from src.processor import AudioProcessor
+
+def _process_single_segment(s, i, target_bpm, sr, time_range):
+    """Standalone function for parallel processing of a single segment with caching."""
+    s_start = s['start_ms']
+    s_dur = s['duration_ms']
+    s_off = s['offset_ms']
+    stems_dir = s.get('stems_path')
+    
+    range_start = time_range[0] if time_range else 0
+    range_end = time_range[1] if time_range else (s_start + s_dur)
+    
+    render_start_ms = s_start
+    render_end_ms = s_start + s_dur
+    render_offset_ms = s_off
+    
+    if time_range:
+        if render_start_ms < range_start:
+            diff = range_start - render_start_ms
+            render_offset_ms += diff
+            render_start_ms = range_start
+        if render_end_ms > range_end:
+            render_end_ms = range_end
+    
+    effective_dur = render_end_ms - render_start_ms
+    if effective_dur <= 0: return None
+
+    # --- CACHE CHECK ---
+    cache_dir = "render_cache"
+    os.makedirs(cache_dir, exist_ok=True)
+    # Create unique hash for this segment's heavy processing
+    # (file + bpm + pitch + duration + offset)
+    key_str = f"{s['file_path']}_{s['bpm']}_{target_bpm}_{s.get('pitch_shift',0)}_{s_dur}_{s_off}_{stems_dir}"
+    cache_hash = hashlib.md5(key_str.encode()).hexdigest()
+    cache_file = os.path.join(cache_dir, f"{cache_hash}.npy")
+    
+    if os.path.exists(cache_file):
+        try:
+            seg_np = np.load(cache_file)
+            return {
+                'samples': seg_np,
+                'start_idx': int((render_start_ms - range_start) * sr / 1000.0) if time_range else int(render_start_ms * sr / 1000.0),
+                'is_primary': s.get('is_primary', False),
+                'vocal_energy': s.get('vocal_energy', 0.0)
+            }
+        except: pass
+
+    proc = AudioProcessor(sample_rate=sr)
+    required_raw_dur = (effective_dur + render_offset_ms) / 1000.0
+    
+    # --- STEM PROCESSING ---
+    if stems_dir and os.path.exists(stems_dir):
+        combined_seg_np = None
+        stem_types = ["vocals", "drums", "other"]
+        
+        for stype in stem_types:
+            stem_file = os.path.join(stems_dir, f"{stype}.wav")
+            if not os.path.exists(stem_file): continue
+            
+            # 1. Load & Loop
+            y, _ = librosa.load(stem_file, sr=sr)
+            onsets = [float(x)*1000 for x in s.get('onsets_json', "").split(',') if x]
+            y_looped = proc.loop_numpy(y, sr, required_raw_dur + 1.0, onsets)
+            
+            # 2. Stretch
+            y_sync = proc.stretch_numpy(y_looped, sr, s['bpm'], target_bpm)
+            
+            # 3. Pitch Shift
+            ps = s.get('pitch_shift', 0)
+            if ps != 0:
+                y_sync = proc.shift_pitch_numpy(y_sync, sr, ps)
+            
+            # 4. Trim to exactly what we need
+            start_sample = int(render_offset_ms * sr / 1000.0)
+            end_sample = int((render_offset_ms + effective_dur) * sr / 1000.0)
+            y_sync = y_sync[start_sample : end_sample]
+            
+            # 5. Convert to Stereo (Pedalboard/Renderer expects 2 channels)
+            if len(y_sync.shape) == 1:
+                stem_np = np.stack([y_sync, y_sync])
+            else:
+                stem_np = y_sync
+
+            # Apply Vocal Specific Harmonics
+            if stype == "vocals":
+                vocal_harm = 0.4 + (s.get('harmonics', 0.0) * 0.6)
+                stem_np = Pedalboard([Distortion(drive_db=vocal_harm * 12)])(stem_np, sr)
+            
+            if combined_seg_np is None:
+                combined_seg_np = stem_np
+            else:
+                if stype == "other":
+                    # Sidechain-style blend stems
+                    # Calculate envelope of vocals/drums
+                    rms = np.sqrt(np.mean(combined_seg_np**2, axis=0))
+                    envelope = np.repeat(rms[::512], 512)[:combined_seg_np.shape[1]]
+                    if len(envelope) < combined_seg_np.shape[1]:
+                        envelope = np.pad(envelope, (0, combined_seg_np.shape[1]-len(envelope)))
+                    if np.max(envelope) > 0: envelope /= np.max(envelope)
+                    ducking = 1.0 - (envelope * 0.5)
+                    stem_np *= ducking
+                
+                min_l = min(combined_seg_np.shape[1], stem_np.shape[1])
+                combined_seg_np[:, :min_l] += stem_np[:, :min_l]
+        seg_np = combined_seg_np
+    else:
+        # Single file fallback
+        y, _ = librosa.load(s['file_path'], sr=sr)
+        onsets = [float(x)*1000 for x in s.get('onsets_json', "").split(',') if x]
+        y_looped = proc.loop_numpy(y, sr, required_raw_dur + 1.0, onsets)
+        y_sync = proc.stretch_numpy(y_looped, sr, s['bpm'], target_bpm)
+        ps = s.get('pitch_shift', 0)
+        if ps != 0:
+            y_sync = proc.shift_pitch_numpy(y_sync, sr, ps)
+        
+        start_sample = int(render_offset_ms * sr / 1000.0)
+        end_sample = int((render_offset_ms + effective_dur) * sr / 1000.0)
+        y_sync = y_sync[start_sample : end_sample]
+        if len(y_sync.shape) == 1:
+            seg_np = np.stack([y_sync, y_sync])
+        else:
+            seg_np = y_sync
+
+    # --- BALANCING & FADES ---
+    clip_rms = np.sqrt(np.mean(seg_np**2)) + 1e-9
+    balancing_gain = 0.15 / clip_rms
+    vol_mult = s.get('volume', 1.0)
+    
+    num_samples = seg_np.shape[1]
+    fi_s = int(s.get('fade_in_ms', 2000) * sr / 1000.0)
+    fo_s = int(s.get('fade_out_ms', 2000) * sr / 1000.0)
+    if time_range and s_start < range_start: fi_s = 0
+    if time_range and (s_start + s_dur) > range_end: fo_s = 0
+
+    envelope = np.ones(num_samples, dtype=np.float32)
+    if fi_s > 0:
+        t_in = np.linspace(0, 1, min(fi_s, num_samples))
+        envelope[:len(t_in)] = 0.5 * (1 - np.cos(np.pi * t_in))
+    if fo_s > 0:
+        t_out = np.linspace(0, 1, min(fo_s, num_samples))
+        envelope[-len(t_out):] *= 0.5 * (1 + np.cos(np.pi * t_out))
+    
+    seg_np *= (balancing_gain * vol_mult * envelope)
+    
+    # --- FILTERS & PAN ---
+    is_amb = s.get('is_ambient', False)
+    lc = s.get('low_cut', 400 if is_amb else 20)
+    hc = s.get('high_cut', 20000)
+    if lc > 25 or hc < 19000:
+        seg_np = Pedalboard([HighpassFilter(lc), LowpassFilter(hc)])(seg_np, sr)
+    
+    pan = s.get('pan', 0.0)
+    if pan != 0:
+        l_gain = max(0.0, min(1.0, 1.0 - pan))
+        r_gain = max(0.0, min(1.0, 1.0 + pan))
+        seg_np[0, :] *= l_gain
+        seg_np[1, :] *= r_gain
+
+    # --- APPLY FX (Reverb & Harmonics) ---
+    rev_amt = s.get('reverb', 0.0)
+    harm_amt = s.get('harmonics', 0.0)
+    if rev_amt > 0 or harm_amt > 0:
+        fx_chain = []
+        if harm_amt > 0: fx_chain.append(Distortion(drive_db=harm_amt * 15))
+        if rev_amt > 0: fx_chain.append(Reverb(room_size=0.8, wet_level=rev_amt * 0.6, dry_level=1.0 - (rev_amt * 0.2)))
+        seg_np = Pedalboard(fx_chain)(seg_np, sr)
+
+    # --- SAVE TO CACHE ---
+    try: np.save(cache_file, seg_np)
+    except: pass
+
+    return {
+        'samples': seg_np,
+        'start_idx': int((render_start_ms - range_start) * sr / 1000.0) if time_range else int(render_start_ms * sr / 1000.0),
+        'is_primary': s.get('is_primary', False),
+        'vocal_energy': s.get('vocal_energy', 0.0)
+    }
 
 class FlowRenderer:
     """Handles mixing, layering, and crossfading multiple tracks with pro gain staging."""
@@ -123,7 +303,7 @@ class FlowRenderer:
 
     def _render_internal(self, segments, output_path, target_bpm=124, mutes=None, solos=None, progress_cb=None, time_range=None):
         """
-        Internal rendering logic shared by full mix and stems.
+        Optimized parallel rendering logic.
         """
         if not segments:
             return None
@@ -164,152 +344,53 @@ class FlowRenderer:
             
         master_samples = np.zeros((2, int(self.sr * total_duration_ms / 1000.0)), dtype=np.float32)
 
-        print(f"Sonic Rendering ({'Region' if time_range else 'Full'}): {len(active_segments)} segments...")
-        if progress_cb: progress_cb(0)
-
+        print(f"Parallel Sonic Rendering: {len(active_segments)} segments...")
+        
         processed_data = []
-        for i, s in enumerate(active_segments):
-            s_start = s['start_ms']
-            s_dur = s['duration_ms']
-            s_off = s['offset_ms']
-            stems_dir = s.get('stems_path')
+        with ProcessPoolExecutor() as executor:
+            futures = [executor.submit(_process_single_segment, s, i, target_bpm, self.sr, time_range) 
+                       for i, s in enumerate(active_segments)]
             
-            render_start_ms = s_start
-            render_end_ms = s_start + s_dur
-            render_offset_ms = s_off
-            
-            if time_range:
-                if render_start_ms < range_start:
-                    diff = range_start - render_start_ms
-                    render_offset_ms += diff
-                    render_start_ms = range_start
-                if render_end_ms > range_end:
-                    render_end_ms = range_end
-            
-            effective_dur = render_end_ms - render_start_ms
-            if effective_dur <= 0: continue
+            completed = 0
+            for future in as_completed(futures):
+                res = future.result()
+                if res:
+                    processed_data.append(res)
+                completed += 1
+                if progress_cb: progress_cb(completed)
 
-            from src.processor import AudioProcessor
-            proc = AudioProcessor()
-            
-            required_raw_dur = (effective_dur + render_offset_ms) / 1000.0
-            
-            # --- STEM PROCESSING ---
-            if stems_dir and os.path.exists(stems_dir):
-                # Process individual stems
-                combined_seg_np = None
-                stem_types = ["vocals", "drums", "other"]
-                
-                for stype in stem_types:
-                    stem_file = os.path.join(stems_dir, f"{stype}.wav")
-                    if not os.path.exists(stem_file): continue
-                    
-                    tmp_loop = f"temp_render_{i}_{stype}.wav"
-                    proc.loop_track(stem_file, required_raw_dur + 1.0, [], tmp_loop)
-                    y_sync = proc.stretch_to_bpm(tmp_loop, s['bpm'], target_bpm)
-                    
-                    ps = s.get('pitch_shift', 0)
-                    if ps != 0:
-                        import librosa
-                        y_sync = librosa.effects.pitch_shift(y_sync, sr=self.sr, n_steps=ps)
-                    
-                    if os.path.exists(tmp_loop): os.remove(tmp_loop)
-                    
-                    # Back to numpy
-                    stem_audio = self.numpy_to_segment(y_sync, self.sr)
-                    stem_audio = stem_audio[int(render_offset_ms) : int(render_offset_ms + effective_dur)]
-                    stem_np = self.segment_to_numpy(stem_audio)
-                    
-                    # Apply Vocal Specific Harmonics
-                    if stype == "vocals":
-                        # Auto-harmonics for vocals as requested
-                        # Combine user harmonics + auto-vocal-boost
-                        vocal_harm = 0.4 + (s.get('harmonics', 0.0) * 0.6)
-                        stem_np = Pedalboard([Distortion(drive_db=vocal_harm * 12)])(stem_np, self.sr)
-                    
-                    if combined_seg_np is None:
-                        combined_seg_np = stem_np
-                    else:
-                        # Stem-aware ducking: if this is 'other' (instruments), 
-                        # and we already have vocals/drums, duck 'other'
-                        if stype == "other" and combined_seg_np is not None:
-                            # Use sidechain logic to duck instruments based on already mixed stems
-                            stem_np = self._apply_sidechain(stem_np, combined_seg_np, amount=0.5)
+        print("Mixing & Applying Dynamic Ducking...")
+        for i, current in enumerate(processed_data):
+            samples = current['samples']; start = current['start_idx']; end = start + samples.shape[1]
+            if not current['is_primary']:
+                for other in processed_data:
+                    if (other is current) or not other['is_primary']: continue
+                    o_start = other['start_idx']; o_end = o_start + other['samples'].shape[1]
+                    overlap_start = max(start, o_start); overlap_end = min(end, o_end)
+                    if overlap_start < overlap_end:
+                        samples = self._apply_spectral_ducking(samples, self.sr)
+                        rel_start_o = overlap_start - o_start; rel_end_o = overlap_end - o_start
+                        source_segment = other['samples'][:, rel_start_o:rel_end_o]
+                        rel_start_c = overlap_start - start; rel_end_c = overlap_end - start
+                        target_segment = samples[:, rel_start_c:rel_end_c]
                         
-                        min_l = min(combined_seg_np.shape[1], stem_np.shape[1])
-                        combined_seg_np[:, :min_l] += stem_np[:, :min_l]
-                
-                seg_np = combined_seg_np
-            else:
-                # Fallback to single file processing
-                tmp_loop = f"temp_render_{i}.wav"
-                proc.loop_track(s['file_path'], required_raw_dur + 1.0, [], tmp_loop)
-                y_sync = proc.stretch_to_bpm(tmp_loop, s['bpm'], target_bpm)
-                ps = s.get('pitch_shift', 0)
-                if ps != 0:
-                    import librosa
-                    y_sync = librosa.effects.pitch_shift(y_sync, sr=self.sr, n_steps=ps)
-                if os.path.exists(tmp_loop): os.remove(tmp_loop)
-                seg_audio = self.numpy_to_segment(y_sync, self.sr)
-                seg_audio = seg_audio[int(render_offset_ms) : int(render_offset_ms + effective_dur)]
-                seg_np = self.segment_to_numpy(seg_audio)
+                        # Vocal-aware ducking amount
+                        is_vocal = other.get('vocal_energy', 0) > 0.2
+                        duck_amt = 0.9 if is_vocal else (0.85 if current['is_ambient'] else 0.7)
+                        
+                        ducked_segment = self._apply_sidechain(target_segment, source_segment, amount=duck_amt)
+                        samples[:, rel_start_c:rel_end_c] = ducked_segment
+                        break
+            
+            render_end = min(master_samples.shape[1], end); render_len = render_end - start
+            if render_len > 0: master_samples[:, start:render_end] += samples[:, :render_len]
 
-            num_samples = seg_np.shape[1]
-
-            clip_rms = np.sqrt(np.mean(seg_np**2)) + 1e-9
-            target_rms = 0.15 
-            balancing_gain = target_rms / clip_rms
-            vol_mult = s.get('volume', 1.0)
-            
-            fi_s = int(s.get('fade_in_ms', 2000) * self.sr / 1000.0)
-            fo_s = int(s.get('fade_out_ms', 2000) * self.sr / 1000.0)
-            if time_range and s_start < range_start: fi_s = 0
-            if time_range and (s_start + s_dur) > range_end: fo_s = 0
-
-            envelope = np.ones(num_samples, dtype=np.float32)
-            if fi_s > 0:
-                t_in = np.linspace(0, 1, min(fi_s, num_samples))
-                envelope[:len(t_in)] = 0.5 * (1 - np.cos(np.pi * t_in))
-            if fo_s > 0:
-                t_out = np.linspace(0, 1, min(fo_s, num_samples))
-                envelope[-len(t_out):] *= 0.5 * (1 + np.cos(np.pi * t_out))
-            
-            seg_np *= (balancing_gain * vol_mult * envelope)
-            
-            is_amb = s.get('is_ambient', False)
-            lc = s.get('low_cut', 400 if is_amb else 20)
-            hc = s.get('high_cut', 20000)
-            if lc > 25 or hc < 19000:
-                seg_np = self._apply_spectral_ducking(seg_np, self.sr, low_cut=lc, high_cut=hc)
-            
-            seg_np = self._apply_panning(seg_np, s.get('pan', 0.0))
-            
-            # --- APPLY FX (Reverb & Harmonics) ---
-            rev_amt = s.get('reverb', 0.0)
-            harm_amt = s.get('harmonics', 0.0)
-            
-            if rev_amt > 0 or harm_amt > 0:
-                fx_chain = []
-                if harm_amt > 0:
-                    # Harmonics: Use Distortion for saturation
-                    # We use moderate drive (up to 20dB) and mix it
-                    fx_chain.append(Distortion(drive_db=harm_amt * 15))
-                if rev_amt > 0:
-                    # Reverb: Large room for "cool" cinematic feel
-                    fx_chain.append(Reverb(room_size=0.8, wet_level=rev_amt * 0.6, dry_level=1.0 - (rev_amt * 0.2)))
-                
-                if fx_chain:
-                    seg_np = Pedalboard(fx_chain)(seg_np, self.sr)
-
-            processed_data.append({
-                'samples': seg_np,
-                'start_idx': int((render_start_ms - range_start) * self.sr / 1000.0) if time_range else int(render_start_ms * self.sr / 1000.0),
-                'is_primary': s.get('is_primary', False),
-                'is_ambient': is_amb,
-                'vocal_energy': s.get('vocal_energy', 0.0)
-            })
-            
-            if progress_cb: progress_cb(i + 1)
+        print("Finalizing Master Bus...")
+        master_bus = Pedalboard([Compressor(threshold_db=-14, ratio=2.5), Limiter(threshold_db=-0.1)])
+        final_y = master_bus(master_samples, self.sr)
+        final_seg = self.numpy_to_segment(final_y, self.sr)
+        final_seg.export(output_path, format="mp3", bitrate="320k")
+        return output_path
 
         for i, current in enumerate(processed_data):
             samples = current['samples']; start = current['start_idx']; end = start + samples.shape[1]
