@@ -549,7 +549,12 @@ class AudioSequencerApp(QMainWindow):
 
     def add_track_by_id(self, tid, x=None, only_update_recs=False, lane=0, selection_range=None):
         try:
-            conn = self.dm.get_conn(); conn.row_factory = sqlite3_factory; cursor = conn.cursor(); cursor.execute("SELECT * FROM tracks WHERE id = ?", (tid,)); track = dict(cursor.fetchone()); conn.close()
+            conn = self.dm.get_conn(); conn.row_factory = sqlite3_factory; cursor = conn.cursor(); cursor.execute("SELECT * FROM tracks WHERE id = ?", (tid,)); 
+            row = cursor.fetchone()
+            if not row:
+                if not only_update_recs: print(f"[UI] Track ID {tid} not found in database."); 
+                conn.close(); return
+            track = dict(row); conn.close()
             if not only_update_recs:
                 self.push_undo(); sm = x / self.timeline_widget.pixels_per_ms if x is not None else None; seg = self.timeline_widget.add_track(track, start_ms=sm); loop_dur = track.get('loop_duration') or 0; loop_start = track.get('loop_start') or 0
                 if loop_dur > 0: seg.offset_ms = loop_start * 1000.0; seg.duration_ms = loop_dur * 1000.0

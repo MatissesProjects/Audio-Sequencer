@@ -10,11 +10,11 @@ class TrackSegment:
         'A#': QColor(200, 100, 255), 'B': QColor(100, 255, 100)
     }
     def __init__(self, track_data, start_ms=0, duration_ms=20000, lane=0, offset_ms=0):
-        self.id = track_data['id']
-        self.filename = track_data['filename']
-        self.file_path = track_data['file_path']
-        self.bpm = track_data['bpm']
-        self.key = track_data['harmonic_key']
+        self.id = track_data.get('id', -1)
+        self.filename = track_data.get('filename', "Unknown")
+        self.file_path = track_data.get('file_path', "")
+        self.bpm = track_data.get('bpm', 120.0)
+        self.key = track_data.get('harmonic_key') or track_data.get('key', 'N/A')
         self.start_ms = start_ms
         self.duration_ms = duration_ms
         self.offset_ms = offset_ms
