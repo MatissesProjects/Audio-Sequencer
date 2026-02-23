@@ -2,7 +2,7 @@ from pydub import AudioSegment, effects
 import os
 import numpy as np
 import pedalboard
-from pedalboard import Pedalboard, HighpassFilter, LowpassFilter, Limiter, Compressor
+from pedalboard import Pedalboard, HighpassFilter, LowpassFilter, Limiter, Compressor, Reverb, Phaser, Chorus, Distortion
 from tqdm import tqdm
 
 class FlowRenderer:
@@ -236,6 +236,23 @@ class FlowRenderer:
             
             seg_np = self._apply_panning(seg_np, s.get('pan', 0.0))
             
+            # --- APPLY FX (Reverb & Harmonics) ---
+            rev_amt = s.get('reverb', 0.0)
+            harm_amt = s.get('harmonics', 0.0)
+            
+            if rev_amt > 0 or harm_amt > 0:
+                fx_chain = []
+                if harm_amt > 0:
+                    # Harmonics: Use Distortion for saturation
+                    # We use moderate drive (up to 20dB) and mix it
+                    fx_chain.append(Distortion(drive_db=harm_amt * 15))
+                if rev_amt > 0:
+                    # Reverb: Large room for "cool" cinematic feel
+                    fx_chain.append(Reverb(room_size=0.8, wet_level=rev_amt * 0.6, dry_level=1.0 - (rev_amt * 0.2)))
+                
+                if fx_chain:
+                    seg_np = Pedalboard(fx_chain)(seg_np, self.sr)
+
             processed_data.append({
                 'samples': seg_np,
                 'start_idx': int((render_start_ms - range_start) * self.sr / 1000.0) if time_range else int(render_start_ms * self.sr / 1000.0),

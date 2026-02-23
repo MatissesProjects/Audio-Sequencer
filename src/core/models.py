@@ -29,6 +29,8 @@ class TrackSegment:
         self.fade_in_ms = 2000
         self.fade_out_ms = 2000
         self.pitch_shift = 0
+        self.reverb = 0.0 # 0.0 to 1.0 (Wet amount)
+        self.harmonics = 0.0 # 0.0 to 1.0 (Saturation/Harmonic excitement)
         base_color = self.KEY_COLORS.get(self.key, QColor(70, 130, 180))
         self.color = QColor(base_color.red(), base_color.green(), base_color.blue(), 200)
         self.onsets = []
@@ -48,7 +50,8 @@ class TrackSegment:
             'is_ambient': self.is_ambient,
             'lane': self.lane, 'is_primary': self.is_primary, 
             'fade_in_ms': self.fade_in_ms, 'fade_out_ms': self.fade_out_ms, 
-            'pitch_shift': self.pitch_shift
+            'pitch_shift': self.pitch_shift,
+            'reverb': self.reverb, 'harmonics': self.harmonics
         }
         d['onsets_json'] = ",".join([str(x/1000.0) for x in self.onsets])
         return d
