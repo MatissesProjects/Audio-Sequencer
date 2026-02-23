@@ -369,7 +369,6 @@ class AudioSequencerApp(QMainWindow):
         if QMessageBox.question(self, "New Project", "Discard current journey?") == QMessageBox.StandardButton.Yes: self.push_undo(); self.timeline_widget.segments = []; self.timeline_widget.cursor_pos_ms = 0; self.timeline_widget.loop_enabled = False; self.preview_dirty = True; self.timeline_widget.update_geometry(); self.update_status()
     def smart_fill_all_gaps(self, range_start=None, range_end=None):
         if not self.ai_enabled: QMessageBox.warning(self, "AI Disabled", "AI Gap Filling requires the AI Engine."); return
-        if not self.timeline_widget.segments: return
         
         self.push_undo(); self.loading_overlay.show_loading("AI Healing Gaps...")
         
@@ -379,18 +378,22 @@ class AudioSequencerApp(QMainWindow):
             else:
                 gaps = self.timeline_widget.find_silence_regions()
 
-            if not gaps:
+            if not gaps and self.timeline_widget.segments:
                 self.loading_overlay.hide_loading()
                 self.status_bar.showMessage("No significant gaps detected.")
                 return
+            
+            # If timeline is empty and no gaps found, create an initial gap from 0 to 30s
+            if not self.timeline_widget.segments and not gaps:
+                gaps = [(0.0, 30000.0)]
                 
             # Determine the absolute end of the arrangement
-            abs_end = max(s.start_ms + s.duration_ms for s in self.timeline_widget.segments)
+            abs_end = max([s.start_ms + s.duration_ms for s in self.timeline_widget.segments]) if self.timeline_widget.segments else 0
             
             filled_count = 0
             for start, end in gaps:
                 # Rule: Don't fill if the gap is at the very end (taper out) and it's not a forced range
-                if range_start is None and end >= abs_end - 500: continue
+                if range_start is None and end >= abs_end - 500 and self.timeline_widget.segments: continue
                 
                 # Find surrounding tracks for context
                 prev_track = None
@@ -404,9 +407,12 @@ class AudioSequencerApp(QMainWindow):
                         if not next_track or s.start_ms < next_track.start_ms:
                             next_track = s
                 
+                # If no surrounding tracks (empty timeline case), use selected library track as seed
+                seed_id = self.selected_library_track['id'] if self.selected_library_track else None
+                
                 # Find best filler
                 filler_data = self.orchestrator.find_best_filler_for_gap(
-                    prev_track_id=prev_track.id if prev_track else None,
+                    prev_track_id=prev_track.id if prev_track else seed_id,
                     next_track_id=next_track.id if next_track else None
                 )
                 

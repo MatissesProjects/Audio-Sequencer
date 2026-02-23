@@ -636,6 +636,10 @@ class TimelineWidget(QWidget):
                 if self.loop_enabled and (self.loop_end_ms - self.loop_start_ms) > 1000:
                     m.addSeparator()
                     fa = m.addAction("🩹 AI: Fill Selected Range")
+                else:
+                    m.addSeparator()
+                    fs = m.addAction("🩹 AI: Fill from Start to Here")
+                    fe = m.addAction("🩹 AI: Fill from Here to End")
 
                 act = m.exec(self.mapToGlobal(event.pos()))
                 if act == ba:
@@ -644,6 +648,11 @@ class TimelineWidget(QWidget):
                     self.aiTransitionRequested.emit(event.pos().x())
                 elif act == fa:
                     self.fillRangeRequested.emit(self.loop_start_ms, self.loop_end_ms)
+                elif act == fs:
+                    self.fillRangeRequested.emit(0.0, event.pos().x() / self.pixels_per_ms)
+                elif act == fe:
+                    total_dur = max([s.start_ms + s.duration_ms for s in self.segments]) if self.segments else 30000
+                    self.fillRangeRequested.emit(event.pos().x() / self.pixels_per_ms, total_dur)
 
     def mouseMoveEvent(self, event):
         # Update Cursor based on hover position (if not dragging)
