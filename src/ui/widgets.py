@@ -173,6 +173,7 @@ class TimelineWidget(QWidget):
     captureRequested = pyqtSignal(object) # TrackSegment
     zoomChanged = pyqtSignal(int)
     trackDropped = pyqtSignal(int, int, int) # tid, x, y
+    fillRangeRequested = pyqtSignal(float, float) # start_ms, end_ms
 
     def __init__(self):
         super().__init__()
@@ -630,11 +631,19 @@ class TimelineWidget(QWidget):
             else:
                 ba = m.addAction("🪄 Find Bridge Track here")
                 ta = m.addAction("✨ Generate AI Transition")
+                
+                fa = None
+                if self.loop_enabled and (self.loop_end_ms - self.loop_start_ms) > 1000:
+                    m.addSeparator()
+                    fa = m.addAction("🩹 AI: Fill Selected Range")
+
                 act = m.exec(self.mapToGlobal(event.pos()))
                 if act == ba:
                     self.bridgeRequested.emit(event.pos().x())
                 elif act == ta:
                     self.aiTransitionRequested.emit(event.pos().x())
+                elif act == fa:
+                    self.fillRangeRequested.emit(self.loop_start_ms, self.loop_end_ms)
 
     def mouseMoveEvent(self, event):
         # Update Cursor based on hover position (if not dragging)

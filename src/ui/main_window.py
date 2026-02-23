@@ -200,6 +200,7 @@ class AudioSequencerApp(QMainWindow):
         self.status_bar = QStatusBar(); self.setStatusBar(self.status_bar)
         self.timeline_widget.segmentSelected.connect(self.on_segment_selected); self.timeline_widget.timelineChanged.connect(self.update_status); self.timeline_widget.undoRequested.connect(self.push_undo); self.timeline_widget.cursorJumped.connect(self.on_cursor_jump); self.timeline_widget.bridgeRequested.connect(self.find_bridge_for_gap); self.timeline_widget.aiTransitionRequested.connect(self.generate_ai_transition); self.timeline_widget.duplicateRequested.connect(self.duplicate_segment); self.timeline_widget.captureRequested.connect(self.capture_segment_to_library); self.timeline_widget.zoomChanged.connect(lambda v: self.zs.setValue(v))
         self.timeline_widget.trackDropped.connect(self.on_track_dropped)
+        self.timeline_widget.fillRangeRequested.connect(self.smart_fill_all_gaps)
         self.setStyleSheet("""QMainWindow { background-color: #121212; color: #e0e0e0; font-family: 'Segoe UI'; } QLabel { color: #ffffff; } QTableWidget { background-color: #1e1e1e; gridline-color: #333; color: white; border: 1px solid #333; } QHeaderView::section { background-color: #333; color: white; border: 1px solid #444; padding: 5px; } QPushButton { background-color: #333; color: #fff; padding: 6px; border-radius: 4px; border: 1px solid #444; } QPushButton:hover { background-color: #444; } QLineEdit { background-color: #222; color: white; border: 1px solid #444; } QComboBox { background-color: #333; color: white; } QCheckBox { color: white; } QScrollBar:vertical { width: 12px; background: #222; } QScrollBar::handle:vertical { background: #444; border-radius: 6px; }""")
 
     def on_track_dropped(self, tid_str, x, y):
@@ -366,14 +367,18 @@ class AudioSequencerApp(QMainWindow):
         except Exception as e: self.loading_overlay.hide_loading(); show_error(self, "Bridge Error", "Failed.", e)
     def new_project(self):
         if QMessageBox.question(self, "New Project", "Discard current journey?") == QMessageBox.StandardButton.Yes: self.push_undo(); self.timeline_widget.segments = []; self.timeline_widget.cursor_pos_ms = 0; self.timeline_widget.loop_enabled = False; self.preview_dirty = True; self.timeline_widget.update_geometry(); self.update_status()
-    def smart_fill_all_gaps(self):
+    def smart_fill_all_gaps(self, range_start=None, range_end=None):
         if not self.ai_enabled: QMessageBox.warning(self, "AI Disabled", "AI Gap Filling requires the AI Engine."); return
         if not self.timeline_widget.segments: return
         
         self.push_undo(); self.loading_overlay.show_loading("AI Healing Gaps...")
         
         try:
-            gaps = self.timeline_widget.find_silence_regions()
+            if range_start is not None and range_end is not None:
+                gaps = [(range_start, range_end)]
+            else:
+                gaps = self.timeline_widget.find_silence_regions()
+
             if not gaps:
                 self.loading_overlay.hide_loading()
                 self.status_bar.showMessage("No significant gaps detected.")
@@ -384,8 +389,8 @@ class AudioSequencerApp(QMainWindow):
             
             filled_count = 0
             for start, end in gaps:
-                # Rule: Don't fill if the gap is at the very end (taper out)
-                if end >= abs_end - 500: continue
+                # Rule: Don't fill if the gap is at the very end (taper out) and it's not a forced range
+                if range_start is None and end >= abs_end - 500: continue
                 
                 # Find surrounding tracks for context
                 prev_track = None
