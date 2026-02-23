@@ -46,6 +46,10 @@ class AnalysisModule:
         # Find 16-beat window with stable energy
         loop_start, loop_dur = self.detect_best_loop(y, sr, beat_times, bars=4)
 
+        # 5. Vocal Prominence (Mid-range energy vs total)
+        # 300Hz to 3000Hz is where most vocal energy sits
+        vocal_energy = self.detect_vocal_prominence(y, sr)
+
         return {
             "file_path": os.path.abspath(file_path),
             "filename": os.path.basename(file_path),
@@ -55,10 +59,24 @@ class AnalysisModule:
             "onsets_json": onsets_json,
             "harmonic_key": harmonic_key,
             "energy": energy,
+            "vocal_energy": vocal_energy,
             "onset_density": onset_density,
             "loop_start": loop_start,
             "loop_duration": loop_dur
         }
+
+    def detect_vocal_prominence(self, y, sr):
+        """Estimates how prominent vocals/mid-range leads are."""
+        # Compute spectrogram
+        S = np.abs(librosa.stft(y))
+        freqs = librosa.fft_frequencies(sr=sr)
+        
+        # Vocal mask: 300 - 3000 Hz
+        vocal_mask = (freqs >= 300) & (freqs <= 3000)
+        vocal_energy = np.mean(S[vocal_mask, :])
+        total_energy = np.mean(S)
+        
+        return float(vocal_energy / (total_energy + 1e-9))
 
     def detect_best_loop(self, y, sr, beat_times, bars=4):
         """Finds the most energetic and rhythmic 'n' bar section."""
