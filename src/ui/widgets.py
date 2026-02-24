@@ -171,6 +171,7 @@ class TimelineWidget(QWidget):
     aiTransitionRequested = pyqtSignal(float)
     duplicateRequested = pyqtSignal(object) # TrackSegment
     captureRequested = pyqtSignal(object) # TrackSegment
+    stemsRequested = pyqtSignal(object) # TrackSegment
     zoomChanged = pyqtSignal(int)
     trackDropped = pyqtSignal(object, int, int) # tid_str, x, y
     fillRangeRequested = pyqtSignal(float, float) # start_ms, end_ms
@@ -572,6 +573,8 @@ class TimelineWidget(QWidget):
                 qa = m.addAction("🪄 Quantize to Grid")
                 da_dup = m.addAction("👯 Duplicate Track")
                 m.addSeparator()
+                sa_stems = m.addAction("🔪 Separate Stems (Remote AI)")
+                m.addSeparator()
                 pm = m.addMenu("🎵 Shift Pitch")
                 for i in range(-6, 7):
                     a = pm.addAction(f"{i:+} st")
@@ -593,6 +596,8 @@ class TimelineWidget(QWidget):
                 elif act == da_dup:
                     self.undoRequested.emit()
                     self.duplicateRequested.emit(ts)
+                elif act == sa_stems:
+                    self.stemsRequested.emit(ts)
                 elif act == sl:
                     self.captureRequested.emit(ts)
                 elif act in pm.actions():

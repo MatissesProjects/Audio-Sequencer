@@ -39,9 +39,22 @@ def _process_single_segment(s, i, target_bpm, sr, time_range):
     # --- CACHE CHECK ---
     cache_dir = AppConfig.CACHE_DIR
     AppConfig.ensure_dirs()
+    # If stems_dir is missing but available in DB, pick it up early for hashing
+    if not stems_dir:
+        try:
+            from src.database import DataManager
+            dm = DataManager()
+            conn = dm.get_conn()
+            cursor = conn.cursor()
+            cursor.execute("SELECT stems_path FROM tracks WHERE file_path = ?", (os.path.abspath(s['file_path']),))
+            row = cursor.fetchone()
+            if row and row[0]: stems_dir = row[0]
+            conn.close()
+        except: pass
+
     # Create unique hash for this segment's heavy processing
-    # (file + bpm + pitch + duration + offset + stem mix + harmony)
-    key_str = f"{s['file_path']}_{s['bpm']}_{target_bpm}_{s.get('pitch_shift',0)}_{s_dur}_{s_off}_{stems_dir}_{s.get('vocal_shift',0)}_{s.get('harmony_level',0)}_{s.get('vocal_vol',1.0)}_{s.get('drum_vol',1.0)}_{s.get('instr_vol',1.0)}"
+    # (file + bpm + pitch + duration + offset + stem mix + harmony + frequency ducking)
+    key_str = f"{s['file_path']}_{s['bpm']}_{target_bpm}_{s.get('pitch_shift',0)}_{s_dur}_{s_off}_{stems_dir}_{s.get('vocal_shift',0)}_{s.get('harmony_level',0)}_{s.get('vocal_vol',1.0)}_{s.get('drum_vol',1.0)}_{s.get('bass_vol',1.0)}_{s.get('instr_vol',1.0)}_{s.get('duck_low',1.0)}_{s.get('duck_mid',1.0)}_{s.get('duck_high',1.0)}"
     cache_hash = hashlib.md5(key_str.encode()).hexdigest()
     cache_file = os.path.join(cache_dir, f"{cache_hash}.npy")
     

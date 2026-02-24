@@ -22,7 +22,7 @@ from src.core.config import AppConfig
 from src.core.models import TrackSegment
 from src.core.undo import UndoManager
 from src.ui.dialogs import show_error
-from src.ui.threads import SearchThread, IngestionThread, WaveformLoader, AIInitializerThread
+from src.ui.threads import SearchThread, IngestionThread, WaveformLoader, AIInitializerThread, StemSeparationThread
 from src.ui.widgets import TimelineWidget, DraggableTable, LibraryWaveformPreview, LoadingOverlay
 
 def sqlite3_factory(cursor, row):
@@ -520,6 +520,7 @@ class AudioSequencerApp(QMainWindow):
         self.timeline_widget.zoomChanged.connect(lambda v: self.zs.setValue(v))
         self.timeline_widget.trackDropped.connect(self.on_track_dropped)
         self.timeline_widget.fillRangeRequested.connect(self.smart_fill_all_gaps)
+        self.timeline_widget.stemsRequested.connect(self.request_stem_separation)
         
         self.setStyleSheet("""
             QMainWindow { background-color: #121212; color: #e0e0e0; font-family: 'Segoe UI'; } 
@@ -535,6 +536,36 @@ class AudioSequencerApp(QMainWindow):
             QScrollBar::handle:vertical { background: #444; border-radius: 6px; }
         """)
 
+    def request_stem_separation(self, seg):
+        if not seg: return
+        self.loading_overlay.show_loading("🔪 Separating Stems (Remote 4090)...")
+        self.status_bar.showMessage(f"AI: Processing stems for {seg.filename}...")
+        
+        self.stem_thread = StemSeparationThread(seg, self.processor)
+        self.stem_thread.finished.connect(lambda d: self.on_stems_ready(seg, d))
+        self.stem_thread.error.connect(self.on_stems_error)
+        self.stem_thread.start()
+
+    def on_stems_ready(self, seg, stems_dir):
+        try:
+            # Update DB with new stems path
+            conn = self.dm.get_conn()
+            cursor = conn.cursor()
+            cursor.execute("UPDATE tracks SET stems_path = ? WHERE id = ?", (os.path.abspath(stems_dir), seg.id))
+            conn.commit()
+            conn.close()
+            
+            self.status_bar.showMessage(f"AI: Successfully extracted 4 stems for {seg.filename}")
+            self.preview_dirty = True # Force re-render to use stems
+        except Exception as e:
+            print(f"Error updating stems DB: {e}")
+        finally:
+            self.loading_overlay.hide_loading()
+
+    def on_stems_error(self, e):
+        self.loading_overlay.hide_loading()
+        show_error(self, "Separation Error", "Failed to separate stems on remote 4090.", e)
+
     def on_track_dropped(self, tid_str, x, y):
         # tid_str might be "tid" or "tid:start:end"
         parts = str(tid_str).split(':')
@@ -545,7 +576,7 @@ class AudioSequencerApp(QMainWindow):
 
         # Header is 40px tall, then lanes are (height + spacing)
         # We use the widget's internal coordinates (x,y)
-        lane = max(0, min(7, int((y - 40) // (self.timeline_widget.lane_height + self.timeline_widget.lane_spacing))))
+        lane = max(0, min(self.timeline_widget.lane_count - 1, int((y - 40) // (self.timeline_widget.lane_height + self.timeline_widget.lane_spacing))))
         print(f"[UI] Track {tid} dropped at x={x}, y={y} -> Lane {lane} (Range: {selection_range})")
         self.add_track_by_id(tid, x=x, lane=lane, selection_range=selection_range)
         self.timeline_widget.update_geometry()

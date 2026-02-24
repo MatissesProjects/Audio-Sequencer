@@ -26,6 +26,8 @@ class AIInitializerThread(QThread):
     finished = pyqtSignal(object, object, object) # scorer, generator, orchestrator
     error = pyqtSignal(str)
     
+    def run(self):
+        try:
             from src.core.config import AppConfig
             import requests
             
@@ -94,3 +96,21 @@ class IngestionThread(QThread):
             self.finished.emit()
         except:
             pass
+
+class StemSeparationThread(QThread):
+    finished = pyqtSignal(str) # stems_dir
+    error = pyqtSignal(str)
+    
+    def __init__(self, segment, processor):
+        super().__init__()
+        self.segment = segment
+        self.processor = processor
+        
+    def run(self):
+        try:
+            from src.core.config import AppConfig
+            stems_dir = AppConfig.get_stems_path(self.segment.filename)
+            self.processor.separate_stems(self.segment.file_path, stems_dir)
+            self.finished.emit(stems_dir)
+        except Exception as e:
+            self.error.emit(str(e))
