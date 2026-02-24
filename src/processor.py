@@ -57,22 +57,35 @@ class AudioProcessor:
             end_sample = int(onsets[-1] * sr) if onsets else len(y)
             
             loop_segment = y[start_sample:end_sample]
+            
+            # Ensure fade_len is never larger than the segment itself
             fade_len = int(sr * 0.5) # 500ms crossfade
+            if fade_len > len(loop_segment) // 2:
+                fade_len = len(loop_segment) // 2
+            
+            # If still too small (extremely short clip), use 0 fade
+            if fade_len < 10: fade_len = 0
             
             extended = y[:end_sample]
             
-            # Crossfade curves (Equal Power)
-            t = np.linspace(0, 1, fade_len)
-            fade_out = np.cos(0.5 * np.pi * t)
-            fade_in = np.sin(0.5 * np.pi * t)
-            
-            current_dur = len(extended) / sr
-            while current_dur < target_duration + 2.0:
-                overlap_end = extended[-fade_len:]
-                overlap_start = loop_segment[:fade_len]
-                blended = (overlap_end * fade_out) + (overlap_start * fade_in)
-                extended = np.concatenate([extended[:-fade_len], blended, loop_segment[fade_len:]])
+            if fade_len > 0:
+                # Crossfade curves (Equal Power)
+                t = np.linspace(0, 1, fade_len)
+                fade_out = np.cos(0.5 * np.pi * t)
+                fade_in = np.sin(0.5 * np.pi * t)
+                
                 current_dur = len(extended) / sr
+                while current_dur < target_duration + 2.0:
+                    overlap_end = extended[-fade_len:]
+                    overlap_start = loop_segment[:fade_len]
+                    blended = (overlap_end * fade_out) + (overlap_start * fade_in)
+                    extended = np.concatenate([extended[:-fade_len], blended, loop_segment[fade_len:]])
+                    current_dur = len(extended) / sr
+            else:
+                # Simple concatenation fallback for tiny clips
+                while (len(extended)/sr) < target_duration + 2.0:
+                    extended = np.concatenate([extended, loop_segment])
+            
             final = extended[:int(target_duration * sr)]
         
         if output_path:
