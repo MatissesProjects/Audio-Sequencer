@@ -289,7 +289,7 @@ class TimelineWidget(QWidget):
 
     def paintEvent(self, event):
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setRenderHint(QPainter.Hint.Antialiasing if hasattr(QPainter.Hint, 'Antialiasing') else QPainter.RenderHint.Antialiasing)
         painter.fillRect(self.rect(), QColor(25, 25, 25))
         
         # Draw Silence Guard Warnings
@@ -370,12 +370,12 @@ class TimelineWidget(QWidget):
             is_ducked = False
             if not seg.is_primary:
                 for o in self.segments:
-                    if o != seg and o.is_primary and max(seg.start_ms, o.start_ms) < min(seg.start_ms + seg.duration_ms, o.start_ms + o.duration_ms):
+                    if o != seg and o.is_primary and max(seg.start_ms, o.start_ms) < min(seg.get_end_ms(), o.get_end_ms()):
                         is_ducked = True
                         break
             hc = False
             for o in self.segments:
-                if o != seg and max(seg.start_ms, o.start_ms) < min(seg.start_ms + seg.duration_ms, o.start_ms + o.duration_ms):
+                if o != seg and seg.overlaps_with(o):
                     if self.scorer.calculate_harmonic_score(seg.key, o.key) < 60:
                         hc = True
                         break
@@ -441,57 +441,17 @@ class TimelineWidget(QWidget):
             if hasattr(seg, 'harmonics') and seg.harmonics > 0:
                 painter.setBrush(QBrush(QColor(255, 150, 0, int(255 * seg.harmonics))))
                 painter.drawEllipse(rect.right() - 45, rect.bottom() - 25, 12, 12)
-            
+
             painter.setPen(Qt.GlobalColor.white)
             painter.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
             painter.drawText(rect.adjusted(8, 8, -8, -8), Qt.AlignmentFlag.AlignTop, seg.filename)
-            
-            by = rect.bottom() - 22
-            bx = rect.left() + 8
-            if seg.is_primary:
-                painter.setBrush(QBrush(QColor(255, 215, 0)))
-                painter.setPen(Qt.PenStyle.NoPen)
-                br = QRect(bx, by, 60, 16)
-                painter.drawRoundedRect(br, 4, 4)
-                painter.setPen(Qt.GlobalColor.black)
-                painter.setFont(QFont("Segoe UI", 7, QFont.Weight.Bold))
-                painter.drawText(br, Qt.AlignmentFlag.AlignCenter, "PRIMARY")
-                bx += 65
-                
-            if self.show_modifications:
-                if abs(seg.bpm - self.target_bpm) > 0.1:
-                    painter.setBrush(QBrush(QColor(255, 165, 0)))
-                    br = QRect(bx, by, 55, 16)
-                    painter.drawRoundedRect(br, 4, 4)
-                    painter.setPen(Qt.GlobalColor.black)
-                    painter.drawText(br, Qt.AlignmentFlag.AlignCenter, "STRETCH")
-                    bx += 60
-                if abs(seg.volume - 1.0) > 0.05:
-                    painter.setBrush(QBrush(QColor(0, 200, 255)))
-                    br = QRect(bx, by, 40, 16)
-                    painter.drawRoundedRect(br, 4, 4)
-                    painter.setPen(Qt.GlobalColor.black)
-                    painter.drawText(br, Qt.AlignmentFlag.AlignCenter, f"{int(seg.volume*100)}%")
-                    bx += 45
-                if seg.pitch_shift != 0:
-                    painter.setBrush(QBrush(QColor(200, 100, 255)))
-                    br = QRect(bx, by, 40, 16)
-                    painter.drawRoundedRect(br, 4, 4)
-                    painter.setPen(Qt.GlobalColor.black)
-                    painter.drawText(br, Qt.AlignmentFlag.AlignCenter, f"{seg.pitch_shift:+}st")
-                    
+
+        # Draw Playback Cursor
         cx = int(self.cursor_pos_ms * self.pixels_per_ms)
-        painter.setPen(QPen(QColor(255, 50, 50), 2))
+        painter.setPen(QPen(QColor(255, 255, 255, 200), 2))
         painter.drawLine(cx, 0, cx, self.height())
-        painter.setBrush(QBrush(QColor(255, 50, 50)))
-        painter.drawPolygon(QPoint(cx - 8, 0), QPoint(cx + 8, 0), QPoint(cx, 12))
-        
-        painter.fillRect(0, self.height() - 15, self.width(), 15, QColor(40, 40, 40))
-        painter.setPen(QPen(QColor(100, 100, 100), 1))
-        painter.drawLine(0, self.height() - 15, self.width(), self.height() - 15)
-        painter.setPen(QColor(120, 120, 120))
-        painter.setFont(QFont("Segoe UI", 7))
-        painter.drawText(self.rect().adjusted(0, 0, 0, -2), Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignHCenter, "↕ DRAG TO RESIZE TIMELINE VERTICALLY")
+        painter.setBrush(QBrush(QColor(255, 255, 255)))
+        painter.drawPolygon(QPoint(cx-6, 0), QPoint(cx+6, 0), QPoint(cx, 10))
 
     def mousePressEvent(self, event):
         if event.pos().y() > self.height() - 15:
@@ -500,7 +460,7 @@ class TimelineWidget(QWidget):
             self.drag_start_h = self.height()
             return
 
-        for i in range(5):
+        for i in range(8):
             y = i * (self.lane_height + self.lane_spacing) + 40
             m_r = QRect(5, y + 25, 20, 20)
             s_r = QRect(30, y + 25, 20, 20)
@@ -594,10 +554,8 @@ class TimelineWidget(QWidget):
                 m.addSeparator()
                 pm = m.addMenu("🎵 Shift Pitch")
                 for i in range(-6, 7):
-                    t = f"{i:+} st" if i != 0 else "Original"
-                    p_act = pm.addAction(t)
-                    p_act.setData(i)
-                m.addSeparator()
+                    a = pm.addAction(f"{i:+} st")
+                    a.setData(i)
                 sl = m.addAction("💾 Capture as New Loop")
                 da_rem = m.addAction("🗑 Remove Track")
                 
@@ -651,7 +609,7 @@ class TimelineWidget(QWidget):
                 elif act == fs:
                     self.fillRangeRequested.emit(0.0, event.pos().x() / self.pixels_per_ms)
                 elif act == fe:
-                    total_dur = max([s.start_ms + s.duration_ms for s in self.segments]) if self.segments else 30000
+                    total_dur = max([s.get_end_ms() for s in self.segments]) if self.segments else 30000
                     self.fillRangeRequested.emit(event.pos().x() / self.pixels_per_ms, total_dur)
 
     def mouseMoveEvent(self, event):
@@ -728,13 +686,13 @@ class TimelineWidget(QWidget):
             for o in self.segments:
                 if o == self.selected_segment:
                     continue
-                oe = o.start_ms + o.duration_ms
+                oe = o.get_end_ms()
                 if abs(ns - oe) < self.snap_threshold_ms:
                     ns = oe
                 elif abs(ns - o.start_ms) < self.snap_threshold_ms:
                     ns = o.start_ms
             self.selected_segment.start_ms = ns
-            nl = max(0, min(4, int((event.pos().y() - 40) // (self.lane_height + self.lane_spacing))))
+            nl = max(0, min(7, int((event.pos().y() - 40) // (self.lane_height + self.lane_spacing))))
             self.selected_segment.lane = nl
             
         self.update_geometry()
@@ -790,8 +748,8 @@ class TimelineWidget(QWidget):
     def add_track(self, td, start_ms=None, lane=0):
         if start_ms is None:
             if self.segments:
-                l_s = max(self.segments, key=lambda s: s.start_ms + s.duration_ms)
-                start_ms = l_s.start_ms + l_s.duration_ms - 5000
+                l_s = max(self.segments, key=lambda s: s.get_end_ms())
+                start_ms = l_s.get_end_ms() - 5000
                 lane = l_s.lane
             else:
                 start_ms = 0
