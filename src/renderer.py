@@ -107,6 +107,7 @@ def _process_single_segment(s, i, target_bpm, sr, time_range):
     proc = AudioProcessor(sample_rate=sr)
     fx_chain = FXChain()
     required_raw_dur = (effective_dur + render_offset_ms) / 1000.0
+    keyframes = s.get('keyframes', {})
     
     # --- STEM PROCESSING ---
     if stems_dir and os.path.exists(stems_dir):
@@ -244,7 +245,6 @@ def _process_single_segment(s, i, target_bpm, sr, time_range):
     seg_np *= (balancing_gain * vol_mult * envelope)
     
     # --- KEYFRAME MODULATION ---
-    keyframes = s.get('keyframes', {})
     
     # 1. Volume Automation
     if 'volume' in keyframes and keyframes['volume']:
