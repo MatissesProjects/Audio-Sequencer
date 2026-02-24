@@ -10,28 +10,45 @@ import json
 load_dotenv()
 
 class TransitionGenerator:
-    """Uses Gemini to orchestrate transitions and local DSP to generate them."""
+    """Uses Gemini to orchestrate transitions and MusicGen (AudioCraft) to generate them locally."""
     
-    def __init__(self, api_key=None):
+    _model_cache = None
+
+    def __init__(self, api_key=None, use_cuda=True):
         api_key = api_key or os.getenv("GOOGLE_API_KEY")
         if api_key:
             self.client = genai.Client(api_key=api_key)
         else:
             self.client = None
             print("Warning: GOOGLE_API_KEY not found. Gemini orchestration disabled.")
+        
+        self.device = "cuda" if use_cuda and torch.cuda.is_available() else "cpu"
+        self._warmup_musicgen()
+
+    def _warmup_musicgen(self):
+        """Loads MusicGen model into GPU memory."""
+        if TransitionGenerator._model_cache is None:
+            try:
+                from audiocraft.models import MusicGen
+                import torch
+                print(f"[BOOT] Loading MusicGen ('facebook/musicgen-small') onto {self.device}...")
+                model = MusicGen.get_pretrained('facebook/musicgen-small', device=self.device)
+                model.set_generation_params(duration=4) # Default transition length
+                TransitionGenerator._model_cache = model
+            except Exception as e:
+                print(f"Error loading MusicGen: {e}. AI generation will fallback to noise.")
 
     def get_transition_params(self, track_a, track_b):
         """Asks Gemini for transition characteristics based on track metadata."""
         if not self.client:
-            return {"noise_type": "white", "filter_type": "highpass", "reverb_amount": 0.7, "description": "Default White Noise"}
+            return {"noise_type": "white", "filter_type": "highpass", "reverb_amount": 0.7, "prompt": "cinematic riser sweep"}
 
-        # Normalize keys
         bpm_a = track_a.get('bpm', 120)
-        key_a = track_a.get('harmonic_key', track_a.get('key', 'Unknown'))
+        key_a = track_a.get('harmonic_key') or track_a.get('key') or 'Unknown'
         name_a = track_a.get('filename', 'Track A')
         
         bpm_b = track_b.get('bpm', 120)
-        key_b = track_b.get('harmonic_key', track_b.get('key', 'Unknown'))
+        key_b = track_b.get('harmonic_key') or track_b.get('key') or 'Unknown'
         name_b = track_b.get('filename', 'Track B')
 
         prompt = f"""
@@ -43,6 +60,7 @@ class TransitionGenerator:
         'noise_type' (white, pink, or brown),
         'filter_type' (lowpass or highpass),
         'reverb_amount' (float 0.0 to 1.0),
+        'prompt' (A text prompt for MusicGen generation, e.g. 'ethereal synth pad riser in {key_b}, {bpm_b} bpm'),
         'description' (brief vibe description).
         """
         try:
@@ -54,15 +72,36 @@ class TransitionGenerator:
             match = re.search(r'\{.*\}', text, re.DOTALL)
             if match:
                 return json.loads(match.group())
-            return {"noise_type": "white", "filter_type": "highpass", "reverb_amount": 0.7}
+            return {"noise_type": "white", "filter_type": "highpass", "reverb_amount": 0.7, "prompt": "cinematic riser"}
         except Exception as e:
             print(f"Gemini error: {e}")
-            return {"noise_type": "white", "filter_type": "highpass", "reverb_amount": 0.5}
+            return {"noise_type": "white", "filter_type": "highpass", "reverb_amount": 0.5, "prompt": "cinematic riser"}
 
     def generate_riser(self, duration_sec, bpm, output_path, params=None):
-        """Generates a procedural noise riser with DSP effects."""
+        """Generates a procedural noise riser OR a MusicGen neural riser."""
+        prompt = params.get('prompt') if params else None
+        
+        # Try Neural Generation first if model is loaded
+        if TransitionGenerator._model_cache and prompt:
+            try:
+                print(f"Generating Neural Riser: '{prompt}'...")
+                model = TransitionGenerator._model_cache
+                model.set_generation_params(duration=duration_sec)
+                
+                descriptions = [prompt]
+                wav = model.generate(descriptions, progress=True) # [1, 1, samples]
+                
+                # Convert torch tensor to numpy
+                samples = wav[0].cpu().numpy().flatten()
+                sf.write(output_path, samples, 32000) # MusicGen small outputs 32kHz
+                return output_path
+            except Exception as e:
+                print(f"Neural generation failed: {e}. Falling back to procedural noise.")
+
+        # Fallback: Procedural Noise
         sr = 44100
         num_samples = int(sr * duration_sec)
+        # ... (remaining noise logic)
         
         noise_type = params.get('noise_type', 'white') if params else 'white'
         if noise_type == 'pink':
