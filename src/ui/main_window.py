@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QTableWidgetItem, QLineEdit, QLabel, QPushButton, 
                              QFrame, QMessageBox, QScrollArea, QFileDialog,
                              QSlider, QComboBox, QCheckBox, QStatusBar, QApplication,
-                             QSplitter)
+                             QSplitter, QFormLayout)
 from PyQt6.QtCore import Qt, QSize, QTimer, QUrl, QMimeData
 from PyQt6.QtGui import QBrush, QColor, QDrag
 from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
@@ -231,147 +231,150 @@ class AudioSequencerApp(QMainWindow):
         rl.addWidget(self.rec_list)
         
         self.prop_group = QFrame()
-        self.prop_group.setStyleSheet("background-color: #252525; border: 1px solid #444; border-radius: 8px; padding: 15px; margin-top: 10px;")
-        pl = QVBoxLayout(self.prop_group)
-        pl.addWidget(QLabel("<h3>🔍 Track Inspector</h3>"))
+        self.prop_group.setStyleSheet("""
+            QFrame#InspectorFrame { background-color: #1a1a1a; border: 1px solid #333; border-radius: 8px; }
+            QLabel { color: #ffffff; font-weight: bold; font-size: 11px; border: none; background: transparent; }
+            QSlider::handle:horizontal { background: #007acc; border: 1px solid #444; width: 14px; margin: -5px 0; border-radius: 7px; }
+            QSlider::groove:horizontal { border: 1px solid #333; height: 4px; background: #252525; margin: 2px 0; }
+            QCheckBox { color: #e0e0e0; }
+        """)
+        self.prop_group.setObjectName("InspectorFrame")
         
-        vl = QHBoxLayout()
-        l_vol = QLabel("<b>Volume:</b>")
-        l_vol.setFixedWidth(60)
-        vl.addWidget(l_vol)
+        # Create a container widget for the scroll area
+        inspector_content = QWidget()
+        inspector_content.setStyleSheet("background: transparent;")
+        inspector_layout = QVBoxLayout(inspector_content)
+        inspector_layout.setContentsMargins(10, 10, 10, 10)
+        inspector_layout.setSpacing(10)
+        
+        header = QLabel("TRACK INSPECTOR")
+        header.setStyleSheet("font-size: 16px; color: #00ffcc; font-weight: bold; margin-bottom: 5px;")
+        inspector_layout.addWidget(header)
+
+        form = QFormLayout()
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+        form.setSpacing(10)
+        
+        # --- CORE PROPS ---
         self.vol_slider = QSlider(Qt.Orientation.Horizontal)
         self.vol_slider.setRange(0, 150)
         self.vol_slider.valueChanged.connect(self.on_prop_changed)
-        vl.addWidget(self.vol_slider)
-        pl.addLayout(vl)
+        form.addRow("Main Volume:", self.vol_slider)
         
-        pal = QHBoxLayout()
-        l_pan = QLabel("<b>Panning:</b>")
-        l_pan.setFixedWidth(60)
-        pal.addWidget(l_pan)
         self.pan_slider = QSlider(Qt.Orientation.Horizontal)
         self.pan_slider.setRange(-100, 100)
         self.pan_slider.setValue(0)
         self.pan_slider.valueChanged.connect(self.on_prop_changed)
-        pal.addWidget(self.pan_slider)
-        pl.addLayout(pal)
+        form.addRow("Stereo Pan:", self.pan_slider)
         
-        pil = QHBoxLayout()
-        l_pitch = QLabel("<b>Pitch:</b>")
-        l_pitch.setFixedWidth(60)
-        pil.addWidget(l_pitch)
         self.pitch_combo = QComboBox()
         for i in range(-6, 7):
             self.pitch_combo.addItem(f"{i:+} st", i)
         self.pitch_combo.currentIndexChanged.connect(self.on_prop_changed)
-        pil.addWidget(self.pitch_combo)
-        pl.addLayout(pil)
+        form.addRow("Master Pitch:", self.pitch_combo)
         
-        rel = QHBoxLayout()
-        l_rev = QLabel("<b>Reverb:</b>")
-        l_rev.setFixedWidth(60)
-        rel.addWidget(l_rev)
         self.rev_slider = QSlider(Qt.Orientation.Horizontal)
         self.rev_slider.setRange(0, 100)
         self.rev_slider.valueChanged.connect(self.on_prop_changed)
-        rel.addWidget(self.rev_slider)
-        pl.addLayout(rel)
+        form.addRow("Reverb Space:", self.rev_slider)
         
-        hel = QHBoxLayout()
-        l_harm = QLabel("<b>Harmonics:</b>")
-        l_harm.setFixedWidth(60)
-        hel.addWidget(l_harm)
         self.harm_slider = QSlider(Qt.Orientation.Horizontal)
         self.harm_slider.setRange(0, 100)
         self.harm_slider.valueChanged.connect(self.on_prop_changed)
-        hel.addWidget(self.harm_slider)
-        pl.addLayout(hel)
+        form.addRow("Saturation:", self.harm_slider)
         
-        del_l = QHBoxLayout()
-        del_l.addWidget(QLabel("<b>Delay:</b>"))
         self.delay_slider = QSlider(Qt.Orientation.Horizontal)
         self.delay_slider.setRange(0, 100)
         self.delay_slider.valueChanged.connect(self.on_prop_changed)
-        del_l.addWidget(self.delay_slider)
-        pl.addLayout(del_l)
+        form.addRow("Echo/Delay:", self.delay_slider)
         
-        cho_l = QHBoxLayout()
-        cho_l.addWidget(QLabel("<b>Chorus:</b>"))
         self.chorus_slider = QSlider(Qt.Orientation.Horizontal)
         self.chorus_slider.setRange(0, 100)
         self.chorus_slider.valueChanged.connect(self.on_prop_changed)
-        cho_l.addWidget(self.chorus_slider)
-        pl.addLayout(cho_l)
+        form.addRow("Chorus/Air:", self.chorus_slider)
         
-        vpl = QHBoxLayout()
-        l_vsh = QLabel("<b>Vocal Shft:</b>")
-        l_vsh.setFixedWidth(60)
-        vpl.addWidget(l_vsh)
         self.vocal_shift_combo = QComboBox()
         for i in range(-12, 13):
             self.vocal_shift_combo.addItem(f"{i:+} st", i)
         self.vocal_shift_combo.setCurrentIndex(12)
         self.vocal_shift_combo.currentIndexChanged.connect(self.on_prop_changed)
-        vpl.addWidget(self.vocal_shift_combo)
-        pl.addLayout(vpl)
+        form.addRow("Vocal Shift:", self.vocal_shift_combo)
         
-        hrel = QHBoxLayout()
-        l_hry = QLabel("<b>Harm Rhy:</b>")
-        l_hry.setFixedWidth(60)
-        hrel.addWidget(l_hry)
         self.harmony_slider = QSlider(Qt.Orientation.Horizontal)
         self.harmony_slider.setRange(0, 100)
         self.harmony_slider.valueChanged.connect(self.on_prop_changed)
-        hrel.addWidget(self.harmony_slider)
-        pl.addLayout(hrel)
+        form.addRow("Voc Rhythm:", self.harmony_slider)
         
-        # --- Stem Mixers ---
-        pl.addWidget(QLabel("<b>🎛 Stem Mix</b>"))
-        vvl = QHBoxLayout()
-        vvl.addWidget(QLabel("Voc:"))
+        inspector_layout.addLayout(form)
+
+        # --- STEM MIXER ---
+        inspector_layout.addSpacing(5)
+        lbl_mix = QLabel("🎛 STEM MIXER")
+        lbl_mix.setStyleSheet("color: #00ffcc; font-size: 11px; font-weight: bold; margin-top: 5px;")
+        inspector_layout.addWidget(lbl_mix)
+        
+        mix_form = QFormLayout()
+        mix_form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+        
         self.v_vol_s = QSlider(Qt.Orientation.Horizontal)
         self.v_vol_s.setRange(0, 150)
         self.v_vol_s.setValue(100)
         self.v_vol_s.valueChanged.connect(self.on_prop_changed)
-        vvl.addWidget(self.v_vol_s)
-        pl.addLayout(vvl)
+        mix_form.addRow("Vocal Vol:", self.v_vol_s)
         
-        dvl = QHBoxLayout()
-        dvl.addWidget(QLabel("Drm:"))
         self.d_vol_s = QSlider(Qt.Orientation.Horizontal)
         self.d_vol_s.setRange(0, 150)
         self.d_vol_s.setValue(100)
         self.d_vol_s.valueChanged.connect(self.on_prop_changed)
-        dvl.addWidget(self.d_vol_s)
-        pl.addLayout(dvl)
+        mix_form.addRow("Drum Vol:", self.d_vol_s)
         
-        ivl = QHBoxLayout()
-        ivl.addWidget(QLabel("Ins:"))
         self.i_vol_s = QSlider(Qt.Orientation.Horizontal)
         self.i_vol_s.setRange(0, 150)
         self.i_vol_s.setValue(100)
         self.i_vol_s.valueChanged.connect(self.on_prop_changed)
-        ivl.addWidget(self.i_vol_s)
-        pl.addLayout(ivl)
+        mix_form.addRow("Instr Vol:", self.i_vol_s)
         
-        # --- Ducking ---
-        pl.addWidget(QLabel("<b>🌊 Smart Ducking</b>"))
-        ddl = QHBoxLayout()
-        ddl.addWidget(QLabel("Depth:"))
+        inspector_layout.addLayout(mix_form)
+
+        # --- DUCKING ---
+        inspector_layout.addSpacing(5)
+        lbl_duck = QLabel("🌊 AUTO-DUCKING")
+        lbl_duck.setStyleSheet("color: #00ffcc; font-size: 11px; font-weight: bold; margin-top: 5px;")
+        inspector_layout.addWidget(lbl_duck)
+        
+        duck_form = QFormLayout()
+        duck_form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+        
         self.duck_depth_s = QSlider(Qt.Orientation.Horizontal)
         self.duck_depth_s.setRange(0, 100)
         self.duck_depth_s.setValue(70)
         self.duck_depth_s.valueChanged.connect(self.on_prop_changed)
-        ddl.addWidget(self.duck_depth_s)
-        pl.addLayout(ddl)
-
-        self.prim_check = QCheckBox("Primary Foundation Track")
-        self.prim_check.stateChanged.connect(self.on_prop_changed)
-        pl.addWidget(self.prim_check)
+        duck_form.addRow("Duck Depth:", self.duck_depth_s)
         
-        self.amb_check = QCheckBox("Ambient Background Track")
+        inspector_layout.addLayout(duck_form)
+
+        # --- CHECKBOXES ---
+        cb_layout = QHBoxLayout()
+        self.prim_check = QCheckBox("Primary Track")
+        self.prim_check.stateChanged.connect(self.on_prop_changed)
+        cb_layout.addWidget(self.prim_check)
+        
+        self.amb_check = QCheckBox("Ambient Track")
         self.amb_check.stateChanged.connect(self.on_prop_changed)
-        pl.addWidget(self.amb_check)
+        cb_layout.addWidget(self.amb_check)
+        
+        inspector_layout.addLayout(cb_layout)
+        
+        # Wrap everything in a scroll area
+        self.inspector_scroll = QScrollArea()
+        self.inspector_scroll.setWidgetResizable(True)
+        self.inspector_scroll.setWidget(inspector_content)
+        self.inspector_scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+        
+        # Add the scroll area to the prop_group frame
+        prop_group_main_layout = QVBoxLayout(self.prop_group)
+        prop_group_main_layout.setContentsMargins(0, 0, 0, 0)
+        prop_group_main_layout.addWidget(self.inspector_scroll)
         
         self.prop_group.setVisible(False)
         rl.addWidget(self.prop_group)
