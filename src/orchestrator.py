@@ -294,7 +294,8 @@ class FullMixOrchestrator:
                     'volume': 0.8, 'is_primary': False, 'lane': lane, 'fade_in_ms': 3000, 'fade_out_ms': 3000,
                     'instr_vol': 1.1 if is_drop else 0.8, 'vocal_vol': 0.0,
                     'ducking_depth': 0.9 if is_drop else 0.7,
-                    'duck_high': 0.4
+                    'duck_high': 0.4,
+                    'low_cut': 600 if is_intro else 20 # Pro Intro: Start bass with HPF to avoid muddiness
                 })
 
             # --- LANE 2/3/5/6: Melodic/Atmosphere ---
@@ -308,6 +309,18 @@ class FullMixOrchestrator:
                     'is_ambient': True, 'ducking_depth': 0.98, 'reverb': 0.8, 'low_cut': 600,
                     'duck_low': 0.2, 'duck_mid': 0.5
                 })
+                
+                # Pro Intro: Add a "Teaser" of the first lead during the second half of the intro
+                if is_intro:
+                    lead = melodic_leads[0]
+                    t_start = current_ms + 8000
+                    t_lane = find_free_lane(t_start, 8000, preferred=5)
+                    segments.append({
+                        'id': lead['id'], 'filename': f"{lead['filename']} (TEASE)", 'file_path': lead['file_path'], 'bpm': lead['bpm'], 'harmonic_key': lead['harmonic_key'],
+                        'start_ms': t_start, 'duration_ms': 8000, 'offset_ms': (lead.get('loop_start') or 0)*1000,
+                        'volume': 0.3, 'lane': t_lane, 'fade_in_ms': 4000, 'fade_out_ms': 2000,
+                        'low_cut': 1500, 'reverb': 0.9, 'instr_vol': 0.5, 'vocal_vol': 0.0 # Ghostly teaser
+                    })
             
             if not is_intro and b_name != 'Outro':
                 lead = melodic_leads[idx % len(melodic_leads)]
@@ -368,13 +381,14 @@ class FullMixOrchestrator:
                             })
 
             # --- LANE 4/7: Atmosphere Glue ---
-            if b_name not in ['Intro', 'Outro']:
+            if b_name != 'Outro': # Now allowed in Intro
                 glue = fx_tracks[idx % len(fx_tracks)]
                 lane = find_free_lane(current_ms, b_dur + overlap, preferred=4 if idx % 2 == 0 else 7)
                 segments.append({
                     'id': glue['id'], 'filename': "ATMOS GLUE", 'file_path': glue['file_path'], 'bpm': glue['bpm'], 'harmonic_key': glue['harmonic_key'],
                     'start_ms': current_ms, 'duration_ms': b_dur + overlap, 'offset_ms': 0,
-                    'volume': random.uniform(0.2, 0.3), 'lane': lane, 'low_cut': 800, 'high_cut': 8000, 'fade_in_ms': 5000, 'fade_out_ms': 5000,
+                    'volume': random.uniform(0.15, 0.25) if is_intro else random.uniform(0.2, 0.3), 
+                    'lane': lane, 'low_cut': 1200 if is_intro else 800, 'high_cut': 8000, 'fade_in_ms': 8000 if is_intro else 5000, 'fade_out_ms': 5000,
                     'pan': random.uniform(-0.4, 0.4), 'is_ambient': True, 'ducking_depth': 0.99, 'reverb': 0.8, 'duck_low': 0.1, 'duck_mid': 0.3
                 })
             current_ms += (b_dur - overlap)
