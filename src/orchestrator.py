@@ -287,123 +287,130 @@ class FullMixOrchestrator:
                     'ducking_depth': 0.3 # Foundation is stable
                 })
 
-            # --- LANE 1: Harmonic Body (Bass) ---
-            if b_name in ['Intro', 'Verse 1', 'Drop', 'Verse 2', 'Outro']:
-                b_start = current_ms
-                # Intro/Outro: Bass MUST be present if Neural Cloud is there
-                if is_intro: b_start = current_ms 
-                
-                lane = find_free_lane(b_start, b_dur + overlap, preferred=1)
-                segments.append({
-                    'id': bass_track['id'], 'filename': bass_track['filename'], 'file_path': bass_track['file_path'], 'bpm': bass_track['bpm'], 'harmonic_key': bass_track['harmonic_key'],
-                    'start_ms': b_start, 'duration_ms': b_dur + overlap, 'offset_ms': (bass_track.get('loop_start') or 0)*1000,
-                    'volume': 0.8, 'is_primary': False, 'lane': lane, 'fade_in_ms': 3000, 'fade_out_ms': 3000,
-                    'instr_vol': 1.1 if is_drop else 0.8, 'vocal_vol': 0.0,
-                    'ducking_depth': 0.9 if is_drop else 0.7 
-                })
-
-            # --- LANE 2/3/5/6: Melodic/Atmosphere ---
-            if is_intro or b_name == 'Outro':
-                c_dur = max(4000, b_dur - 4000)
-                lane = find_free_lane(current_ms, c_dur + 4000, preferred=2)
-                segments.append({
-                    'id': -2, 'filename': "NEURAL CLOUD", 'file_path': cloud_path, 'bpm': 120, 'harmonic_key': 'N/A',
-                    'start_ms': current_ms, 'duration_ms': c_dur + 4000, 'offset_ms': 0,
-                    'volume': 0.45, 'lane': lane, 'fade_in_ms': 3000, 'fade_out_ms': 3000, # Lower volume
-                    'is_ambient': True, 'ducking_depth': 0.98, 
-                    'reverb': 0.8, 'low_cut': 600 # Filter more mud
-                })
-            
-            if not is_intro and b_name != 'Outro':
-                lead = melodic_leads[idx % len(melodic_leads)]
-                if is_build:
-                    sub_durs = [4000, 4000, 2000, 2000, 1000, 1000, 1000, 1000]
-                    sub_start = 0
-                    for c_idx, sd in enumerate(sub_durs):
-                        lane = find_free_lane(current_ms + sub_start, sd + 200, preferred=2 if c_idx % 2 == 0 else 5)
-                        segments.append({
-                            'id': lead['id'], 'filename': f"CHOP {c_idx}", 'file_path': lead['file_path'], 'bpm': lead['bpm'], 'harmonic_key': lead['harmonic_key'],
-                            'start_ms': current_ms + sub_start, 'duration_ms': sd + 200, 'offset_ms': (lead.get('loop_start') or 0)*1000,
-                            'volume': 0.7 + (c_idx/len(sub_durs) * 0.3), 'lane': lane, 'pitch_shift': int(c_idx/2), 'low_cut': 200 + (c_idx * 100), 'fade_in_ms': 50, 'fade_out_ms': 50,
-                            'harmony_level': 0.3 + (c_idx/len(sub_durs) * 0.5),
-                            'vocal_vol': 1.2, 'instr_vol': 0.3,
-                            'ducking_depth': 0.4 # Builds should cut through
-                        })
-                        sub_start += sd
-                else:
-                    ps = -2 if b_name == 'Verse 2' else 0
-                    preferred_mel_lane = 3 if idx % 2 == 0 else 6
-                    lane = find_free_lane(current_ms, b_dur + overlap, preferred=preferred_mel_lane)
-                    
-                    v_energy = lead.get('vocal_energy') or 0.0
-                    is_vocal_heavy = v_energy > 0.2
-                    
-                    # 1. THE MAIN LEAD
-                    segments.append({
-                        'id': lead['id'], 'filename': lead['filename'], 'file_path': lead['file_path'], 'bpm': lead['bpm'], 'harmonic_key': lead['harmonic_key'],
-                        'start_ms': current_ms, 'duration_ms': b_dur + overlap, 'offset_ms': (lead.get('loop_start') or 0)*1000,
-                        'volume': 0.85 if is_vocal_heavy else 0.7, 'pan': 0.0, 'lane': lane, 'pitch_shift': ps, 'low_cut': 400, 'fade_in_ms': 4000, 'fade_out_ms': 4000,
-                        'vocal_vol': 1.3 if is_vocal_heavy else 0.8, # More vocal boost
-                        'instr_vol': 0.4 if is_vocal_heavy else 0.9, # Deeper instrument cut for vocals
-                        'vocal_shift': 12 if is_drop and is_vocal_heavy else 0,
-                        'ducking_depth': 0.4 if is_vocal_heavy else 0.75,
-                        'harmony_level': 0.5 if is_drop else 0.1
-                    })
-
-                    # 2. THE HARMONY STACKS
-                    # Broadened: Stacks for vocal-heavy leads ALWAYS, 
-                    # and 50% chance for regular melodic leads.
-                    should_stack = is_vocal_heavy or (random.random() > 0.5)
-                    
-                    if should_stack and not is_build:
-                        # --- Upper Harmony (+7st) ---
-                        h1_lane = find_free_lane(current_ms, b_dur + overlap)
-                        segments.append({
-                            'id': lead['id'], 'filename': f"{lead['filename']} (H+7)", 'file_path': lead['file_path'], 'bpm': lead['bpm'], 'harmonic_key': lead['harmonic_key'],
-                            'start_ms': current_ms, 'duration_ms': b_dur + overlap, 'offset_ms': (lead.get('loop_start') or 0)*1000,
-                            'volume': 0.4, 'pan': -0.7, 'lane': h1_lane, 'pitch_shift': ps, 'low_cut': 800, 'fade_in_ms': 5000, 'fade_out_ms': 5000,
-                            'vocal_vol': 1.0 if is_vocal_heavy else 0.0, 
-                            'instr_vol': 0.0 if is_vocal_heavy else 0.8,
-                            'vocal_shift': 7, 'ducking_depth': 0.8, 'reverb': 0.5
-                        })
-
-                        # --- Lower Harmony (-5st) ---
-                        h2_lane = find_free_lane(current_ms, b_dur + overlap)
-                        segments.append({
-                            'id': lead['id'], 'filename': f"{lead['filename']} (H-5)", 'file_path': lead['file_path'], 'bpm': lead['bpm'], 'harmonic_key': lead['harmonic_key'],
-                            'start_ms': current_ms, 'duration_ms': b_dur + overlap, 'offset_ms': (lead.get('loop_start') or 0)*1000,
-                            'volume': 0.4, 'pan': 0.7, 'lane': h2_lane, 'pitch_shift': ps, 'low_cut': 800, 'fade_in_ms': 5000, 'fade_out_ms': 5000,
-                            'vocal_vol': 1.0 if is_vocal_heavy else 0.0, 
-                            'instr_vol': 0.0 if is_vocal_heavy else 0.8,
-                            'vocal_shift': -5, 'ducking_depth': 0.8, 'reverb': 0.5
-                        })
-
-                        # --- NEW: High Octave Power Layer (+12st) ---
-                        # Occurs 40% of the time for extra richness
-                        if random.random() > 0.6:
-                            h3_lane = find_free_lane(current_ms, b_dur + overlap)
+                        # --- LANE 1: Harmonic Body (Bass) ---
+                        if b_name in ['Intro', 'Verse 1', 'Drop', 'Verse 2', 'Outro']:
+                            b_start = current_ms
+                            # Intro/Outro: Bass MUST be present if Neural Cloud is there
+                            if is_intro: b_start = current_ms 
+                            
+                            lane = find_free_lane(b_start, b_dur + overlap, preferred=1)
                             segments.append({
-                                'id': lead['id'], 'filename': f"{lead['filename']} (OCT)", 'file_path': lead['file_path'], 'bpm': lead['bpm'], 'harmonic_key': lead['harmonic_key'],
-                                'start_ms': current_ms, 'duration_ms': b_dur + overlap, 'offset_ms': (lead.get('loop_start') or 0)*1000,
-                                'volume': 0.3, 'pan': 0.0, 'lane': h3_lane, 'pitch_shift': ps, 'low_cut': 1200, 'fade_in_ms': 6000, 'fade_out_ms': 6000,
-                                'vocal_vol': 0.8 if is_vocal_heavy else 0.0, 
-                                'instr_vol': 0.0 if is_vocal_heavy else 0.6,
-                                'vocal_shift': 12, 'ducking_depth': 0.9, 'reverb': 0.7, 'chorus': 0.4
+                                'id': bass_track['id'], 'filename': bass_track['filename'], 'file_path': bass_track['file_path'], 'bpm': bass_track['bpm'], 'harmonic_key': bass_track['harmonic_key'],
+                                'start_ms': b_start, 'duration_ms': b_dur + overlap, 'offset_ms': (bass_track.get('loop_start') or 0)*1000,
+                                'volume': 0.8, 'is_primary': False, 'lane': lane, 'fade_in_ms': 3000, 'fade_out_ms': 3000,
+                                'instr_vol': 1.1 if is_drop else 0.8, 'vocal_vol': 0.0,
+                                'ducking_depth': 0.9 if is_drop else 0.7,
+                                'duck_high': 0.4 # Duck highs on bass tracks to leave room for leads
                             })
-
-
-            # --- LANE 4/7: Atmosphere Glue ---
-            if b_name not in ['Intro', 'Outro']:
-                glue = fx_tracks[idx % len(fx_tracks)]
-                lane = find_free_lane(current_ms, b_dur + overlap, preferred=4 if idx % 2 == 0 else 7)
-                segments.append({
-                    'id': glue['id'], 'filename': "ATMOS GLUE", 'file_path': glue['file_path'], 'bpm': glue['bpm'], 'harmonic_key': glue['harmonic_key'],
-                    'start_ms': current_ms, 'duration_ms': b_dur + overlap, 'offset_ms': 0,
-                    'volume': random.uniform(0.2, 0.3), 'lane': lane, 'low_cut': 800, 'high_cut': 8000, 'fade_in_ms': 5000, 'fade_out_ms': 5000,
-                    'pan': random.uniform(-0.4, 0.4),
-                    'is_ambient': True, 'ducking_depth': 0.99, # Total disappearance when focus hits
-                    'reverb': 0.8
-                })
+            
+                        # --- LANE 2/3/5/6: Melodic/Atmosphere ---
+                        if is_intro or b_name == 'Outro':
+                            c_dur = max(4000, b_dur - 4000)
+                            lane = find_free_lane(current_ms, c_dur + 4000, preferred=2)
+                            segments.append({
+                                'id': -2, 'filename': "NEURAL CLOUD", 'file_path': cloud_path, 'bpm': 120, 'harmonic_key': 'N/A',
+                                'start_ms': current_ms, 'duration_ms': c_dur + 4000, 'offset_ms': 0,
+                                'volume': 0.45, 'lane': lane, 'fade_in_ms': 3000, 'fade_out_ms': 3000, # Lower volume
+                                'is_ambient': True, 'ducking_depth': 0.98, 
+                                'reverb': 0.8, 'low_cut': 600,
+                                'duck_low': 0.2, 'duck_mid': 0.5 # Ambient should duck bass and mids heavily
+                            })
+                        
+                        if not is_intro and b_name != 'Outro':
+                            lead = melodic_leads[idx % len(melodic_leads)]
+                            if is_build:
+                                sub_durs = [4000, 4000, 2000, 2000, 1000, 1000, 1000, 1000]
+                                sub_start = 0
+                                for c_idx, sd in enumerate(sub_durs):
+                                    lane = find_free_lane(current_ms + sub_start, sd + 200, preferred=2 if c_idx % 2 == 0 else 5)
+                                    segments.append({
+                                        'id': lead['id'], 'filename': f"CHOP {c_idx}", 'file_path': lead['file_path'], 'bpm': lead['bpm'], 'harmonic_key': lead['harmonic_key'],
+                                        'start_ms': current_ms + sub_start, 'duration_ms': sd + 200, 'offset_ms': (lead.get('loop_start') or 0)*1000,
+                                        'volume': 0.7 + (c_idx/len(sub_durs) * 0.3), 'lane': lane, 'pitch_shift': int(c_idx/2), 'low_cut': 200 + (c_idx * 100), 'fade_in_ms': 50, 'fade_out_ms': 50,
+                                        'harmony_level': 0.3 + (c_idx/len(sub_durs) * 0.5),
+                                        'vocal_vol': 1.2, 'instr_vol': 0.3,
+                                        'ducking_depth': 0.4,
+                                        'duck_low': 0.3 # Builds should lose bass to pop
+                                    })
+                                    sub_start += sd
+                            else:
+                                ps = -2 if b_name == 'Verse 2' else 0
+                                preferred_mel_lane = 3 if idx % 2 == 0 else 6
+                                lane = find_free_lane(current_ms, b_dur + overlap, preferred=preferred_mel_lane)
+                                
+                                v_energy = lead.get('vocal_energy') or 0.0
+                                is_vocal_heavy = v_energy > 0.2
+                                
+                                # 1. THE MAIN LEAD
+                                segments.append({
+                                    'id': lead['id'], 'filename': lead['filename'], 'file_path': lead['file_path'], 'bpm': lead['bpm'], 'harmonic_key': lead['harmonic_key'],
+                                    'start_ms': current_ms, 'duration_ms': b_dur + overlap, 'offset_ms': (lead.get('loop_start') or 0)*1000,
+                                    'volume': 0.85 if is_vocal_heavy else 0.7, 'pan': 0.0, 'lane': lane, 'pitch_shift': ps, 'low_cut': 400, 'fade_in_ms': 4000, 'fade_out_ms': 4000,
+                                    'vocal_vol': 1.3 if is_vocal_heavy else 0.8,
+                                    'instr_vol': 0.4 if is_vocal_heavy else 0.9,
+                                    'vocal_shift': 12 if is_drop and is_vocal_heavy else 0,
+                                    'ducking_depth': 0.4 if is_vocal_heavy else 0.75,
+                                    'harmony_level': 0.4 if is_drop else 0.1,
+                                    'duck_low': 0.2 if is_vocal_heavy else 0.5 # Lead tracks scoop out bass for clarity
+                                })
+            
+                                # 2. THE HARMONY STACKS
+                                # Broadened: Stacks for vocal-heavy leads ALWAYS, 
+                                # and 50% chance for regular melodic leads.
+                                should_stack = is_vocal_heavy or (random.random() > 0.5)
+                                
+                                if should_stack and not is_build:
+                                    # --- Upper Harmony (+7st) ---
+                                    h1_lane = find_free_lane(current_ms, b_dur + overlap)
+                                    segments.append({
+                                        'id': lead['id'], 'filename': f"{lead['filename']} (H+7)", 'file_path': lead['file_path'], 'bpm': lead['bpm'], 'harmonic_key': lead['harmonic_key'],
+                                        'start_ms': current_ms, 'duration_ms': b_dur + overlap, 'offset_ms': (lead.get('loop_start') or 0)*1000,
+                                        'volume': 0.4, 'pan': -0.7, 'lane': h1_lane, 'pitch_shift': ps, 'low_cut': 800, 'fade_in_ms': 5000, 'fade_out_ms': 5000,
+                                        'vocal_vol': 1.0 if is_vocal_heavy else 0.0, 
+                                        'instr_vol': 0.0 if is_vocal_heavy else 0.8,
+                                        'vocal_shift': 7, 'ducking_depth': 0.8, 'reverb': 0.5,
+                                        'duck_low': 0.1, 'duck_mid': 0.6 # Stacks scoop bass almost entirely
+                                    })
+            
+                                    # --- Lower Harmony (-5st) ---
+                                    h2_lane = find_free_lane(current_ms, b_dur + overlap)
+                                    segments.append({
+                                        'id': lead['id'], 'filename': f"{lead['filename']} (H-5)", 'file_path': lead['file_path'], 'bpm': lead['bpm'], 'harmonic_key': lead['harmonic_key'],
+                                        'start_ms': current_ms, 'duration_ms': b_dur + overlap, 'offset_ms': (lead.get('loop_start') or 0)*1000,
+                                        'volume': 0.4, 'pan': 0.7, 'lane': h2_lane, 'pitch_shift': ps, 'low_cut': 800, 'fade_in_ms': 5000, 'fade_out_ms': 5000,
+                                        'vocal_vol': 1.0 if is_vocal_heavy else 0.0, 
+                                        'instr_vol': 0.0 if is_vocal_heavy else 0.8,
+                                        'vocal_shift': -5, 'ducking_depth': 0.8, 'reverb': 0.5,
+                                        'duck_low': 0.1, 'duck_mid': 0.6
+                                    })
+            
+                                    # --- NEW: High Octave Power Layer (+12st) ---
+                                    # Occurs 40% of the time for extra richness
+                                    if random.random() > 0.6:
+                                        h3_lane = find_free_lane(current_ms, b_dur + overlap)
+                                        segments.append({
+                                            'id': lead['id'], 'filename': f"{lead['filename']} (OCT)", 'file_path': lead['file_path'], 'bpm': lead['bpm'], 'harmonic_key': lead['harmonic_key'],
+                                            'start_ms': current_ms, 'duration_ms': b_dur + overlap, 'offset_ms': (lead.get('loop_start') or 0)*1000,
+                                            'volume': 0.3, 'pan': 0.0, 'lane': h3_lane, 'pitch_shift': ps, 'low_cut': 1200, 'fade_in_ms': 6000, 'fade_out_ms': 6000,
+                                            'vocal_vol': 0.8 if is_vocal_heavy else 0.0, 
+                                            'instr_vol': 0.0 if is_vocal_heavy else 0.6,
+                                            'vocal_shift': 12, 'ducking_depth': 0.9, 'reverb': 0.7, 'chorus': 0.4,
+                                            'duck_low': 0.05 # Octave layers have NO bass
+                                        })
+            
+                        # --- LANE 4/7: Atmosphere Glue ---
+                        if b_name not in ['Intro', 'Outro']:
+                            glue = fx_tracks[idx % len(fx_tracks)]
+                            lane = find_free_lane(current_ms, b_dur + overlap, preferred=4 if idx % 2 == 0 else 7)
+                            segments.append({
+                                'id': glue['id'], 'filename': "ATMOS GLUE", 'file_path': glue['file_path'], 'bpm': glue['bpm'], 'harmonic_key': glue['harmonic_key'],
+                                'start_ms': current_ms, 'duration_ms': b_dur + overlap, 'offset_ms': 0,
+                                'volume': random.uniform(0.2, 0.3), 'lane': lane, 'low_cut': 800, 'high_cut': 8000, 'fade_in_ms': 5000, 'fade_out_ms': 5000,
+                                'pan': random.uniform(-0.4, 0.4),
+                                'is_ambient': True, 'ducking_depth': 0.99, 'reverb': 0.8,
+                                'duck_low': 0.1, 'duck_mid': 0.3 # Glue ducks everything but the highs
+                            })
+            
 
 
 
