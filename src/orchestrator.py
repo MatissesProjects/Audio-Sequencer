@@ -186,7 +186,8 @@ class FullMixOrchestrator:
                     'start_ms': f_start, 'duration_ms': b_dur + overlap, 'offset_ms': (main_drum.get('loop_start') or 0)*1000, 'stems_path': main_drum.get('stems_path'),
                     'volume': 1.0 if is_drop else 0.8, 'is_primary': True, 'lane': lane,
                     'fade_in_ms': 4000, 'fade_out_ms': 4000,
-                    'drum_vol': 1.3 if is_drop else 1.0, 'instr_vol': 0.3 if is_drop else 0.6, 'ducking_depth': 0.3
+                    'drum_vol': 1.3 if is_drop else 1.0, 'instr_vol': 0.3 if is_drop else 0.6, 
+                    'ducking_depth': 0.3
                 })
 
             # --- BASS (Lanes 2-3) ---
@@ -198,7 +199,12 @@ class FullMixOrchestrator:
                     'start_ms': b_start, 'duration_ms': b_dur + overlap, 'offset_ms': (bass_track.get('loop_start') or 0)*1000, 'stems_path': bass_track.get('stems_path'),
                     'volume': 0.8, 'is_primary': False, 'lane': lane, 'fade_in_ms': 3000, 'fade_out_ms': 3000,
                     'instr_vol': 1.1 if is_drop else 0.8, 'vocal_vol': 0.0, 'bass_vol': 1.2,
-                    'ducking_depth': 0.9 if is_drop else 0.7, 'duck_high': 0.4, 'low_cut': 600 if is_intro else 20
+                    'ducking_depth': 0.9 if is_drop else 0.7,
+                    'duck_high': 0.4,
+                    'low_cut': 20,
+                    'keyframes': {
+                        'low_cut': [(0, 800), (16000, 20)] if is_intro else []
+                    }
                 })
 
             # --- ATMOSPHERE (Lanes 6-7) ---
@@ -208,7 +214,11 @@ class FullMixOrchestrator:
                     'id': -2, 'filename': "NEURAL CLOUD", 'file_path': cloud_path, 'bpm': 120, 'harmonic_key': 'N/A',
                     'start_ms': current_ms, 'duration_ms': b_dur + 4000, 'offset_ms': 0, 'stems_path': None,
                     'volume': 0.45, 'lane': lane, 'fade_in_ms': 3000, 'fade_out_ms': 3000,
-                    'is_ambient': True, 'ducking_depth': 0.98, 'reverb': 0.8, 'low_cut': 600, 'duck_low': 0.2, 'duck_mid': 0.5
+                    'is_ambient': True, 'ducking_depth': 0.98, 'reverb': 0.8, 'low_cut': 600,
+                    'duck_low': 0.2, 'duck_mid': 0.5,
+                    'keyframes': {
+                        'volume': [(0, 0.0), (4000, 1.0), (b_dur, 1.0), (b_dur + 4000, 0.0)]
+                    }
                 })
                 if is_intro:
                     t_start = current_ms + 8000
@@ -230,7 +240,10 @@ class FullMixOrchestrator:
                             'id': lead['id'], 'filename': f"CHOP {c_idx}", 'file_path': lead['file_path'], 'bpm': lead['bpm'], 'harmonic_key': lead['harmonic_key'],
                             'start_ms': current_ms + sub_start, 'duration_ms': sd + 200, 'offset_ms': (lead.get('loop_start') or 0)*1000, 'stems_path': lead.get('stems_path'),
                             'volume': 0.7 + (c_idx/len(sub_durs) * 0.3), 'lane': lane, 'pitch_shift': int(c_idx/2), 'low_cut': 200 + (c_idx * 100), 'fade_in_ms': 50, 'fade_out_ms': 50,
-                            'harmony_level': 0.3 + (c_idx/len(sub_durs) * 0.5), 'vocal_vol': 1.2, 'instr_vol': 0.3, 'ducking_depth': 0.4, 'duck_low': 0.3
+                            'harmony_level': 0.3 + (c_idx/len(sub_durs) * 0.5), 'vocal_vol': 1.2, 'instr_vol': 0.3, 'ducking_depth': 0.4, 'duck_low': 0.3,
+                            'keyframes': {
+                                'volume': [(0, 0.8), (sd, 1.0)]
+                            }
                         })
                         sub_start += sd
                 else:
@@ -287,7 +300,10 @@ class FullMixOrchestrator:
                     'start_ms': current_ms, 'duration_ms': b_dur + overlap, 'offset_ms': 0, 'stems_path': glue.get('stems_path'),
                     'volume': random.uniform(0.15, 0.25) if is_intro else random.uniform(0.2, 0.3), 
                     'lane': lane, 'low_cut': 1200 if is_intro else 800, 'high_cut': 8000, 'fade_in_ms': 8000 if is_intro else 5000, 'fade_out_ms': 5000,
-                    'pan': random.uniform(-0.4, 0.4), 'is_ambient': True, 'ducking_depth': 0.99, 'reverb': 0.8, 'duck_low': 0.1, 'duck_mid': 0.3
+                    'pan': 0.0, 'is_ambient': True, 'ducking_depth': 0.99, 'reverb': 0.8, 'duck_low': 0.1, 'duck_mid': 0.3,
+                    'keyframes': {
+                        'pan': [(0, random.uniform(-0.8, -0.3)), (b_dur/2, random.uniform(0.3, 0.8)), (b_dur, random.uniform(-0.8, -0.3))]
+                    }
                 })
             current_ms += (b_dur - overlap)
         
@@ -304,6 +320,10 @@ class FullMixOrchestrator:
             try:
                 p = self.generator.get_transition_params(melodic_leads[0], melodic_leads[1], type_context="Build a high-energy riser.")
                 self.generator.generate_riser(duration_sec=4.0, bpm=target_bpm, output_path=op_riser, params=p)
+                # Auto-ingest
+                from src.ingestion import IngestionEngine
+                IngestionEngine(db_path=self.dm.db_path).analyze_and_store(op_riser)
+                
                 segments.append({
                     'id': -1, 'filename': f"HYPER RISER ({p.get('description', 'Neural')})", 'file_path': op_riser,
                     'bpm': target_bpm, 'harmonic_key': 'N/A', 'start_ms': build_end_ms - 4000, 'duration_ms': 4000,
@@ -315,6 +335,10 @@ class FullMixOrchestrator:
             try:
                 p = self.generator.get_transition_params(melodic_leads[1], melodic_leads[2], type_context="Create a heavy sub-bass impact.")
                 self.generator.generate_riser(duration_sec=4.0, bpm=target_bpm, output_path=op_drop, params=p)
+                # Auto-ingest
+                from src.ingestion import IngestionEngine
+                IngestionEngine(db_path=self.dm.db_path).analyze_and_store(op_drop)
+                
                 segments.append({
                     'id': -1, 'filename': f"HYPER DROP ({p.get('description', 'Sub')})", 'file_path': op_drop,
                     'bpm': target_bpm, 'harmonic_key': 'N/A', 'start_ms': build_end_ms, 'duration_ms': 4000,

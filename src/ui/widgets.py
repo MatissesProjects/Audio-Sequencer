@@ -185,6 +185,9 @@ class TimelineWidget(QWidget):
         self.pixels_per_ms = 0.05
         self.selected_segment = None
         self.dragging = self.resizing = self.resizing_left = self.vol_dragging = self.fade_in_dragging = self.fade_out_dragging = self.slipping = self.setting_loop = self.resizing_timeline = False
+        self.keyframe_dragging = False
+        self.selected_keyframe_idx = -1
+        self.selected_keyframe_param = None
         self.drag_start_pos = None
         self.drag_start_ms = self.drag_start_dur = self.drag_start_fade = self.drag_start_offset = 0
         self.drag_start_vol = 1.0
@@ -563,6 +566,23 @@ class TimelineWidget(QWidget):
             return
 
         if event.button() == Qt.MouseButton.LeftButton:
+            # Check for Keyframe Selection/Dragging
+            for seg in reversed(self.segments):
+                rect = self.get_seg_rect(seg)
+                if rect.contains(event.pos()) and hasattr(seg, 'keyframes'):
+                    for param, points in seg.keyframes.items():
+                        for idx, (ms, val) in enumerate(points):
+                            kx = rect.left() + int(ms * self.pixels_per_ms)
+                            ky = rect.bottom() - int(rect.height() * val)
+                            if QRect(kx - 6, ky - 6, 12, 12).contains(event.pos()):
+                                self.selected_segment = seg
+                                self.selected_keyframe_param = param
+                                self.selected_keyframe_idx = idx
+                                self.keyframe_dragging = True
+                                self.drag_start_pos = event.pos()
+                                self.update()
+                                return
+
             # Check for Keyframe Addition (Ctrl + Click)
             if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
                 for seg in self.segments:
@@ -654,6 +674,8 @@ class TimelineWidget(QWidget):
                     a.setData(i)
                 sl = m.addAction("💾 Capture as New Loop")
                 da_rem = m.addAction("🗑 Remove Track")
+                m.addSeparator()
+                ra_keys = m.addAction("🧹 Remove Keyframes")
                 
                 act = m.exec(self.mapToGlobal(event.pos()))
                 
@@ -679,6 +701,9 @@ class TimelineWidget(QWidget):
                 elif act == da_rem:
                     self.undoRequested.emit()
                     self.segments.remove(ts)
+                elif act == ra_keys:
+                    self.undoRequested.emit()
+                    ts.keyframes = {}
                     
                 if self.selected_segment == ts:
                     self.selected_segment = None
@@ -748,6 +773,29 @@ class TimelineWidget(QWidget):
             self.update()
             return
 
+        if self.keyframe_dragging and self.selected_segment:
+            rect = self.get_seg_rect(self.selected_segment)
+            rel_ms = (event.pos().x() - rect.left()) / self.pixels_per_ms
+            val = 1.0 - ((event.pos().y() - rect.top()) / rect.height())
+            
+            # Constrain to segment bounds
+            rel_ms = max(0.0, min(self.selected_segment.duration_ms, rel_ms))
+            val = max(0.0, min(1.0, val))
+            
+            # Update keyframe
+            pts = self.selected_segment.keyframes[self.selected_keyframe_param]
+            pts[self.selected_keyframe_idx] = (rel_ms, val)
+            pts.sort(key=lambda x: x[0])
+            
+            # Re-find index after sort to maintain selection
+            for i, p in enumerate(pts):
+                if p[0] == rel_ms:
+                    self.selected_keyframe_idx = i
+                    break
+                    
+            self.update()
+            return
+
         if not self.selected_segment:
             return
 
@@ -808,7 +856,7 @@ class TimelineWidget(QWidget):
         self.timelineChanged.emit()
 
     def mouseReleaseEvent(self, event):
-        self.dragging = self.resizing = self.resizing_left = self.vol_dragging = self.fade_in_dragging = self.fade_out_dragging = self.slipping = self.setting_loop = self.resizing_timeline = False
+        self.dragging = self.resizing = self.resizing_left = self.vol_dragging = self.fade_in_dragging = self.fade_out_dragging = self.slipping = self.setting_loop = self.resizing_timeline = self.keyframe_dragging = False
         self.update_geometry()
 
     def wheelEvent(self, event):

@@ -534,6 +534,10 @@ class AudioSequencerApp(QMainWindow):
             QCheckBox { color: white; } 
             QScrollBar:vertical { width: 12px; background: #222; } 
             QScrollBar::handle:vertical { background: #444; border-radius: 6px; }
+            QMenu { background-color: #252525; color: white; border: 1px solid #444; }
+            QMenu::item { padding: 6px 25px 6px 20px; }
+            QMenu::item:selected { background-color: #007acc; }
+            QMenu::separator { height: 1px; background: #444; margin: 5px 10px; }
         """)
 
     def request_stem_separation(self, seg):
@@ -937,6 +941,13 @@ class AudioSequencerApp(QMainWindow):
             
             p = self.generator.get_transition_params(ps.__dict__, ns.__dict__, type_context=context)
             self.generator.generate_riser(duration_sec=4.0, bpm=self.timeline_widget.target_bpm, output_path=op, params=p)
+            
+            # --- NEW: Ingest into permanent library ---
+            from src.ingestion import IngestionEngine
+            ie = IngestionEngine(db_path=self.dm.db_path)
+            ie.analyze_and_store(op)
+            self.load_library() # Refresh library UI
+            
             td = {
                 'id': -1, 
                 'filename': f"AI {prompt_type.upper()} ({p.get('description', 'Neural')})", 
@@ -1578,6 +1589,7 @@ class AudioSequencerApp(QMainWindow):
                     seg.reverb = sd.get('reverb', 0.0)
                     seg.harmony_level = sd.get('harmony_level', 0.0)
                     seg.vocal_shift = sd.get('vocal_shift', 0)
+                    seg.keyframes = sd.get('keyframes', {})
                     
                     self.load_waveform_async(seg)
                 self.timeline_widget.update_geometry()

@@ -11,6 +11,36 @@ from src.processor import AudioProcessor
 from src.core.config import AppConfig
 from src.core.effects import FXChain
 
+def _interpolate_value(points, current_ms, default_val):
+    if not points: return default_val
+    if current_ms <= points[0][0]: return points[0][1]
+    if current_ms >= points[-1][0]: return points[-1][1]
+    for i in range(len(points) - 1):
+        t1, v1 = points[i]; t2, v2 = points[i+1]
+        if t1 <= current_ms <= t2:
+            return v1 + (v2 - v1) * (current_ms - t1) / (t2 - t1)
+    return default_val
+
+def _get_modulation_envelope(points, num_samples, sr, default_val=1.0):
+    env = np.full(num_samples, default_val, dtype=np.float32)
+    if not points: return env
+    pts = sorted(points, key=lambda x: x[0])
+    first_ms, first_val = pts[0]
+    first_idx = int(first_ms * sr / 1000.0)
+    env[:min(first_idx, num_samples)] = first_val
+    for i in range(len(pts) - 1):
+        t1, v1 = pts[i]; t2, v2 = pts[i+1]
+        idx1 = int(t1 * sr / 1000.0); idx2 = int(t2 * sr / 1000.0)
+        if idx2 <= 0 or idx1 >= num_samples: continue
+        idx1 = max(0, idx1); idx2 = min(num_samples, idx2)
+        if idx2 > idx1:
+            env[idx1:idx2] = np.linspace(v1, v2, idx2 - idx1)
+    last_ms, last_val = pts[-1]
+    last_idx = int(last_ms * sr / 1000.0)
+    if last_idx < num_samples:
+        env[max(0, last_idx):] = last_val
+    return env
+
 def _process_single_segment(s, i, target_bpm, sr, time_range):
     """Standalone function for parallel processing of a single segment with caching."""
     s_start = s['start_ms']
@@ -201,44 +231,45 @@ def _process_single_segment(s, i, target_bpm, sr, time_range):
     
     # --- KEYFRAME MODULATION ---
     keyframes = s.get('keyframes', {})
+    
+    # 1. Volume Automation
     if 'volume' in keyframes and keyframes['volume']:
-        # Generate modulation envelope
-        mod_env = np.ones(num_samples, dtype=np.float32)
-        points = sorted(keyframes['volume'], key=lambda x: x[0])
-        
-        # Convert ms points to sample indices
-        # points: [(ms, val), ...]
-        
-        # Pre-fill start
-        first_ms, first_val = points[0]
-        first_idx = int(first_ms * sr / 1000.0)
-        mod_env[:min(first_idx, num_samples)] = first_val
-        
-        for i in range(len(points) - 1):
-            t1, v1 = points[i]; t2, v2 = points[i+1]
-            idx1 = int(t1 * sr / 1000.0); idx2 = int(t2 * sr / 1000.0)
-            
-            # Clamp to segment bounds
-            if idx2 <= 0 or idx1 >= num_samples: continue
-            idx1 = max(0, idx1); idx2 = min(num_samples, idx2)
-            
-            if idx2 > idx1:
-                ramp = np.linspace(v1, v2, idx2 - idx1)
-                mod_env[idx1:idx2] = ramp
-                
-        # Fill end
-        last_ms, last_val = points[-1]
-        last_idx = int(last_ms * sr / 1000.0)
-        if last_idx < num_samples:
-            mod_env[last_idx:] = last_val
-            
+        mod_env = _get_modulation_envelope(keyframes['volume'], num_samples, sr)
         seg_np *= mod_env
+        
+    # 2. Panning Automation
+    if 'pan' in keyframes and keyframes['pan']:
+        pan_env = _get_modulation_envelope(keyframes['pan'], num_samples, sr, default_val=s.get('pan', 0.0))
+        # Apply stereo panning
+        # pan -1.0 (full left) to 1.0 (full right)
+        l_gain = np.clip(1.0 - pan_env, 0.0, 1.0)
+        r_gain = np.clip(1.0 + pan_env, 0.0, 1.0)
+        seg_np[0, :] *= l_gain
+        seg_np[1, :] *= r_gain
+        # Mark as panned so global pan isn't applied twice
+        s['pan_applied'] = True
+
+    # 3. Filter Automation (Low Cut)
+    if 'low_cut' in keyframes and keyframes['low_cut']:
+        # This is more expensive as we need to process chunks or use a varying filter
+        # For simplicity, we'll use 4 broad chunks if automation is complex
+        pts = sorted(keyframes['low_cut'], key=lambda x: x[0])
+        if len(pts) >= 2:
+            from pedalboard import HighpassFilter
+            chunk_size = int(sr * 0.5) # 500ms chunks for filter interpolation
+            for i in range(0, num_samples, chunk_size):
+                end = min(i + chunk_size, num_samples)
+                rel_ms = (i + (end-i)/2) * 1000.0 / sr
+                # Get interpolated filter freq
+                freq = _interpolate_value(pts, rel_ms, s.get('low_cut', 20))
+                if freq > 30:
+                    seg_np[:, i:end] = HighpassFilter(cutoff_frequency_hz=freq)(seg_np[:, i:end], sr)
 
     # --- MODULAR FX CHAIN ---
     seg_np = fx_chain.process(seg_np, sr, s)
     
     pan = s.get('pan', 0.0)
-    if pan != 0:
+    if pan != 0 and not s.get('pan_applied'):
         l_gain = max(0.0, min(1.0, 1.0 - pan))
         r_gain = max(0.0, min(1.0, 1.0 + pan))
         seg_np[0, :] *= l_gain
