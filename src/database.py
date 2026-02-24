@@ -99,6 +99,33 @@ class DataManager:
             return np.array(result['embeddings'][0])
         return None
 
+    def search_embeddings(self, query_vector, n_results=10):
+        """Performs a vector search in ChromaDB and joins with SQLite metadata."""
+        results = self.collection.query(
+            query_embeddings=[query_vector.tolist() if isinstance(query_vector, np.ndarray) else query_vector],
+            n_results=n_results
+        )
+        
+        if not results['ids'] or not results['ids'][0]:
+            return []
+            
+        final_results = []
+        conn = self.get_conn()
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        for i, embed_id in enumerate(results['ids'][0]):
+            distance = results['distances'][0][i]
+            cursor.execute("SELECT * FROM tracks WHERE clp_embedding_id = ?", (embed_id,))
+            row = cursor.fetchone()
+            if row:
+                d = dict(row)
+                d['distance'] = float(distance)
+                final_results.append(d)
+        
+        conn.close()
+        return final_results
+
     def get_library_stats(self):
         """Returns high-level statistics about the audio library."""
         conn = self.get_conn()

@@ -5,18 +5,26 @@ import os
 class EmbeddingEngine:
     """Handles generation of semantic audio embeddings using CLAP."""
     
+    _model_cache = None
+    _torch_cache = None
+    _device_cache = None
+
     def __init__(self, model_type="640", use_cuda=False):
-        import torch
-        import laion_clap
-        self.torch = torch
-        self.device = "cuda" if use_cuda and torch.cuda.is_available() else "cpu"
-        self.model = laion_clap.CLAP_Module(enable_fusion=False, amodel='HTSAT-tiny')
-        
-        # This will download the weights on first run
-        print(f"Loading CLAP model onto {self.device}...")
-        self.model.load_ckpt() 
-        self.model.to(self.device)
-        self.model.eval()
+        if EmbeddingEngine._model_cache is None:
+            import torch
+            import laion_clap
+            EmbeddingEngine._torch_cache = torch
+            EmbeddingEngine._device_cache = "cuda" if use_cuda and torch.cuda.is_available() else "cpu"
+            EmbeddingEngine._model_cache = laion_clap.CLAP_Module(enable_fusion=False, amodel='HTSAT-tiny')
+            
+            print(f"Loading CLAP model onto {EmbeddingEngine._device_cache}...")
+            EmbeddingEngine._model_cache.load_ckpt() 
+            EmbeddingEngine._model_cache.to(EmbeddingEngine._device_cache)
+            EmbeddingEngine._model_cache.eval()
+            
+        self.torch = EmbeddingEngine._torch_cache
+        self.device = EmbeddingEngine._device_cache
+        self.model = EmbeddingEngine._model_cache
 
     def get_embedding(self, audio_path):
         """Generates a 512-d embedding for the given audio file."""

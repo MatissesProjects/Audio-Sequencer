@@ -33,10 +33,15 @@ class AIInitializerThread(QThread):
             from src.scoring import CompatibilityScorer
             from src.generator import TransitionGenerator
             from src.orchestrator import FullMixOrchestrator
+            from src.embeddings import EmbeddingEngine
             
             s = CompatibilityScorer()
             g = TransitionGenerator()
             o = FullMixOrchestrator()
+            
+            # Warm up CLAP model in background
+            print("[BOOT] Pre-loading CLAP model...")
+            _ = EmbeddingEngine()
             
             elapsed = time.time() - start
             print(f"[BOOT] AI Engine Ready ({elapsed:.2f}s)")
