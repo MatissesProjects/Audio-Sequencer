@@ -350,29 +350,47 @@ class FullMixOrchestrator:
                         'harmony_level': 0.5 if is_drop else 0.1
                     })
 
-                    # 2. THE HARMONY STACKS (Only for vocal-heavy leads)
-                    if is_vocal_heavy and not is_build:
-                        # Add a Perfect 5th Harmony (+7st)
+                    # 2. THE HARMONY STACKS
+                    # Broadened: Stacks for vocal-heavy leads ALWAYS, 
+                    # and 50% chance for regular melodic leads.
+                    should_stack = is_vocal_heavy or (random.random() > 0.5)
+                    
+                    if should_stack and not is_build:
+                        # --- Upper Harmony (+7st) ---
                         h1_lane = find_free_lane(current_ms, b_dur + overlap)
                         segments.append({
                             'id': lead['id'], 'filename': f"{lead['filename']} (H+7)", 'file_path': lead['file_path'], 'bpm': lead['bpm'], 'harmonic_key': lead['harmonic_key'],
                             'start_ms': current_ms, 'duration_ms': b_dur + overlap, 'offset_ms': (lead.get('loop_start') or 0)*1000,
-                            'volume': 0.5, 'pan': -0.6, 'lane': h1_lane, 'pitch_shift': ps, 'low_cut': 800, 'fade_in_ms': 5000, 'fade_out_ms': 5000,
-                            'vocal_vol': 1.0, 'instr_vol': 0.0, # VOCAL ONLY for the stack
-                            'vocal_shift': 7, 
-                            'ducking_depth': 0.8, 'reverb': 0.4
+                            'volume': 0.4, 'pan': -0.7, 'lane': h1_lane, 'pitch_shift': ps, 'low_cut': 800, 'fade_in_ms': 5000, 'fade_out_ms': 5000,
+                            'vocal_vol': 1.0 if is_vocal_heavy else 0.0, 
+                            'instr_vol': 0.0 if is_vocal_heavy else 0.8,
+                            'vocal_shift': 7, 'ducking_depth': 0.8, 'reverb': 0.5
                         })
 
-                        # Add a Perfect 4th/Lower Harmony (-5st)
+                        # --- Lower Harmony (-5st) ---
                         h2_lane = find_free_lane(current_ms, b_dur + overlap)
                         segments.append({
                             'id': lead['id'], 'filename': f"{lead['filename']} (H-5)", 'file_path': lead['file_path'], 'bpm': lead['bpm'], 'harmonic_key': lead['harmonic_key'],
                             'start_ms': current_ms, 'duration_ms': b_dur + overlap, 'offset_ms': (lead.get('loop_start') or 0)*1000,
-                            'volume': 0.5, 'pan': 0.6, 'lane': h2_lane, 'pitch_shift': ps, 'low_cut': 800, 'fade_in_ms': 5000, 'fade_out_ms': 5000,
-                            'vocal_vol': 1.0, 'instr_vol': 0.0, # VOCAL ONLY
-                            'vocal_shift': -5,
-                            'ducking_depth': 0.8, 'reverb': 0.4
+                            'volume': 0.4, 'pan': 0.7, 'lane': h2_lane, 'pitch_shift': ps, 'low_cut': 800, 'fade_in_ms': 5000, 'fade_out_ms': 5000,
+                            'vocal_vol': 1.0 if is_vocal_heavy else 0.0, 
+                            'instr_vol': 0.0 if is_vocal_heavy else 0.8,
+                            'vocal_shift': -5, 'ducking_depth': 0.8, 'reverb': 0.5
                         })
+
+                        # --- NEW: High Octave Power Layer (+12st) ---
+                        # Occurs 40% of the time for extra richness
+                        if random.random() > 0.6:
+                            h3_lane = find_free_lane(current_ms, b_dur + overlap)
+                            segments.append({
+                                'id': lead['id'], 'filename': f"{lead['filename']} (OCT)", 'file_path': lead['file_path'], 'bpm': lead['bpm'], 'harmonic_key': lead['harmonic_key'],
+                                'start_ms': current_ms, 'duration_ms': b_dur + overlap, 'offset_ms': (lead.get('loop_start') or 0)*1000,
+                                'volume': 0.3, 'pan': 0.0, 'lane': h3_lane, 'pitch_shift': ps, 'low_cut': 1200, 'fade_in_ms': 6000, 'fade_out_ms': 6000,
+                                'vocal_vol': 0.8 if is_vocal_heavy else 0.0, 
+                                'instr_vol': 0.0 if is_vocal_heavy else 0.6,
+                                'vocal_shift': 12, 'ducking_depth': 0.9, 'reverb': 0.7, 'chorus': 0.4
+                            })
+
 
             # --- LANE 4/7: Atmosphere Glue ---
             if b_name not in ['Intro', 'Outro']:
