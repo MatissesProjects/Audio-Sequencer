@@ -150,7 +150,12 @@ def _process_single_segment(s, i, target_bpm, sr, time_range):
             if stype == "vocals":
                 vocal_harm = 0.4 + (s.get('harmonics', 0.0) * 0.6)
                 stem_np = Pedalboard([Distortion(drive_db=vocal_harm * 12)])(stem_np, sr)
-                stem_np *= s.get('vocal_vol', 1.0)
+                
+                # Automated Stem Volume
+                if 'vocal_vol' in keyframes:
+                    stem_np *= _get_modulation_envelope(keyframes['vocal_vol'], stem_np.shape[1], sr, default_val=s.get('vocal_vol', 1.0))
+                else:
+                    stem_np *= s.get('vocal_vol', 1.0)
 
                 h_level = s.get('harmony_level', 0.0)
                 if h_level > 0:
@@ -169,11 +174,20 @@ def _process_single_segment(s, i, target_bpm, sr, time_range):
                     stem_np[:, :min_l] += (h_layer1[:, :min_l] * h_level * 0.5)
                     stem_np[:, :min_l] += (h_layer2[:, :min_l] * h_level * 0.3)
             elif stype == "drums":
-                stem_np *= s.get('drum_vol', 1.0)
+                if 'drum_vol' in keyframes:
+                    stem_np *= _get_modulation_envelope(keyframes['drum_vol'], stem_np.shape[1], sr, default_val=s.get('drum_vol', 1.0))
+                else:
+                    stem_np *= s.get('drum_vol', 1.0)
             elif stype == "bass":
-                stem_np *= s.get('bass_vol', 1.0)
+                if 'bass_vol' in keyframes:
+                    stem_np *= _get_modulation_envelope(keyframes['bass_vol'], stem_np.shape[1], sr, default_val=s.get('bass_vol', 1.0))
+                else:
+                    stem_np *= s.get('bass_vol', 1.0)
             elif stype == "other":
-                stem_np *= s.get('instr_vol', 1.0)
+                if 'instr_vol' in keyframes:
+                    stem_np *= _get_modulation_envelope(keyframes['instr_vol'], stem_np.shape[1], sr, default_val=s.get('instr_vol', 1.0))
+                else:
+                    stem_np *= s.get('instr_vol', 1.0)
             
             if combined_seg_np is None:
                 combined_seg_np = stem_np
@@ -264,6 +278,19 @@ def _process_single_segment(s, i, target_bpm, sr, time_range):
                 freq = _interpolate_value(pts, rel_ms, s.get('low_cut', 20))
                 if freq > 30:
                     seg_np[:, i:end] = HighpassFilter(cutoff_frequency_hz=freq)(seg_np[:, i:end], sr)
+
+    # 4. Filter Automation (High Cut)
+    if 'high_cut' in keyframes and keyframes['high_cut']:
+        pts = sorted(keyframes['high_cut'], key=lambda x: x[0])
+        if len(pts) >= 2:
+            from pedalboard import LowpassFilter
+            chunk_size = int(sr * 0.5) 
+            for i in range(0, num_samples, chunk_size):
+                end = min(i + chunk_size, num_samples)
+                rel_ms = (i + (end-i)/2) * 1000.0 / sr
+                freq = _interpolate_value(pts, rel_ms, s.get('high_cut', 20000))
+                if freq < 19000:
+                    seg_np[:, i:end] = LowpassFilter(cutoff_frequency_hz=freq)(seg_np[:, i:end], sr)
 
     # --- MODULAR FX CHAIN ---
     seg_np = fx_chain.process(seg_np, sr, s)

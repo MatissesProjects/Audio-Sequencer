@@ -251,6 +251,18 @@ class AudioSequencerApp(QMainWindow):
         header.setStyleSheet("font-size: 16px; color: #00ffcc; font-weight: bold; margin-bottom: 5px;")
         inspector_layout.addWidget(header)
         
+        # Automation Selector
+        auto_layout = QHBoxLayout()
+        auto_layout.addWidget(QLabel("Auto Mode:"))
+        self.auto_param_combo = QComboBox()
+        self.auto_param_combo.addItems([
+            "volume", "pan", "low_cut", "high_cut", 
+            "vocal_vol", "drum_vol", "bass_vol", "instr_vol"
+        ])
+        self.auto_param_combo.currentTextChanged.connect(self.on_automation_mode_changed)
+        auto_layout.addWidget(self.auto_param_combo)
+        inspector_layout.addLayout(auto_layout)
+        
         self.audition_btn = QPushButton("🎧 Audition FX")
         self.audition_btn.setStyleSheet("background-color: #007acc; color: white; font-weight: bold; padding: 8px;")
         self.audition_btn.clicked.connect(self.audition_selected_clip)
@@ -839,6 +851,10 @@ class AudioSequencerApp(QMainWindow):
         else:
             self.prop_group.setVisible(False)
             self.update_status()
+
+    def on_automation_mode_changed(self, mode):
+        self.timeline_widget.active_automation_param = mode
+        self.timeline_widget.update()
 
     def on_prop_changed(self):
         sel = self.timeline_widget.selected_segment

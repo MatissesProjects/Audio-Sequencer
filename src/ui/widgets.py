@@ -188,6 +188,7 @@ class TimelineWidget(QWidget):
         self.keyframe_dragging = False
         self.selected_keyframe_idx = -1
         self.selected_keyframe_param = None
+        self.active_automation_param = "volume"
         self.drag_start_pos = None
         self.drag_start_ms = self.drag_start_dur = self.drag_start_fade = self.drag_start_offset = 0
         self.drag_start_vol = 1.0
@@ -497,32 +498,38 @@ class TimelineWidget(QWidget):
 
             # --- Keyframe Rendering ---
             if hasattr(seg, 'keyframes'):
-                for param, points in seg.keyframes.items():
-                    if not points: continue
-                    # Different color per param? For now just one color
-                    k_color = QColor(255, 200, 0, 200)
-                    painter.setPen(QPen(k_color, 2))
-                    painter.setBrush(QBrush(k_color))
-                    
-                    # Sort points just in case
-                    sorted_pts = sorted(points, key=lambda x: x[0])
-                    prev_x = rect.left()
-                    prev_y = rect.bottom() - int(rect.height() * sorted_pts[0][1]) # Assuming 0-1 val
-                    
-                    for ms, val in sorted_pts:
-                        # Draw point
-                        x = rect.left() + int(ms * self.pixels_per_ms)
-                        y = rect.bottom() - int(rect.height() * max(0.0, min(1.0, val)))
+                # Only draw for the active parameter to avoid clutter
+                if self.active_automation_param in seg.keyframes:
+                    points = seg.keyframes[self.active_automation_param]
+                    if points:
+                        # Color coding based on parameter type
+                        if self.active_automation_param == "volume": k_color = QColor(255, 200, 0, 200) # Yellow
+                        elif self.active_automation_param == "pan": k_color = QColor(0, 200, 255, 200) # Blue
+                        elif "cut" in self.active_automation_param: k_color = QColor(0, 255, 100, 200) # Green
+                        else: k_color = QColor(255, 100, 255, 200) # Purple
                         
-                        painter.drawLine(prev_x, prev_y, x, y)
-                        painter.drawEllipse(x - 3, y - 3, 6, 6)
+                        painter.setPen(QPen(k_color, 2))
+                        painter.setBrush(QBrush(k_color))
                         
-                        prev_x = x
-                        prev_y = y
+                        # Sort points just in case
+                        sorted_pts = sorted(points, key=lambda x: x[0])
+                        prev_x = rect.left()
+                        prev_y = rect.bottom() - int(rect.height() * sorted_pts[0][1])
                         
-                    # Line to end?
-                    if prev_x < rect.right():
-                        painter.drawLine(prev_x, prev_y, rect.right(), prev_y)
+                        for ms, val in sorted_pts:
+                            # Draw point
+                            x = rect.left() + int(ms * self.pixels_per_ms)
+                            y = rect.bottom() - int(rect.height() * max(0.0, min(1.0, val)))
+                            
+                            painter.drawLine(prev_x, prev_y, x, y)
+                            painter.drawEllipse(x - 3, y - 3, 6, 6)
+                            
+                            prev_x = x
+                            prev_y = y
+                            
+                        # Line to end?
+                        if prev_x < rect.right():
+                            painter.drawLine(prev_x, prev_y, rect.right(), prev_y)
 
             painter.setPen(Qt.GlobalColor.white)
             painter.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
@@ -592,8 +599,8 @@ class TimelineWidget(QWidget):
                         # Invert Y to get 0.0 - 1.0 value
                         val = 1.0 - ((event.pos().y() - r.top()) / r.height())
                         
-                        # Default to volume for now, extendable later
-                        seg.add_keyframe('volume', rel_ms, val)
+                        # Use selected parameter
+                        seg.add_keyframe(self.active_automation_param, rel_ms, val)
                         self.update()
                         self.timelineChanged.emit()
                         return
