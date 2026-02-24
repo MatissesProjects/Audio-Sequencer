@@ -53,8 +53,8 @@ def _process_single_segment(s, i, target_bpm, sr, time_range):
                 'start_idx': int((render_start_ms - range_start) * sr / 1000.0) if time_range else int(render_start_ms * sr / 1000.0),
                 'is_primary': s.get('is_primary', False),
                 'is_ambient': s.get('is_ambient', False),
-                'vocal_energy': s.get('vocal_energy', 0.0),
-                'ducking_depth': s.get('ducking_depth', 0.7)
+                'vocal_energy': s.get('vocal_energy') or 0.0,
+                'ducking_depth': s.get('ducking_depth') or 0.7
             }
         except: pass
 
@@ -200,8 +200,8 @@ def _process_single_segment(s, i, target_bpm, sr, time_range):
         'start_idx': int((render_start_ms - range_start) * sr / 1000.0) if time_range else int(render_start_ms * sr / 1000.0),
         'is_primary': s.get('is_primary', False),
         'is_ambient': s.get('is_ambient', False),
-        'vocal_energy': s.get('vocal_energy', 0.0),
-        'ducking_depth': s.get('ducking_depth', 0.7)
+        'vocal_energy': s.get('vocal_energy') or 0.0,
+        'ducking_depth': s.get('ducking_depth') or 0.7
     }
 
 class FlowRenderer:
@@ -406,11 +406,11 @@ class FlowRenderer:
                         target_segment = samples[:, rel_start_c:rel_end_c]
                         
                         # Vocal-aware ducking base amount
-                        is_vocal = other.get('vocal_energy', 0) > 0.2
+                        is_vocal = (other.get('vocal_energy') or 0.0) > 0.2
                         base_duck = 0.9 if is_vocal else (0.85 if current['is_ambient'] else 0.7)
                         
                         # Apply user-defined ducking depth preference
-                        depth = current.get('ducking_depth', 0.7)
+                        depth = current.get('ducking_depth') or 0.7
                         final_duck_amt = base_duck * (depth / 0.7) # Scale based on 0.7 being "normal"
                         
                         ducked_segment = self._apply_sidechain(target_segment, source_segment, amount=min(0.95, final_duck_amt))
