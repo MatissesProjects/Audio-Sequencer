@@ -187,7 +187,7 @@ class FullMixOrchestrator:
                     'volume': 1.0 if is_drop else 0.8, 'is_primary': True, 'lane': lane,
                     'fade_in_ms': 4000, 'fade_out_ms': 4000,
                     'drum_vol': 1.3 if is_drop else 1.0, 'instr_vol': 0.3 if is_drop else 0.6, 
-                    'ducking_depth': 0.3
+                    'ducking_depth': 0.3, 'keyframes': {}
                 })
 
             # --- BASS (Lanes 2-3) ---
@@ -226,7 +226,8 @@ class FullMixOrchestrator:
                     segments.append({
                         'id': melodic_leads[0]['id'], 'filename': f"{melodic_leads[0]['filename']} (TEASE)", 'file_path': melodic_leads[0]['file_path'], 'bpm': melodic_leads[0]['bpm'], 'harmonic_key': melodic_leads[0]['harmonic_key'],
                         'start_ms': t_start, 'duration_ms': 8000, 'offset_ms': (melodic_leads[0].get('loop_start') or 0)*1000, 'stems_path': melodic_leads[0].get('stems_path'),
-                        'volume': 0.3, 'lane': lane, 'fade_in_ms': 4000, 'fade_out_ms': 2000, 'low_cut': 1500, 'reverb': 0.9, 'instr_vol': 0.5, 'vocal_vol': 0.0
+                        'volume': 0.3, 'lane': lane, 'fade_in_ms': 4000, 'fade_out_ms': 2000, 'low_cut': 1500, 'reverb': 0.9, 'instr_vol': 0.5, 'vocal_vol': 0.0,
+                        'keyframes': {}
                     })
             
             # --- MELODIC (Lanes 4-5) ---
@@ -277,7 +278,8 @@ class FullMixOrchestrator:
                             'start_ms': current_ms, 'duration_ms': b_dur + overlap, 'offset_ms': (lead.get('loop_start') or 0)*1000, 'stems_path': lead.get('stems_path'),
                             'volume': 0.85 if is_vocal_heavy else 0.7, 'pan': 0.0, 'lane': lane, 'pitch_shift': ps, 'low_cut': 400, 'fade_in_ms': 4000, 'fade_out_ms': 4000,
                             'vocal_vol': 1.3 if is_vocal_heavy else 0.8, 'instr_vol': 0.4 if is_vocal_heavy else 0.9, 'bass_vol': 0.6 if is_vocal_heavy else 0.8,
-                            'vocal_shift': 12 if is_drop and is_vocal_heavy else 0, 'ducking_depth': 0.4 if is_vocal_heavy else 0.75, 'harmony_level': 0.4 if is_drop else 0.1, 'duck_low': 0.2 if is_vocal_heavy else 0.5
+                            'vocal_shift': 12 if is_drop and is_vocal_heavy else 0, 'ducking_depth': 0.4 if is_vocal_heavy else 0.75, 'harmony_level': 0.4 if is_drop else 0.1, 'duck_low': 0.2 if is_vocal_heavy else 0.5,
+                            'keyframes': {}
                         })
 
                     should_stack = is_vocal_heavy or (random.random() > 0.5)
@@ -288,7 +290,8 @@ class FullMixOrchestrator:
                                 'id': lead['id'], 'filename': f"{lead['filename']} (H{s_shift:+})", 'file_path': lead['file_path'], 'bpm': lead['bpm'], 'harmonic_key': lead['harmonic_key'],
                                 'start_ms': current_ms, 'duration_ms': b_dur + overlap, 'offset_ms': (lead.get('loop_start') or 0)*1000, 'stems_path': lead.get('stems_path'),
                                 'volume': 0.4, 'pan': -0.7 if s_shift > 0 else 0.7, 'lane': lane, 'pitch_shift': ps, 'low_cut': 800, 'fade_in_ms': 5000, 'fade_out_ms': 5000,
-                                'vocal_vol': 1.0 if is_vocal_heavy else 0.0, 'instr_vol': 0.0 if is_vocal_heavy else 0.8, 'bass_vol': 0.0, 'vocal_shift': s_shift, 'ducking_depth': 0.8, 'reverb': 0.5, 'duck_low': 0.1, 'duck_mid': 0.6
+                                'vocal_vol': 1.0 if is_vocal_heavy else 0.0, 'instr_vol': 0.0 if is_vocal_heavy else 0.8, 'bass_vol': 0.0, 'vocal_shift': s_shift, 'ducking_depth': 0.8, 'reverb': 0.5, 'duck_low': 0.1, 'duck_mid': 0.6,
+                                'keyframes': {}
                             })
 
             # --- ATMOSPHERE GLUE (Lanes 6-7) ---

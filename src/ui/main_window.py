@@ -1636,17 +1636,23 @@ class AudioSequencerApp(QMainWindow):
                 return # Cancelled
 
         ss = sorted(self.timeline_widget.segments, key=lambda s: s.start_ms)
+        
+        # Ask for output location
+        output_path, _ = QFileDialog.getSaveFileName(self, "Export Rendered Mix", "journey_mix.mp3", "MP3 Files (*.mp3)")
+        if not output_path:
+            return
+
         self.loading_overlay.show_loading("Rendering Mix...", total=len(ss))
         try:
             tb = float(self.tbe.text()) if self.tbe.text() else 124.0
             rd = [s.to_dict() for s in ss]
-            self.renderer.render_timeline(rd, "timeline_mix.mp3", target_bpm=tb, 
+            self.renderer.render_timeline(rd, output_path, target_bpm=tb, 
                                           mutes=self.timeline_widget.mutes, solos=self.timeline_widget.solos,
                                           progress_cb=self.loading_overlay.set_progress,
                                           time_range=time_range)
             self.loading_overlay.hide_loading()
-            QMessageBox.information(self, "Success", "Mix rendered: timeline_mix.mp3")
-            os.startfile("timeline_mix.mp3")
+            QMessageBox.information(self, "Success", f"Mix rendered:\n{os.path.basename(output_path)}")
+            os.startfile(os.path.dirname(output_path))
         except Exception as e:
             self.loading_overlay.hide_loading()
             show_error(self, "Render Error", "Failed.", e)
