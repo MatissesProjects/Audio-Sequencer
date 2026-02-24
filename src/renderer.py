@@ -106,11 +106,20 @@ def _process_single_segment(s, i, target_bpm, sr, time_range):
 
                 h_level = s.get('harmony_level', 0.0)
                 if h_level > 0:
-                    h_layer = proc.shift_pitch_numpy(y_sync, sr, 7)
-                    if len(h_layer.shape) == 1: h_layer = np.stack([h_layer, h_layer])
-                    h_layer = proc.apply_rhythmic_gate(h_layer, sr, target_bpm, pattern="1/8")
-                    min_l = min(stem_np.shape[1], h_layer.shape[1])
-                    stem_np[:, :min_l] += (h_layer[:, :min_l] * h_level * 0.7)
+                    # 1. Perfect 5th Layer (+7st)
+                    h_layer1 = proc.shift_pitch_numpy(y_sync, sr, 7)
+                    if len(h_layer1.shape) == 1: h_layer1 = np.stack([h_layer1, h_layer1])
+                    h_layer1 = proc.apply_rhythmic_gate(h_layer1, sr, target_bpm, pattern="1/8")
+                    
+                    # 2. Octave Layer (+12st)
+                    h_layer2 = proc.shift_pitch_numpy(y_sync, sr, 12)
+                    if len(h_layer2.shape) == 1: h_layer2 = np.stack([h_layer2, h_layer2])
+                    h_layer2 = proc.apply_rhythmic_gate(h_layer2, sr, target_bpm, pattern="1/4")
+                    
+                    # 3. Mix layers
+                    min_l = min(stem_np.shape[1], h_layer1.shape[1], h_layer2.shape[1])
+                    stem_np[:, :min_l] += (h_layer1[:, :min_l] * h_level * 0.5)
+                    stem_np[:, :min_l] += (h_layer2[:, :min_l] * h_level * 0.3)
             elif stype == "drums":
                 stem_np *= s.get('drum_vol', 1.0)
             elif stype == "other":

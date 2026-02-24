@@ -290,15 +290,15 @@ class FullMixOrchestrator:
             # --- LANE 1: Harmonic Body (Bass) ---
             if b_name in ['Intro', 'Verse 1', 'Drop', 'Verse 2', 'Outro']:
                 b_start = current_ms
-                if is_intro: b_start += 4000 # Intro bass after 4s
+                if is_intro: b_start += 2000 # Bass comes in much earlier (2s) to anchor the ambient
                 
                 lane = find_free_lane(b_start, b_dur + overlap, preferred=1)
                 segments.append({
                     'id': bass_track['id'], 'filename': bass_track['filename'], 'file_path': bass_track['file_path'], 'bpm': bass_track['bpm'], 'harmonic_key': bass_track['harmonic_key'],
                     'start_ms': b_start, 'duration_ms': b_dur + overlap, 'offset_ms': (bass_track.get('loop_start') or 0)*1000,
-                    'volume': 0.9, 'is_primary': False, 'lane': lane, 'fade_in_ms': 3000, 'fade_out_ms': 3000,
-                    'instr_vol': 1.2 if is_drop else 0.9, 'vocal_vol': 0.0,
-                    'ducking_depth': 0.9 if is_drop else 0.7 # Heavy sidechain-style ducking for bass
+                    'volume': 0.8, 'is_primary': False, 'lane': lane, 'fade_in_ms': 3000, 'fade_out_ms': 3000,
+                    'instr_vol': 1.1 if is_drop else 0.8, 'vocal_vol': 0.0,
+                    'ducking_depth': 0.9 if is_drop else 0.7 
                 })
 
             # --- LANE 2/3/5/6: Melodic/Atmosphere ---
@@ -308,9 +308,9 @@ class FullMixOrchestrator:
                 segments.append({
                     'id': -2, 'filename': "NEURAL CLOUD", 'file_path': cloud_path, 'bpm': 120, 'harmonic_key': 'N/A',
                     'start_ms': current_ms, 'duration_ms': c_dur + 4000, 'offset_ms': 0,
-                    'volume': 0.6, 'lane': lane, 'fade_in_ms': 3000, 'fade_out_ms': 3000,
-                    'is_ambient': True, 'ducking_depth': 0.95, # Atmosphere ducks HEAVILY
-                    'reverb': 0.7
+                    'volume': 0.45, 'lane': lane, 'fade_in_ms': 3000, 'fade_out_ms': 3000, # Lower volume
+                    'is_ambient': True, 'ducking_depth': 0.98, 
+                    'reverb': 0.8, 'low_cut': 600 # Filter more mud
                 })
             
             if not is_intro and b_name != 'Outro':
@@ -355,9 +355,9 @@ class FullMixOrchestrator:
                 segments.append({
                     'id': glue['id'], 'filename': "ATMOS GLUE", 'file_path': glue['file_path'], 'bpm': glue['bpm'], 'harmonic_key': glue['harmonic_key'],
                     'start_ms': current_ms, 'duration_ms': b_dur + overlap, 'offset_ms': 0,
-                    'volume': random.uniform(0.3, 0.4), 'lane': lane, 'low_cut': 600, 'high_cut': 8000, 'fade_in_ms': 5000, 'fade_out_ms': 5000,
+                    'volume': random.uniform(0.2, 0.3), 'lane': lane, 'low_cut': 800, 'high_cut': 8000, 'fade_in_ms': 5000, 'fade_out_ms': 5000,
                     'pan': random.uniform(-0.4, 0.4),
-                    'is_ambient': True, 'ducking_depth': 0.98, # Atmosphere ducks almost entirely
+                    'is_ambient': True, 'ducking_depth': 0.99, # Total disappearance when focus hits
                     'reverb': 0.8
                 })
 
