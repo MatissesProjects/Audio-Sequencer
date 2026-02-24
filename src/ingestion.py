@@ -47,9 +47,11 @@ class IngestionEngine:
                 # Trigger Stem Separation using Config path
                 stems_dir = AppConfig.get_stems_path(features['filename'])
                 self.processor.separate_stems(file_path, stems_dir)                
-                if row: # Update existing record with stems_path
-                    cursor.execute("UPDATE tracks SET stems_path = ? WHERE id = ?", (os.path.abspath(stems_dir), row[0]))
-                else:
+                
+                # Update DB with stems_path
+                cursor.execute("UPDATE tracks SET stems_path = ? WHERE file_path = ?", (os.path.abspath(stems_dir), os.path.abspath(file_path)))
+                
+                if not row: # Only insert if it didn't exist
                     cursor.execute('''
                         INSERT INTO tracks (
                             file_path, filename, duration, sample_rate, 

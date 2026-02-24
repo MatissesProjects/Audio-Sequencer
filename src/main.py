@@ -18,6 +18,7 @@ def main():
     parser.add_argument("--full-mix", action="store_true", help="Sequence and mix ALL tracks into a continuous journey")
     parser.add_argument("--layered", action="store_true", help="Create a 2-minute layered journey with a foundation track")
     parser.add_argument("--hyper", action="store_true", help="Create a professional 5-lane generative arrangement")
+    parser.add_argument("--separate-all", action="store_true", help="Batch process stem separation for all tracks in the library")
     
     args = parser.parse_args()
     dm = DataManager()
@@ -25,6 +26,30 @@ def main():
     if args.scan:
         engine = IngestionEngine(db_path=dm.db_path)
         engine.scan_directory(args.scan)
+
+    if args.separate_all:
+        print("Starting bulk stem separation (Remote AI)...")
+        from src.processor import AudioProcessor
+        from src.core.config import AppConfig
+        proc = AudioProcessor()
+        conn = dm.get_conn()
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, file_path, filename, stems_path FROM tracks")
+        tracks = cursor.fetchall()
+        
+        for tid, f_path, fname, existing_stems in tqdm(tracks):
+            if existing_stems and os.path.exists(existing_stems):
+                continue
+            
+            try:
+                stems_dir = AppConfig.get_stems_path(fname)
+                proc.separate_stems(f_path, stems_dir)
+                cursor.execute("UPDATE tracks SET stems_path = ? WHERE id = ?", (os.path.abspath(stems_dir), tid))
+                conn.commit()
+            except Exception as e:
+                print(f"Error separating {fname}: {e}")
+        conn.close()
+        print("Bulk separation complete.")
         
     if args.embed:
         print("Initializing AI Embedding Engine...")
