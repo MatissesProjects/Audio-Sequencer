@@ -8,6 +8,8 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from pedalboard import Pedalboard, HighpassFilter, LowpassFilter, Limiter, Compressor, Reverb, Phaser, Chorus, Distortion
 from tqdm import tqdm
 from src.processor import AudioProcessor
+from src.core.config import AppConfig
+from src.core.effects import FXChain
 
 def _process_single_segment(s, i, target_bpm, sr, time_range):
     """Standalone function for parallel processing of a single segment with caching."""
@@ -35,8 +37,8 @@ def _process_single_segment(s, i, target_bpm, sr, time_range):
     if effective_dur <= 0: return None
 
     # --- CACHE CHECK ---
-    cache_dir = "render_cache"
-    os.makedirs(cache_dir, exist_ok=True)
+    cache_dir = AppConfig.CACHE_DIR
+    AppConfig.ensure_dirs()
     # Create unique hash for this segment's heavy processing
     # (file + bpm + pitch + duration + offset + stem mix + harmony)
     key_str = f"{s['file_path']}_{s['bpm']}_{target_bpm}_{s.get('pitch_shift',0)}_{s_dur}_{s_off}_{stems_dir}_{s.get('vocal_shift',0)}_{s.get('harmony_level',0)}_{s.get('vocal_vol',1.0)}_{s.get('drum_vol',1.0)}_{s.get('instr_vol',1.0)}"
@@ -57,6 +59,7 @@ def _process_single_segment(s, i, target_bpm, sr, time_range):
         except: pass
 
     proc = AudioProcessor(sample_rate=sr)
+    fx_chain = FXChain()
     required_raw_dur = (effective_dur + render_offset_ms) / 1000.0
     
     # --- STEM PROCESSING ---
@@ -99,7 +102,6 @@ def _process_single_segment(s, i, target_bpm, sr, time_range):
 
             # Apply Vocal Specific Harmonics & Harmonic Rhythms
             if stype == "vocals":
-                # Auto-harmonics
                 vocal_harm = 0.4 + (s.get('harmonics', 0.0) * 0.6)
                 stem_np = Pedalboard([Distortion(drive_db=vocal_harm * 12)])(stem_np, sr)
                 stem_np *= s.get('vocal_vol', 1.0)
@@ -179,12 +181,8 @@ def _process_single_segment(s, i, target_bpm, sr, time_range):
     
     seg_np *= (balancing_gain * vol_mult * envelope)
     
-    # --- FILTERS & PAN ---
-    is_amb = s.get('is_ambient', False)
-    lc = s.get('low_cut', 400 if is_amb else 20)
-    hc = s.get('high_cut', 20000)
-    if lc > 25 or hc < 19000:
-        seg_np = Pedalboard([HighpassFilter(lc), LowpassFilter(hc)])(seg_np, sr)
+    # --- MODULAR FX CHAIN ---
+    seg_np = fx_chain.process(seg_np, sr, s)
     
     pan = s.get('pan', 0.0)
     if pan != 0:
@@ -192,15 +190,6 @@ def _process_single_segment(s, i, target_bpm, sr, time_range):
         r_gain = max(0.0, min(1.0, 1.0 + pan))
         seg_np[0, :] *= l_gain
         seg_np[1, :] *= r_gain
-
-    # --- APPLY FX (Reverb & Harmonics) ---
-    rev_amt = s.get('reverb', 0.0)
-    harm_amt = s.get('harmonics', 0.0)
-    if rev_amt > 0 or harm_amt > 0:
-        fx_chain = []
-        if harm_amt > 0: fx_chain.append(Distortion(drive_db=harm_amt * 15))
-        if rev_amt > 0: fx_chain.append(Reverb(room_size=0.8, wet_level=rev_amt * 0.6, dry_level=1.0 - (rev_amt * 0.2)))
-        seg_np = Pedalboard(fx_chain)(seg_np, sr)
 
     # --- SAVE TO CACHE ---
     try: np.save(cache_file, seg_np)
@@ -218,8 +207,8 @@ def _process_single_segment(s, i, target_bpm, sr, time_range):
 class FlowRenderer:
     """Handles mixing, layering, and crossfading multiple tracks with pro gain staging."""
     
-    def __init__(self, sample_rate=44100):
-        self.sr = sample_rate
+    def __init__(self, sample_rate=None):
+        self.sr = sample_rate or AppConfig.SAMPLE_RATE
 
     def segment_to_numpy(self, seg):
         """Helper to convert pydub segment to numpy float32 (stereo)."""
@@ -255,10 +244,12 @@ class FlowRenderer:
         combined.export(output_path, format="mp3", bitrate="320k")
         return output_path
 
-    def render_timeline(self, segments, output_path, target_bpm=124, mutes=None, solos=None, progress_cb=None, time_range=None):
+    def render_timeline(self, segments, output_path, target_bpm=None, mutes=None, solos=None, progress_cb=None, time_range=None):
+        target_bpm = target_bpm or AppConfig.DEFAULT_BPM
         return self._render_internal(segments, output_path, target_bpm, mutes, solos, progress_cb, time_range)
 
-    def render_stems(self, segments, output_folder, target_bpm=124, progress_cb=None, time_range=None):
+    def render_stems(self, segments, output_folder, target_bpm=None, progress_cb=None, time_range=None):
+        target_bpm = target_bpm or AppConfig.DEFAULT_BPM
         if not os.path.exists(output_folder):
             os.makedirs(output_folder)
             
