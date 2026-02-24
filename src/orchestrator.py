@@ -3,6 +3,7 @@ import os
 import soundfile as sf
 import numpy as np
 import librosa
+import random
 from src.database import DataManager
 from src.scoring import CompatibilityScorer
 from src.processor import AudioProcessor
@@ -11,7 +12,7 @@ from tqdm import tqdm
 
 class FullMixOrchestrator:
     """Sequences and layers curated selections for maximum musical flow."""
-    
+
     def __init__(self):
         self.dm = DataManager()
         self.scorer = CompatibilityScorer()
@@ -32,41 +33,41 @@ class FullMixOrchestrator:
             return []
 
         unvisited = all_tracks.copy()
-        
+
         # 1. Selection logic for starting track
         if seed_track:
             # Find the seed in unvisited and move it to start
-            current = next((t for t in unvisited if t['id'] == seed_track['id']), unvisited[0])
+            current = next((t for t in unvisited if t['id'] == seed_track['id']), unvisited[0])   
             unvisited.remove(current)
         else:
             current = unvisited.pop(0)
-            
+
         sequence = [current]
 
         print(f"Finding the best flow from {len(all_tracks)} available clips...")
-        
+
         while unvisited and len(sequence) < max_tracks:
             best_next = None
             best_score = -1
             best_idx = -1
-            
+
             curr_emb = self.dm.get_embedding(current['clp_embedding_id']) if current['clp_embedding_id'] else None
 
             for i, candidate in enumerate(unvisited):
                 cand_emb = self.dm.get_embedding(candidate['clp_embedding_id']) if candidate['clp_embedding_id'] else None
                 score = self.scorer.get_total_score(current, candidate, curr_emb, cand_emb)['total']
-                
+
                 if score > best_score:
                     best_score = score
                     best_next = candidate
                     best_idx = i
-            
+
             if best_score < self.min_score_threshold:
                 break
-                
+
             current = unvisited.pop(best_idx)
             sequence.append(current)
-            
+
         return sequence
 
     def generate_full_mix(self, output_path="full_continuous_mix.mp3", target_bpm=124, seed_track=None):
@@ -77,7 +78,7 @@ class FullMixOrchestrator:
             return
 
         print("\nOrchestrating high-fidelity curated sequence...")
-        
+
         segments = []
         current_ms = 0
         for i, track in enumerate(sequence):
@@ -85,9 +86,9 @@ class FullMixOrchestrator:
             duration_ms = 30000 if i % 2 == 0 else 20000
             start_ms = current_ms
             if i > 0: start_ms -= 8000
-            
+
             loop_start = (track.get('loop_start') or 0) * 1000.0
-            
+
             segments.append({
                 'file_path': track['file_path'],
                 'bpm': track['bpm'],
@@ -126,26 +127,24 @@ class FullMixOrchestrator:
             foundation_track = next((t for t in all_tracks if t['id'] == seed_track['id']), all_tracks[0])
         else:
             foundation_track = all_tracks[0]
-        
+
         found_emb = self.dm.get_embedding(foundation_track['clp_embedding_id']) if foundation_track['clp_embedding_id'] else None
-        
+
         candidates = [t for t in all_tracks if t['id'] != foundation_track['id']]
         scored_candidates = []
         for c in candidates:
             c_emb = self.dm.get_embedding(c['clp_embedding_id']) if c['clp_embedding_id'] else None
-            score = self.scorer.get_total_score(foundation_track, c, found_emb, c_emb)['total']
+            score = self.scorer.get_total_score(foundation_track, c, found_emb, c_emb)['total']   
             scored_candidates.append((score, c))
-        
+
         scored_candidates.sort(key=lambda x: x[0], reverse=True)
         interludes = [x[1] for x in scored_candidates[:6]] # Use more for variety
 
         print(f"Creating a professional 120s layered journey based on '{foundation_track['filename']}'...")
-        
-        # We will now use the new Timeline Renderer logic for the orchestrator too
+
         segments = []
-        
+
         # Add Foundation (The "Lead")
-        # Use Smart Loop if available
         f_start_offset = (foundation_track.get('loop_start') or 0) * 1000.0
         segments.append({
             'file_path': foundation_track['file_path'],
@@ -162,13 +161,12 @@ class FullMixOrchestrator:
         })
 
         # Add Interludes with Auto-Panning
-        # Strategy: Alternate L/R and varying start times
         start_times = [10000, 25000, 45000, 65000, 85000, 100000]
         pans = [-0.6, 0.6, -0.4, 0.4, -0.7, 0.7]
-        
+
         for i, track in enumerate(interludes):
             if i >= len(start_times): break
-            
+
             i_loop_start = (track.get('loop_start') or 0) * 1000.0
             segments.append({
                 'file_path': track['file_path'],
@@ -190,9 +188,7 @@ class FullMixOrchestrator:
         return output_path
 
     def generate_hyper_mix(self, output_path="hyper_automated_mix.mp3", target_bpm=124, seed_track=None):
-        """
-        Direct rendering of a Hyper-Mix journey.
-        """
+        """Direct rendering of a Hyper-Mix journey."""
         segments = self.get_hyper_segments(seed_track=seed_track)
         if not segments:
             print("Failed to generate hyper-segments.")
@@ -205,7 +201,6 @@ class FullMixOrchestrator:
 
     def get_hyper_segments(self, seed_track=None, start_time_ms=0):
         """Returns the segment data for a hyper-mix without rendering it."""
-        import random
         conn = self.dm.get_conn()
         conn.row_factory = lambda cursor, row: {col[0]: row[idx] for idx, col in enumerate(cursor.description)}
         cursor = conn.cursor()
@@ -216,12 +211,11 @@ class FullMixOrchestrator:
         if len(all_tracks) < 8: return []
 
         # 1. Randomize and Categorize
-        random.shuffle(all_tracks) # High variety
+        random.shuffle(all_tracks)
         all_tracks.sort(key=lambda x: x.get('energy', 0), reverse=True)
-        drums = all_tracks[:int(len(all_tracks)*0.3)] # Top 30% are drums
+        drums = all_tracks[:int(len(all_tracks)*0.3)]
         others = all_tracks[int(len(all_tracks)*0.3):]
-        
-        # Varied Block durations (Multiples of 4s)
+
         def rnd_dur(base): return base + (random.randint(-1, 1) * 4000)
 
         blocks = [
@@ -232,51 +226,44 @@ class FullMixOrchestrator:
             {'name': 'Verse 2', 'dur': rnd_dur(32000)},
             {'name': 'Outro', 'dur': 20000}
         ]
-        
+
         segments = []
         current_ms = start_time_ms
-        
-        # Pick main components with randomness
+
         main_drum = random.choice(drums)
         bass_track = random.choice([t for t in others if t['harmonic_key'] == main_drum['harmonic_key']] or [others[0]])
         random.shuffle(others)
         melodic_leads = others[:6]
         fx_tracks = others[6:10]
 
-        # Generate Grain Cloud for Intro/Outro
         os.makedirs("generated_assets", exist_ok=True)
         cloud_path = os.path.abspath(f"generated_assets/grain_cloud_{main_drum['id']}_{random.randint(0,999)}.wav")
         if not os.path.exists(cloud_path):
             try: self.processor.generate_grain_cloud(random.choice(melodic_leads)['file_path'], cloud_path, duration=20.0)
             except: cloud_path = melodic_leads[0]['file_path']
 
-        overlap = 4000 
+        overlap = 4000
 
         def find_free_lane(start, dur, preferred=None):
-            # Check which lanes are busy during this time window
             busy_lanes = set()
             for s in segments:
                 if max(start, s['start_ms']) < min(start + dur, s['start_ms'] + s['duration_ms']):
                     busy_lanes.add(s['lane'])
-            
             if preferred is not None and preferred not in busy_lanes:
                 return preferred
-            for l in range(8): # Increased to 8 lanes for richer layering
+            for l in range(8):
                 if l not in busy_lanes: return l
             return preferred or 0
 
         for idx, block in enumerate(blocks):
             b_name = block['name']; b_dur = block['dur']
-            is_drop = (b_name == 'Drop')
-            is_build = (b_name == 'Build')
-            is_intro = (b_name == 'Intro')
-            
+            is_drop = (b_name == 'Drop'); is_build = (b_name == 'Build'); is_intro = (b_name == 'Intro')
+
             # --- LANE 0: Foundation (Heartbeat) ---
             if b_name != 'Outro' or b_name == 'Outro':
                 f_start = current_ms
                 f_dur = b_dur + overlap
-                if is_intro: f_start += 10000 # Clean intro: wait 10s before drums
-                
+                if is_intro: f_start += 10000
                 lane = find_free_lane(f_start, f_dur, preferred=0)
                 segments.append({
                     'id': main_drum['id'], 'filename': main_drum['filename'], 'file_path': main_drum['file_path'], 'bpm': main_drum['bpm'], 'harmonic_key': main_drum['harmonic_key'],
@@ -284,165 +271,121 @@ class FullMixOrchestrator:
                     'volume': 1.0 if is_drop else 0.8, 'is_primary': True, 'lane': lane,
                     'fade_in_ms': 4000, 'fade_out_ms': 4000,
                     'drum_vol': 1.3 if is_drop else 1.0, 'instr_vol': 0.3 if is_drop else 0.6, 
-                    'ducking_depth': 0.3 # Foundation is stable
+                    'ducking_depth': 0.3
                 })
 
-                        # --- LANE 1: Harmonic Body (Bass) ---
-                        if b_name in ['Intro', 'Verse 1', 'Drop', 'Verse 2', 'Outro']:
-                            b_start = current_ms
-                            # Intro/Outro: Bass MUST be present if Neural Cloud is there
-                            if is_intro: b_start = current_ms 
-                            
-                            lane = find_free_lane(b_start, b_dur + overlap, preferred=1)
+            # --- LANE 1: Harmonic Body (Bass) ---
+            if b_name in ['Intro', 'Verse 1', 'Drop', 'Verse 2', 'Outro']:
+                b_start = current_ms
+                if is_intro: b_start = current_ms 
+                lane = find_free_lane(b_start, b_dur + overlap, preferred=1)
+                segments.append({
+                    'id': bass_track['id'], 'filename': bass_track['filename'], 'file_path': bass_track['file_path'], 'bpm': bass_track['bpm'], 'harmonic_key': bass_track['harmonic_key'],
+                    'start_ms': b_start, 'duration_ms': b_dur + overlap, 'offset_ms': (bass_track.get('loop_start') or 0)*1000,
+                    'volume': 0.8, 'is_primary': False, 'lane': lane, 'fade_in_ms': 3000, 'fade_out_ms': 3000,
+                    'instr_vol': 1.1 if is_drop else 0.8, 'vocal_vol': 0.0,
+                    'ducking_depth': 0.9 if is_drop else 0.7,
+                    'duck_high': 0.4
+                })
+
+            # --- LANE 2/3/5/6: Melodic/Atmosphere ---
+            if is_intro or b_name == 'Outro':
+                c_dur = max(4000, b_dur - 4000)
+                lane = find_free_lane(current_ms, c_dur + 4000, preferred=2)
+                segments.append({
+                    'id': -2, 'filename': "NEURAL CLOUD", 'file_path': cloud_path, 'bpm': 120, 'harmonic_key': 'N/A',
+                    'start_ms': current_ms, 'duration_ms': c_dur + 4000, 'offset_ms': 0,
+                    'volume': 0.45, 'lane': lane, 'fade_in_ms': 3000, 'fade_out_ms': 3000,
+                    'is_ambient': True, 'ducking_depth': 0.98, 'reverb': 0.8, 'low_cut': 600,
+                    'duck_low': 0.2, 'duck_mid': 0.5
+                })
+            
+            if not is_intro and b_name != 'Outro':
+                lead = melodic_leads[idx % len(melodic_leads)]
+                if is_build:
+                    sub_durs = [4000, 4000, 2000, 2000, 1000, 1000, 1000, 1000]; sub_start = 0
+                    for c_idx, sd in enumerate(sub_durs):
+                        lane = find_free_lane(current_ms + sub_start, sd + 200, preferred=2 if c_idx % 2 == 0 else 5)
+                        segments.append({
+                            'id': lead['id'], 'filename': f"CHOP {c_idx}", 'file_path': lead['file_path'], 'bpm': lead['bpm'], 'harmonic_key': lead['harmonic_key'],
+                            'start_ms': current_ms + sub_start, 'duration_ms': sd + 200, 'offset_ms': (lead.get('loop_start') or 0)*1000,
+                            'volume': 0.7 + (c_idx/len(sub_durs) * 0.3), 'lane': lane, 'pitch_shift': int(c_idx/2), 'low_cut': 200 + (c_idx * 100), 'fade_in_ms': 50, 'fade_out_ms': 50,
+                            'harmony_level': 0.3 + (c_idx/len(sub_durs) * 0.5), 'vocal_vol': 1.2, 'instr_vol': 0.3,
+                            'ducking_depth': 0.4, 'duck_low': 0.3
+                        })
+                        sub_start += sd
+                else:
+                    ps = -2 if b_name == 'Verse 2' else 0
+                    lane = find_free_lane(current_ms, b_dur + overlap, preferred=3 if idx % 2 == 0 else 6)
+                    v_energy = lead.get('vocal_energy') or 0.0; is_vocal_heavy = v_energy > 0.2
+                    
+                    segments.append({
+                        'id': lead['id'], 'filename': lead['filename'], 'file_path': lead['file_path'], 'bpm': lead['bpm'], 'harmonic_key': lead['harmonic_key'],
+                        'start_ms': current_ms, 'duration_ms': b_dur + overlap, 'offset_ms': (lead.get('loop_start') or 0)*1000,
+                        'volume': 0.85 if is_vocal_heavy else 0.7, 'pan': 0.0, 'lane': lane, 'pitch_shift': ps, 'low_cut': 400, 'fade_in_ms': 4000, 'fade_out_ms': 4000,
+                        'vocal_vol': 1.3 if is_vocal_heavy else 0.8, 'instr_vol': 0.4 if is_vocal_heavy else 0.9,
+                        'vocal_shift': 12 if is_drop and is_vocal_heavy else 0,
+                        'ducking_depth': 0.4 if is_vocal_heavy else 0.75,
+                        'harmony_level': 0.4 if is_drop else 0.1,
+                        'duck_low': 0.2 if is_vocal_heavy else 0.5
+                    })
+
+                    should_stack = is_vocal_heavy or (random.random() > 0.5)
+                    if should_stack and not is_build:
+                        h1_lane = find_free_lane(current_ms, b_dur + overlap)
+                        segments.append({
+                            'id': lead['id'], 'filename': f"{lead['filename']} (H+7)", 'file_path': lead['file_path'], 'bpm': lead['bpm'], 'harmonic_key': lead['harmonic_key'],
+                            'start_ms': current_ms, 'duration_ms': b_dur + overlap, 'offset_ms': (lead.get('loop_start') or 0)*1000,
+                            'volume': 0.4, 'pan': -0.7, 'lane': h1_lane, 'pitch_shift': ps, 'low_cut': 800, 'fade_in_ms': 5000, 'fade_out_ms': 5000,
+                            'vocal_vol': 1.0 if is_vocal_heavy else 0.0, 'instr_vol': 0.0 if is_vocal_heavy else 0.8,
+                            'vocal_shift': 7, 'ducking_depth': 0.8, 'reverb': 0.5, 'duck_low': 0.1, 'duck_mid': 0.6
+                        })
+                        h2_lane = find_free_lane(current_ms, b_dur + overlap)
+                        segments.append({
+                            'id': lead['id'], 'filename': f"{lead['filename']} (H-5)", 'file_path': lead['file_path'], 'bpm': lead['bpm'], 'harmonic_key': lead['harmonic_key'],
+                            'start_ms': current_ms, 'duration_ms': b_dur + overlap, 'offset_ms': (lead.get('loop_start') or 0)*1000,
+                            'volume': 0.4, 'pan': 0.7, 'lane': h2_lane, 'pitch_shift': ps, 'low_cut': 800, 'fade_in_ms': 5000, 'fade_out_ms': 5000,
+                            'vocal_vol': 1.0 if is_vocal_heavy else 0.0, 'instr_vol': 0.0 if is_vocal_heavy else 0.8,
+                            'vocal_shift': -5, 'ducking_depth': 0.8, 'reverb': 0.5, 'duck_low': 0.1, 'duck_mid': 0.6
+                        })
+                        if random.random() > 0.6:
+                            h3_lane = find_free_lane(current_ms, b_dur + overlap)
                             segments.append({
-                                'id': bass_track['id'], 'filename': bass_track['filename'], 'file_path': bass_track['file_path'], 'bpm': bass_track['bpm'], 'harmonic_key': bass_track['harmonic_key'],
-                                'start_ms': b_start, 'duration_ms': b_dur + overlap, 'offset_ms': (bass_track.get('loop_start') or 0)*1000,
-                                'volume': 0.8, 'is_primary': False, 'lane': lane, 'fade_in_ms': 3000, 'fade_out_ms': 3000,
-                                'instr_vol': 1.1 if is_drop else 0.8, 'vocal_vol': 0.0,
-                                'ducking_depth': 0.9 if is_drop else 0.7,
-                                'duck_high': 0.4 # Duck highs on bass tracks to leave room for leads
+                                'id': lead['id'], 'filename': f"{lead['filename']} (OCT)", 'file_path': lead['file_path'], 'bpm': lead['bpm'], 'harmonic_key': lead['harmonic_key'],
+                                'start_ms': current_ms, 'duration_ms': b_dur + overlap, 'offset_ms': (lead.get('loop_start') or 0)*1000,
+                                'volume': 0.3, 'pan': 0.0, 'lane': h3_lane, 'pitch_shift': ps, 'low_cut': 1200, 'fade_in_ms': 6000, 'fade_out_ms': 6000,
+                                'vocal_vol': 0.8 if is_vocal_heavy else 0.0, 'instr_vol': 0.0 if is_vocal_heavy else 0.6,
+                                'vocal_shift': 12, 'ducking_depth': 0.9, 'reverb': 0.7, 'chorus': 0.4, 'duck_low': 0.05
                             })
-            
-                        # --- LANE 2/3/5/6: Melodic/Atmosphere ---
-                        if is_intro or b_name == 'Outro':
-                            c_dur = max(4000, b_dur - 4000)
-                            lane = find_free_lane(current_ms, c_dur + 4000, preferred=2)
-                            segments.append({
-                                'id': -2, 'filename': "NEURAL CLOUD", 'file_path': cloud_path, 'bpm': 120, 'harmonic_key': 'N/A',
-                                'start_ms': current_ms, 'duration_ms': c_dur + 4000, 'offset_ms': 0,
-                                'volume': 0.45, 'lane': lane, 'fade_in_ms': 3000, 'fade_out_ms': 3000, # Lower volume
-                                'is_ambient': True, 'ducking_depth': 0.98, 
-                                'reverb': 0.8, 'low_cut': 600,
-                                'duck_low': 0.2, 'duck_mid': 0.5 # Ambient should duck bass and mids heavily
-                            })
-                        
-                        if not is_intro and b_name != 'Outro':
-                            lead = melodic_leads[idx % len(melodic_leads)]
-                            if is_build:
-                                sub_durs = [4000, 4000, 2000, 2000, 1000, 1000, 1000, 1000]
-                                sub_start = 0
-                                for c_idx, sd in enumerate(sub_durs):
-                                    lane = find_free_lane(current_ms + sub_start, sd + 200, preferred=2 if c_idx % 2 == 0 else 5)
-                                    segments.append({
-                                        'id': lead['id'], 'filename': f"CHOP {c_idx}", 'file_path': lead['file_path'], 'bpm': lead['bpm'], 'harmonic_key': lead['harmonic_key'],
-                                        'start_ms': current_ms + sub_start, 'duration_ms': sd + 200, 'offset_ms': (lead.get('loop_start') or 0)*1000,
-                                        'volume': 0.7 + (c_idx/len(sub_durs) * 0.3), 'lane': lane, 'pitch_shift': int(c_idx/2), 'low_cut': 200 + (c_idx * 100), 'fade_in_ms': 50, 'fade_out_ms': 50,
-                                        'harmony_level': 0.3 + (c_idx/len(sub_durs) * 0.5),
-                                        'vocal_vol': 1.2, 'instr_vol': 0.3,
-                                        'ducking_depth': 0.4,
-                                        'duck_low': 0.3 # Builds should lose bass to pop
-                                    })
-                                    sub_start += sd
-                            else:
-                                ps = -2 if b_name == 'Verse 2' else 0
-                                preferred_mel_lane = 3 if idx % 2 == 0 else 6
-                                lane = find_free_lane(current_ms, b_dur + overlap, preferred=preferred_mel_lane)
-                                
-                                v_energy = lead.get('vocal_energy') or 0.0
-                                is_vocal_heavy = v_energy > 0.2
-                                
-                                # 1. THE MAIN LEAD
-                                segments.append({
-                                    'id': lead['id'], 'filename': lead['filename'], 'file_path': lead['file_path'], 'bpm': lead['bpm'], 'harmonic_key': lead['harmonic_key'],
-                                    'start_ms': current_ms, 'duration_ms': b_dur + overlap, 'offset_ms': (lead.get('loop_start') or 0)*1000,
-                                    'volume': 0.85 if is_vocal_heavy else 0.7, 'pan': 0.0, 'lane': lane, 'pitch_shift': ps, 'low_cut': 400, 'fade_in_ms': 4000, 'fade_out_ms': 4000,
-                                    'vocal_vol': 1.3 if is_vocal_heavy else 0.8,
-                                    'instr_vol': 0.4 if is_vocal_heavy else 0.9,
-                                    'vocal_shift': 12 if is_drop and is_vocal_heavy else 0,
-                                    'ducking_depth': 0.4 if is_vocal_heavy else 0.75,
-                                    'harmony_level': 0.4 if is_drop else 0.1,
-                                    'duck_low': 0.2 if is_vocal_heavy else 0.5 # Lead tracks scoop out bass for clarity
-                                })
-            
-                                # 2. THE HARMONY STACKS
-                                # Broadened: Stacks for vocal-heavy leads ALWAYS, 
-                                # and 50% chance for regular melodic leads.
-                                should_stack = is_vocal_heavy or (random.random() > 0.5)
-                                
-                                if should_stack and not is_build:
-                                    # --- Upper Harmony (+7st) ---
-                                    h1_lane = find_free_lane(current_ms, b_dur + overlap)
-                                    segments.append({
-                                        'id': lead['id'], 'filename': f"{lead['filename']} (H+7)", 'file_path': lead['file_path'], 'bpm': lead['bpm'], 'harmonic_key': lead['harmonic_key'],
-                                        'start_ms': current_ms, 'duration_ms': b_dur + overlap, 'offset_ms': (lead.get('loop_start') or 0)*1000,
-                                        'volume': 0.4, 'pan': -0.7, 'lane': h1_lane, 'pitch_shift': ps, 'low_cut': 800, 'fade_in_ms': 5000, 'fade_out_ms': 5000,
-                                        'vocal_vol': 1.0 if is_vocal_heavy else 0.0, 
-                                        'instr_vol': 0.0 if is_vocal_heavy else 0.8,
-                                        'vocal_shift': 7, 'ducking_depth': 0.8, 'reverb': 0.5,
-                                        'duck_low': 0.1, 'duck_mid': 0.6 # Stacks scoop bass almost entirely
-                                    })
-            
-                                    # --- Lower Harmony (-5st) ---
-                                    h2_lane = find_free_lane(current_ms, b_dur + overlap)
-                                    segments.append({
-                                        'id': lead['id'], 'filename': f"{lead['filename']} (H-5)", 'file_path': lead['file_path'], 'bpm': lead['bpm'], 'harmonic_key': lead['harmonic_key'],
-                                        'start_ms': current_ms, 'duration_ms': b_dur + overlap, 'offset_ms': (lead.get('loop_start') or 0)*1000,
-                                        'volume': 0.4, 'pan': 0.7, 'lane': h2_lane, 'pitch_shift': ps, 'low_cut': 800, 'fade_in_ms': 5000, 'fade_out_ms': 5000,
-                                        'vocal_vol': 1.0 if is_vocal_heavy else 0.0, 
-                                        'instr_vol': 0.0 if is_vocal_heavy else 0.8,
-                                        'vocal_shift': -5, 'ducking_depth': 0.8, 'reverb': 0.5,
-                                        'duck_low': 0.1, 'duck_mid': 0.6
-                                    })
-            
-                                    # --- NEW: High Octave Power Layer (+12st) ---
-                                    # Occurs 40% of the time for extra richness
-                                    if random.random() > 0.6:
-                                        h3_lane = find_free_lane(current_ms, b_dur + overlap)
-                                        segments.append({
-                                            'id': lead['id'], 'filename': f"{lead['filename']} (OCT)", 'file_path': lead['file_path'], 'bpm': lead['bpm'], 'harmonic_key': lead['harmonic_key'],
-                                            'start_ms': current_ms, 'duration_ms': b_dur + overlap, 'offset_ms': (lead.get('loop_start') or 0)*1000,
-                                            'volume': 0.3, 'pan': 0.0, 'lane': h3_lane, 'pitch_shift': ps, 'low_cut': 1200, 'fade_in_ms': 6000, 'fade_out_ms': 6000,
-                                            'vocal_vol': 0.8 if is_vocal_heavy else 0.0, 
-                                            'instr_vol': 0.0 if is_vocal_heavy else 0.6,
-                                            'vocal_shift': 12, 'ducking_depth': 0.9, 'reverb': 0.7, 'chorus': 0.4,
-                                            'duck_low': 0.05 # Octave layers have NO bass
-                                        })
-            
-                        # --- LANE 4/7: Atmosphere Glue ---
-                        if b_name not in ['Intro', 'Outro']:
-                            glue = fx_tracks[idx % len(fx_tracks)]
-                            lane = find_free_lane(current_ms, b_dur + overlap, preferred=4 if idx % 2 == 0 else 7)
-                            segments.append({
-                                'id': glue['id'], 'filename': "ATMOS GLUE", 'file_path': glue['file_path'], 'bpm': glue['bpm'], 'harmonic_key': glue['harmonic_key'],
-                                'start_ms': current_ms, 'duration_ms': b_dur + overlap, 'offset_ms': 0,
-                                'volume': random.uniform(0.2, 0.3), 'lane': lane, 'low_cut': 800, 'high_cut': 8000, 'fade_in_ms': 5000, 'fade_out_ms': 5000,
-                                'pan': random.uniform(-0.4, 0.4),
-                                'is_ambient': True, 'ducking_depth': 0.99, 'reverb': 0.8,
-                                'duck_low': 0.1, 'duck_mid': 0.3 # Glue ducks everything but the highs
-                            })
-            
 
-
-
-
-            current_ms += (b_dur - overlap) 
+            # --- LANE 4/7: Atmosphere Glue ---
+            if b_name not in ['Intro', 'Outro']:
+                glue = fx_tracks[idx % len(fx_tracks)]
+                lane = find_free_lane(current_ms, b_dur + overlap, preferred=4 if idx % 2 == 0 else 7)
+                segments.append({
+                    'id': glue['id'], 'filename': "ATMOS GLUE", 'file_path': glue['file_path'], 'bpm': glue['bpm'], 'harmonic_key': glue['harmonic_key'],
+                    'start_ms': current_ms, 'duration_ms': b_dur + overlap, 'offset_ms': 0,
+                    'volume': random.uniform(0.2, 0.3), 'lane': lane, 'low_cut': 800, 'high_cut': 8000, 'fade_in_ms': 5000, 'fade_out_ms': 5000,
+                    'pan': random.uniform(-0.4, 0.4), 'is_ambient': True, 'ducking_depth': 0.99, 'reverb': 0.8, 'duck_low': 0.1, 'duck_mid': 0.3
+                })
+            current_ms += (b_dur - overlap)
         return segments
 
     def find_best_filler_for_gap(self, prev_track_id=None, next_track_id=None):
-        """Finds the most compatible track to fill a gap between two others (or just vibe match)."""
+        """Finds the most compatible track to fill a gap between two others."""
         conn = self.dm.get_conn()
         conn.row_factory = lambda cursor, row: {col[0]: row[idx] for idx, col in enumerate(cursor.description)}
         cursor = conn.cursor()
-        
-        # Get all candidates
-        cursor.execute("SELECT * FROM tracks")
-        all_tracks = cursor.fetchall()
-        
+        cursor.execute("SELECT * FROM tracks"); all_tracks = cursor.fetchall(); conn.close()
+        if not all_tracks: return None
         prev_track = next((t for t in all_tracks if t['id'] == prev_track_id), None) if prev_track_id else None
         next_track = next((t for t in all_tracks if t['id'] == next_track_id), None) if next_track_id else None
-        
-        conn.close()
-        if not all_tracks: return None
-
         scored = []
         for cand in all_tracks:
             if prev_track and cand['id'] == prev_track['id']: continue
             if next_track and cand['id'] == next_track['id']: continue
-            
             c_emb = self.dm.get_embedding(cand['clp_embedding_id']) if cand['clp_embedding_id'] else None
-            
             if prev_track and next_track:
-                # Use bridge scoring
                 score = self.scorer.calculate_bridge_score(prev_track, next_track, cand, c_emb=c_emb)
             elif prev_track:
                 p_emb = self.dm.get_embedding(prev_track['clp_embedding_id']) if prev_track['clp_embedding_id'] else None
@@ -451,10 +394,7 @@ class FullMixOrchestrator:
                 n_emb = self.dm.get_embedding(next_track['clp_embedding_id']) if next_track['clp_embedding_id'] else None
                 score = self.scorer.get_total_score(next_track, cand, n_emb, c_emb)['total']
             else:
-                # Just pick something energetic
                 score = cand.get('energy', 0) * 100
-                
             scored.append((score, cand))
-            
         scored.sort(key=lambda x: x[0], reverse=True)
         return scored[0][1] if scored else None
