@@ -86,15 +86,26 @@ def generate():
     data = request.json
     prompt = data.get('prompt', 'cinematic riser')
     duration = data.get('duration', 4)
+    # High-quality settings for MusicGen
+    top_k = data.get('top_k', 250)
+    top_p = data.get('top_p', 0)
+    temperature = data.get('temperature', 1.0)
+    cfg_coef = data.get('cfg_coef', 3.0)
     
-    print(f"Generating: '{prompt}' ({duration}s)...")
+    print(f"Generating: '{prompt}' ({duration}s) | CFG: {cfg_coef} | Temp: {temperature}...")
     
     try:
-        # Set specific duration for this call
-        model.set_generation_params(duration=duration)
+        model.set_generation_params(
+            duration=duration,
+            top_k=top_k,
+            top_p=top_p,
+            temperature=temperature,
+            cfg_coeff=cfg_coef
+        )
         
-        # Generate
-        wav = model.generate([prompt], progress=True) # [1, 1, samples]
+        # Multi-prompt generation (if array provided)
+        prompts = [prompt] if isinstance(prompt, str) else prompt
+        wav = model.generate(prompts, progress=True)
         
         # Convert to Bytes for transport
         # torchaudio expectations: (channels, samples)
