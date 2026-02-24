@@ -1462,15 +1462,28 @@ class AudioSequencerApp(QMainWindow):
             return
         
         start_ms = 0
+        seed = self.selected_library_track
+        
         if self.timeline_widget.segments:
             last_seg = max(self.timeline_widget.segments, key=lambda s: s.get_end_ms())
-            start_ms = last_seg.get_end_ms()
+            # Use 15% overlap of the last segment's duration
+            overlap_ms = int(last_seg.duration_ms * 0.15)
+            start_ms = last_seg.get_end_ms() - overlap_ms
+            
+            # If no seed track selected, use properties of the last track for compatibility
+            if not seed:
+                seed = {
+                    'id': last_seg.id,
+                    'file_path': last_seg.file_path,
+                    'bpm': last_seg.bpm,
+                    'harmonic_key': last_seg.key
+                }
             
         self.push_undo()
         self.loading_overlay.show_loading("Synthesizing Hyper-Mix...")
         
         try:
-            h_segs = self.orchestrator.get_hyper_segments(seed_track=self.selected_library_track, start_time_ms=start_ms)
+            h_segs = self.orchestrator.get_hyper_segments(seed_track=seed, start_time_ms=start_ms)
             if h_segs:
                 for sd in h_segs:
                     seg = self.timeline_widget.add_track(sd, start_ms=sd['start_ms'], lane=sd['lane'])

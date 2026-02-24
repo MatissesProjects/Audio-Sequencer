@@ -231,6 +231,13 @@ class FullMixOrchestrator:
         current_ms = start_time_ms
 
         main_drum = random.choice(drums)
+        # Use seed track for harmonic compatibility if available
+        if seed_track:
+            sk = seed_track.get('harmonic_key') or seed_track.get('key')
+            if sk:
+                comp_drums = [t for t in drums if self.scorer.calculate_harmonic_score(sk, t['harmonic_key']) >= 80]
+                if comp_drums: main_drum = random.choice(comp_drums)
+
         bass_track = random.choice([t for t in others if t['harmonic_key'] == main_drum['harmonic_key']] or [others[0]])
         random.shuffle(others)
         melodic_leads = others[:6]
@@ -239,7 +246,9 @@ class FullMixOrchestrator:
         os.makedirs("generated_assets", exist_ok=True)
         cloud_path = os.path.abspath(f"generated_assets/grain_cloud_{main_drum['id']}_{random.randint(0,999)}.wav")
         if not os.path.exists(cloud_path):
-            try: self.processor.generate_grain_cloud(random.choice(melodic_leads)['file_path'], cloud_path, duration=20.0)
+            try: 
+                source_p = seed_track['file_path'] if seed_track else random.choice(melodic_leads)['file_path']
+                self.processor.generate_grain_cloud(source_p, cloud_path, duration=20.0)
             except: cloud_path = melodic_leads[0]['file_path']
 
         overlap = 4000
