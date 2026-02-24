@@ -48,6 +48,14 @@ class TrackSegment:
             except:
                 pass
 
+    def get_end_ms(self):
+        """Returns the absolute end time of the segment on the timeline."""
+        return self.start_ms + self.duration_ms
+
+    def overlaps_with(self, other):
+        """Checks if this segment overlaps with another segment in time."""
+        return max(self.start_ms, other.start_ms) < min(self.get_end_ms(), other.get_end_ms())
+
     def to_dict(self):
         d = {
             'id': self.id, 'filename': self.filename, 'file_path': self.file_path, 
