@@ -354,7 +354,25 @@ class AudioSequencerApp(QMainWindow):
         self.duck_depth_s.setRange(0, 100)
         self.duck_depth_s.setValue(70)
         self.duck_depth_s.valueChanged.connect(self.on_prop_changed)
-        duck_form.addRow("Duck Depth:", self.duck_depth_s)
+        duck_form.addRow("Overall:", self.duck_depth_s)
+        
+        self.duck_low_s = QSlider(Qt.Orientation.Horizontal)
+        self.duck_low_s.setRange(0, 100)
+        self.duck_low_s.setValue(100)
+        self.duck_low_s.valueChanged.connect(self.on_prop_changed)
+        duck_form.addRow("Duck Bass:", self.duck_low_s)
+        
+        self.duck_mid_s = QSlider(Qt.Orientation.Horizontal)
+        self.duck_mid_s.setRange(0, 100)
+        self.duck_mid_s.setValue(100)
+        self.duck_mid_s.valueChanged.connect(self.on_prop_changed)
+        duck_form.addRow("Duck Mids:", self.duck_mid_s)
+        
+        self.duck_high_s = QSlider(Qt.Orientation.Horizontal)
+        self.duck_high_s.setRange(0, 100)
+        self.duck_high_s.setValue(100)
+        self.duck_high_s.valueChanged.connect(self.on_prop_changed)
+        duck_form.addRow("Duck Highs:", self.duck_high_s)
         
         inspector_layout.addLayout(duck_form)
 
@@ -673,6 +691,9 @@ class AudioSequencerApp(QMainWindow):
             seg.drum_vol = s.get('drum_vol', 1.0)
             seg.instr_vol = s.get('instr_vol', 1.0)
             seg.ducking_depth = s.get('ducking_depth', 0.7)
+            seg.duck_low = s.get('duck_low', 1.0)
+            seg.duck_mid = s.get('duck_mid', 1.0)
+            seg.duck_high = s.get('duck_high', 1.0)
             
             self.load_waveform_async(seg)
             self.timeline_widget.segments.append(seg)
@@ -737,6 +758,18 @@ class AudioSequencerApp(QMainWindow):
             self.duck_depth_s.setValue(int(s.ducking_depth * 100))
             self.duck_depth_s.blockSignals(False)
             
+            self.duck_low_s.blockSignals(True)
+            self.duck_low_s.setValue(int(s.duck_low * 100))
+            self.duck_low_s.blockSignals(False)
+            
+            self.duck_mid_s.blockSignals(True)
+            self.duck_mid_s.setValue(int(s.duck_mid * 100))
+            self.duck_mid_s.blockSignals(False)
+            
+            self.duck_high_s.blockSignals(True)
+            self.duck_high_s.setValue(int(s.duck_high * 100))
+            self.duck_high_s.blockSignals(False)
+            
             self.prim_check.blockSignals(True)
             self.prim_check.setChecked(s.is_primary)
             self.prim_check.blockSignals(False)
@@ -766,6 +799,9 @@ class AudioSequencerApp(QMainWindow):
             sel.drum_vol = self.d_vol_s.value() / 100.0
             sel.instr_vol = self.i_vol_s.value() / 100.0
             sel.ducking_depth = self.duck_depth_s.value() / 100.0
+            sel.duck_low = self.duck_low_s.value() / 100.0
+            sel.duck_mid = self.duck_mid_s.value() / 100.0
+            sel.duck_high = self.duck_high_s.value() / 100.0
             
             sel.is_primary = self.prim_check.isChecked()
             sel.is_ambient = self.amb_check.isChecked()
@@ -1109,6 +1145,9 @@ class AudioSequencerApp(QMainWindow):
                 seg.drum_vol = s.get('drum_vol', 1.0)
                 seg.instr_vol = s.get('instr_vol', 1.0)
                 seg.ducking_depth = s.get('ducking_depth', 0.7)
+                seg.duck_low = s.get('duck_low', 1.0)
+                seg.duck_mid = s.get('duck_mid', 1.0)
+                seg.duck_high = s.get('duck_high', 1.0)
                 
                 self.load_waveform_async(seg)
                 self.timeline_widget.segments.append(seg)
@@ -1335,6 +1374,9 @@ class AudioSequencerApp(QMainWindow):
             seg.drum_vol = self.copy_buffer.get('drum_vol', 1.0)
             seg.instr_vol = self.copy_buffer.get('instr_vol', 1.0)
             seg.ducking_depth = self.copy_buffer.get('ducking_depth', 0.7)
+            seg.duck_low = self.copy_buffer.get('duck_low', 1.0)
+            seg.duck_mid = self.copy_buffer.get('duck_mid', 1.0)
+            seg.duck_high = self.copy_buffer.get('duck_high', 1.0)
             seg.is_primary = self.copy_buffer['is_primary']
             seg.is_ambient = self.copy_buffer.get('is_ambient', False)
             

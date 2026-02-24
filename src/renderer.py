@@ -54,7 +54,10 @@ def _process_single_segment(s, i, target_bpm, sr, time_range):
                 'is_primary': s.get('is_primary', False),
                 'is_ambient': s.get('is_ambient', False),
                 'vocal_energy': s.get('vocal_energy') or 0.0,
-                'ducking_depth': s.get('ducking_depth') or 0.7
+                'ducking_depth': s.get('ducking_depth') or 0.7,
+                'duck_low': s.get('duck_low') or 1.0,
+                'duck_mid': s.get('duck_mid') or 1.0,
+                'duck_high': s.get('duck_high') or 1.0
             }
         except: pass
 
@@ -201,7 +204,10 @@ def _process_single_segment(s, i, target_bpm, sr, time_range):
         'is_primary': s.get('is_primary', False),
         'is_ambient': s.get('is_ambient', False),
         'vocal_energy': s.get('vocal_energy') or 0.0,
-        'ducking_depth': s.get('ducking_depth') or 0.7
+        'ducking_depth': s.get('ducking_depth') or 0.7,
+        'duck_low': s.get('duck_low') or 1.0,
+        'duck_mid': s.get('duck_mid') or 1.0,
+        'duck_high': s.get('duck_high') or 1.0
     }
 
 class FlowRenderer:
@@ -412,6 +418,28 @@ class FlowRenderer:
                         # Apply user-defined ducking depth preference
                         depth = current.get('ducking_depth') or 0.7
                         final_duck_amt = base_duck * (depth / 0.7) # Scale based on 0.7 being "normal"
+                        
+                        # --- FREQUENCY SPECIFIC DUCKING ---
+                        duck_l = current.get('duck_low') or 1.0
+                        duck_m = current.get('duck_mid') or 1.0
+                        duck_h = current.get('duck_high') or 1.0
+                        
+                        # If user has customized frequency ducking (< 1.0), apply filters
+                        if duck_l < 0.95 or duck_m < 0.95 or duck_h < 0.95:
+                            # 1. Low Ducking (Apply HPF to target to remove bass)
+                            if duck_l < 0.95:
+                                hpf_amt = 300 * (1.0 - duck_l)
+                                target_segment = Pedalboard([HighpassFilter(hpf_amt)])(target_segment, self.sr)
+                            
+                            # 2. High Ducking (Apply LPF to target to remove highs)
+                            if duck_h < 0.95:
+                                lpf_amt = 20000 - (15000 * (1.0 - duck_h))
+                                target_segment = Pedalboard([LowpassFilter(lpf_amt)])(target_segment, self.sr)
+                                
+                            # 3. Mid Ducking (Approximated by volume reduction if mids are specified)
+                            # (Full multi-band ducking is expensive, so we use a broad cut)
+                            if duck_m < 0.95:
+                                final_duck_amt *= (duck_m * 1.2) # Weight overall ducking more toward mids
                         
                         ducked_segment = self._apply_sidechain(target_segment, source_segment, amount=min(0.95, final_duck_amt))
                         samples[:, rel_start_c:rel_end_c] = ducked_segment

@@ -40,7 +40,10 @@ class TrackSegment:
         self.vocal_vol = 1.0
         self.drum_vol = 1.0
         self.instr_vol = 1.0
-        self.ducking_depth = 0.7 # How much this track is ducked by others (0.0 to 1.0)
+        self.ducking_depth = 0.7 # Overall ducking depth
+        self.duck_low = 1.0 # Frequency-specific ducking multipliers
+        self.duck_mid = 1.0
+        self.duck_high = 1.0
         base_color = self.KEY_COLORS.get(self.key, QColor(70, 130, 180))
         self.color = QColor(base_color.red(), base_color.green(), base_color.blue(), 200)
         self.onsets = []
@@ -78,7 +81,10 @@ class TrackSegment:
             'vocal_vol': self.vocal_vol,
             'drum_vol': self.drum_vol,
             'instr_vol': self.instr_vol,
-            'ducking_depth': self.ducking_depth
+            'ducking_depth': self.ducking_depth,
+            'duck_low': self.duck_low,
+            'duck_mid': self.duck_mid,
+            'duck_high': self.duck_high
         }
         d['onsets_json'] = ",".join([str(x/1000.0) for x in self.onsets])
         return d
