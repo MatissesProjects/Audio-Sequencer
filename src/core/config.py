@@ -14,6 +14,7 @@ class AppConfig:
     STEMS_DIR = "stems_library"
     GENERATED_ASSETS_DIR = "generated_assets"
     REMOTE_GEN_URL = "http://localhost:5000/generate" # Update this to your 4090 machine IP
+    REMOTE_SEP_URL = "http://localhost:5000/separate"
     
     # Processing Settings
     DEFAULT_DUCKING_DEPTH = 0.7

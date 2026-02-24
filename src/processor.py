@@ -186,30 +186,64 @@ class AudioProcessor:
 
     def separate_stems(self, input_path, output_dir):
         """
-        Extracts basic stems using HPSS and frequency filtering.
-        In a full pro environment, this would use Demucs/Spleeter.
+        Extracts stems using high-quality remote Demucs OR local HPSS fallback.
         """
         os.makedirs(output_dir, exist_ok=True)
+        
+        from src.core.config import AppConfig
+        remote_url = AppConfig.REMOTE_SEP_URL
+        
+        # 1. Try Remote Separation (High Quality)
+        try:
+            import requests
+            import zipfile
+            import io
+            
+            print(f"Requesting Remote Stem Separation for: {os.path.basename(input_path)}...")
+            with open(input_path, 'rb') as f:
+                response = requests.post(
+                    remote_url, 
+                    files={'file': f},
+                    timeout=120 # 2 minute timeout for separation
+                )
+            
+            if response.status_code == 200:
+                print("Remote separation success. Extracting stems...")
+                with zipfile.ZipFile(io.BytesIO(response.content)) as zf:
+                    zf.extractall(output_dir)
+                
+                # Verify we got the standard 4 stems
+                paths = {}
+                for s in ["vocals", "drums", "bass", "other"]:
+                    p = os.path.join(output_dir, f"{s}.wav")
+                    if os.path.exists(p): paths[s] = p
+                
+                if paths: return paths
+            else:
+                print(f"Remote separation failed (HTTP {response.status_code}). Using local fallback.")
+        except Exception as e:
+            print(f"Remote separation error: {e}. Using local fallback.")
+
+        # 2. Local Fallback (Basic HPSS)
+        print("Performing local basic stem separation (HPSS)...")
         y, sr = librosa.load(input_path, sr=self.sr)
         
-        # 1. Harmonic / Percussive Separation (Librosa)
         harmonic, percussive = librosa.effects.hpss(y)
         
-        # 2. Pseudo-Vocal extraction (Bandpass 300Hz - 3kHz on Harmonic)
-        # This is a very rough approximation
+        # Pseudo-Vocal extraction (Bandpass 300Hz - 3kHz on Harmonic)
+        import pedalboard
         board = pedalboard.Pedalboard([
             pedalboard.HighpassFilter(cutoff_frequency_hz=300),
             pedalboard.LowpassFilter(cutoff_frequency_hz=3000)
         ])
         vocal_candidate = board(harmonic.astype(np.float32), sr)
-        
-        # Subtract vocal from harmonic to get "instruments"
         instr_harmonic = harmonic - vocal_candidate
         
         stems = {
             "drums": percussive,
             "vocals": vocal_candidate,
-            "other": instr_harmonic
+            "other": instr_harmonic,
+            "bass": np.zeros_like(percussive) # HPSS doesn't isolate bass well
         }
         
         paths = {}

@@ -68,7 +68,7 @@ def _process_single_segment(s, i, target_bpm, sr, time_range):
     # --- STEM PROCESSING ---
     if stems_dir and os.path.exists(stems_dir):
         combined_seg_np = None
-        stem_types = ["vocals", "drums", "other"]
+        stem_types = ["vocals", "drums", "bass", "other"]
         
         for stype in stem_types:
             stem_file = os.path.join(stems_dir, f"{stype}.wav")
@@ -127,6 +127,8 @@ def _process_single_segment(s, i, target_bpm, sr, time_range):
                     stem_np[:, :min_l] += (h_layer2[:, :min_l] * h_level * 0.3)
             elif stype == "drums":
                 stem_np *= s.get('drum_vol', 1.0)
+            elif stype == "bass":
+                stem_np *= s.get('bass_vol', 1.0)
             elif stype == "other":
                 stem_np *= s.get('instr_vol', 1.0)
             

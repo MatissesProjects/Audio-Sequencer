@@ -39,6 +39,7 @@ class TrackSegment:
         self.harmony_level = 0.0 # 0.0 to 1.0 (Mix of rhythmic harmonic layer)
         self.vocal_vol = 1.0
         self.drum_vol = 1.0
+        self.bass_vol = 1.0
         self.instr_vol = 1.0
         self.ducking_depth = 0.7 # Overall ducking depth
         self.duck_low = 1.0 # Frequency-specific ducking multipliers
@@ -80,6 +81,7 @@ class TrackSegment:
             'harmony_level': self.harmony_level,
             'vocal_vol': self.vocal_vol,
             'drum_vol': self.drum_vol,
+            'bass_vol': self.bass_vol,
             'instr_vol': self.instr_vol,
             'ducking_depth': self.ducking_depth,
             'duck_low': self.duck_low,

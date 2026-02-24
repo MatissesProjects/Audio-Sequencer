@@ -2,3 +2,5 @@ flask
 torch
 torchaudio
 audiocraft
+demucs
+zipstream-ng

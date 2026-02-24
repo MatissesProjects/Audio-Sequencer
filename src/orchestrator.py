@@ -293,7 +293,7 @@ class FullMixOrchestrator:
                     'id': bass_track['id'], 'filename': bass_track['filename'], 'file_path': bass_track['file_path'], 'bpm': bass_track['bpm'], 'harmonic_key': bass_track['harmonic_key'],
                     'start_ms': b_start, 'duration_ms': b_dur + overlap, 'offset_ms': (bass_track.get('loop_start') or 0)*1000,
                     'volume': 0.8, 'is_primary': False, 'lane': lane, 'fade_in_ms': 3000, 'fade_out_ms': 3000,
-                    'instr_vol': 1.1 if is_drop else 0.8, 'vocal_vol': 0.0,
+                    'instr_vol': 1.1 if is_drop else 0.8, 'vocal_vol': 0.0, 'bass_vol': 1.2,
                     'ducking_depth': 0.9 if is_drop else 0.7,
                     'duck_high': 0.4,
                     'low_cut': 600 if is_intro else 20 # Pro Intro: Start bass with HPF to avoid muddiness
@@ -347,6 +347,7 @@ class FullMixOrchestrator:
                         'start_ms': current_ms, 'duration_ms': b_dur + overlap, 'offset_ms': (lead.get('loop_start') or 0)*1000,
                         'volume': 0.85 if is_vocal_heavy else 0.7, 'pan': 0.0, 'lane': lane, 'pitch_shift': ps, 'low_cut': 400, 'fade_in_ms': 4000, 'fade_out_ms': 4000,
                         'vocal_vol': 1.3 if is_vocal_heavy else 0.8, 'instr_vol': 0.4 if is_vocal_heavy else 0.9,
+                        'bass_vol': 0.6 if is_vocal_heavy else 0.8,
                         'vocal_shift': 12 if is_drop and is_vocal_heavy else 0,
                         'ducking_depth': 0.4 if is_vocal_heavy else 0.75,
                         'harmony_level': 0.4 if is_drop else 0.1,
@@ -360,16 +361,22 @@ class FullMixOrchestrator:
                             'id': lead['id'], 'filename': f"{lead['filename']} (H+7)", 'file_path': lead['file_path'], 'bpm': lead['bpm'], 'harmonic_key': lead['harmonic_key'],
                             'start_ms': current_ms, 'duration_ms': b_dur + overlap, 'offset_ms': (lead.get('loop_start') or 0)*1000,
                             'volume': 0.4, 'pan': -0.7, 'lane': h1_lane, 'pitch_shift': ps, 'low_cut': 800, 'fade_in_ms': 5000, 'fade_out_ms': 5000,
-                            'vocal_vol': 1.0 if is_vocal_heavy else 0.0, 'instr_vol': 0.0 if is_vocal_heavy else 0.8,
-                            'vocal_shift': 7, 'ducking_depth': 0.8, 'reverb': 0.5, 'duck_low': 0.1, 'duck_mid': 0.6
+                                                        'vocal_vol': 1.0 if is_vocal_heavy else 0.0, 
+                                                        'instr_vol': 0.0 if is_vocal_heavy else 0.8,
+                                                        'bass_vol': 0.0,
+                                                        'vocal_shift': 7, 'ducking_depth': 0.8, 'reverb': 0.5,
+                             'duck_low': 0.1, 'duck_mid': 0.6
                         })
                         h2_lane = find_free_lane(current_ms, b_dur + overlap)
                         segments.append({
                             'id': lead['id'], 'filename': f"{lead['filename']} (H-5)", 'file_path': lead['file_path'], 'bpm': lead['bpm'], 'harmonic_key': lead['harmonic_key'],
                             'start_ms': current_ms, 'duration_ms': b_dur + overlap, 'offset_ms': (lead.get('loop_start') or 0)*1000,
                             'volume': 0.4, 'pan': 0.7, 'lane': h2_lane, 'pitch_shift': ps, 'low_cut': 800, 'fade_in_ms': 5000, 'fade_out_ms': 5000,
-                            'vocal_vol': 1.0 if is_vocal_heavy else 0.0, 'instr_vol': 0.0 if is_vocal_heavy else 0.8,
-                            'vocal_shift': -5, 'ducking_depth': 0.8, 'reverb': 0.5, 'duck_low': 0.1, 'duck_mid': 0.6
+                                                        'vocal_vol': 1.0 if is_vocal_heavy else 0.0, 
+                                                        'instr_vol': 0.0 if is_vocal_heavy else 0.8,
+                                                        'bass_vol': 0.0,
+                                                        'vocal_shift': -5, 'ducking_depth': 0.8, 'reverb': 0.5,
+                             'duck_low': 0.1, 'duck_mid': 0.6
                         })
                         if random.random() > 0.6:
                             h3_lane = find_free_lane(current_ms, b_dur + overlap)
@@ -377,8 +384,11 @@ class FullMixOrchestrator:
                                 'id': lead['id'], 'filename': f"{lead['filename']} (OCT)", 'file_path': lead['file_path'], 'bpm': lead['bpm'], 'harmonic_key': lead['harmonic_key'],
                                 'start_ms': current_ms, 'duration_ms': b_dur + overlap, 'offset_ms': (lead.get('loop_start') or 0)*1000,
                                 'volume': 0.3, 'pan': 0.0, 'lane': h3_lane, 'pitch_shift': ps, 'low_cut': 1200, 'fade_in_ms': 6000, 'fade_out_ms': 6000,
-                                'vocal_vol': 0.8 if is_vocal_heavy else 0.0, 'instr_vol': 0.0 if is_vocal_heavy else 0.6,
-                                'vocal_shift': 12, 'ducking_depth': 0.9, 'reverb': 0.7, 'chorus': 0.4, 'duck_low': 0.05
+                                                                'vocal_vol': 0.8 if is_vocal_heavy else 0.0, 
+                                                                'instr_vol': 0.0 if is_vocal_heavy else 0.6,
+                                                                'bass_vol': 0.0,
+                                                                'vocal_shift': 12, 'ducking_depth': 0.9, 'reverb': 0.7, 'chorus': 0.4,
+                                 'duck_low': 0.05
                             })
 
             # --- LANE 4/7: Atmosphere Glue ---

@@ -333,6 +333,12 @@ class AudioSequencerApp(QMainWindow):
         self.d_vol_s.valueChanged.connect(self.on_prop_changed)
         mix_form.addRow("Drum Vol:", self.d_vol_s)
         
+        self.b_vol_s = QSlider(Qt.Orientation.Horizontal)
+        self.b_vol_s.setRange(0, 150)
+        self.b_vol_s.setValue(100)
+        self.b_vol_s.valueChanged.connect(self.on_prop_changed)
+        mix_form.addRow("Bass Vol:", self.b_vol_s)
+        
         self.i_vol_s = QSlider(Qt.Orientation.Horizontal)
         self.i_vol_s.setRange(0, 150)
         self.i_vol_s.setValue(100)
@@ -700,6 +706,7 @@ class AudioSequencerApp(QMainWindow):
             seg.harmony_level = s.get('harmony_level', 0.0)
             seg.vocal_vol = s.get('vocal_vol', 1.0)
             seg.drum_vol = s.get('drum_vol', 1.0)
+            seg.bass_vol = s.get('bass_vol', 1.0)
             seg.instr_vol = s.get('instr_vol', 1.0)
             seg.ducking_depth = s.get('ducking_depth', 0.7)
             seg.duck_low = s.get('duck_low', 1.0)
@@ -761,6 +768,10 @@ class AudioSequencerApp(QMainWindow):
             self.d_vol_s.setValue(int(s.drum_vol * 100))
             self.d_vol_s.blockSignals(False)
             
+            self.b_vol_s.blockSignals(True)
+            self.b_vol_s.setValue(int(s.bass_vol * 100))
+            self.b_vol_s.blockSignals(False)
+            
             self.i_vol_s.blockSignals(True)
             self.i_vol_s.setValue(int(s.instr_vol * 100))
             self.i_vol_s.blockSignals(False)
@@ -808,6 +819,7 @@ class AudioSequencerApp(QMainWindow):
             
             sel.vocal_vol = self.v_vol_s.value() / 100.0
             sel.drum_vol = self.d_vol_s.value() / 100.0
+            sel.bass_vol = self.b_vol_s.value() / 100.0
             sel.instr_vol = self.i_vol_s.value() / 100.0
             sel.ducking_depth = self.duck_depth_s.value() / 100.0
             sel.duck_low = self.duck_low_s.value() / 100.0
@@ -1154,6 +1166,7 @@ class AudioSequencerApp(QMainWindow):
                 seg.chorus = s.get('chorus', 0.0)
                 seg.vocal_vol = s.get('vocal_vol', 1.0)
                 seg.drum_vol = s.get('drum_vol', 1.0)
+                seg.bass_vol = s.get('bass_vol', 1.0)
                 seg.instr_vol = s.get('instr_vol', 1.0)
                 seg.ducking_depth = s.get('ducking_depth', 0.7)
                 seg.duck_low = s.get('duck_low', 1.0)
@@ -1383,6 +1396,7 @@ class AudioSequencerApp(QMainWindow):
             seg.harmony_level = self.copy_buffer.get('harmony_level', 0.0)
             seg.vocal_vol = self.copy_buffer.get('vocal_vol', 1.0)
             seg.drum_vol = self.copy_buffer.get('drum_vol', 1.0)
+            seg.bass_vol = self.copy_buffer.get('bass_vol', 1.0)
             seg.instr_vol = self.copy_buffer.get('instr_vol', 1.0)
             seg.ducking_depth = self.copy_buffer.get('ducking_depth', 0.7)
             seg.duck_low = self.copy_buffer.get('duck_low', 1.0)
