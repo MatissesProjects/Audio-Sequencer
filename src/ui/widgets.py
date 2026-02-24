@@ -289,7 +289,7 @@ class TimelineWidget(QWidget):
 
     def paintEvent(self, event):
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.Hint.Antialiasing if hasattr(QPainter.Hint, 'Antialiasing') else QPainter.RenderHint.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.fillRect(self.rect(), QColor(25, 25, 25))
         
         # Draw Silence Guard Warnings
