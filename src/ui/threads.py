@@ -28,7 +28,6 @@ class AIInitializerThread(QThread):
     
     def run(self):
         try:
-            import torch
             print("[BOOT] AI Warm-up started in background...")
             start = time.time()
             from src.scoring import CompatibilityScorer
@@ -37,7 +36,7 @@ class AIInitializerThread(QThread):
             from src.embeddings import EmbeddingEngine
             
             s = CompatibilityScorer()
-            # TransitionGenerator now loads MusicGen
+            # TransitionGenerator now uses remote network calls
             g = TransitionGenerator()
             o = FullMixOrchestrator()
             

@@ -13,3 +13,4 @@ transformers
 PyQt6
 google-genai
 audiocraft
+requests

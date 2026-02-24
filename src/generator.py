@@ -10,11 +10,9 @@ import json
 load_dotenv()
 
 class TransitionGenerator:
-    """Uses Gemini to orchestrate transitions and MusicGen (AudioCraft) to generate them locally."""
+    """Uses Gemini to orchestrate transitions and a remote 4090 machine to generate them via network."""
     
-    _model_cache = None
-
-    def __init__(self, api_key=None, use_cuda=True):
+    def __init__(self, api_key=None):
         api_key = api_key or os.getenv("GOOGLE_API_KEY")
         if api_key:
             self.client = genai.Client(api_key=api_key)
@@ -22,21 +20,8 @@ class TransitionGenerator:
             self.client = None
             print("Warning: GOOGLE_API_KEY not found. Gemini orchestration disabled.")
         
-        self.device = "cuda" if use_cuda and torch.cuda.is_available() else "cpu"
-        self._warmup_musicgen()
-
-    def _warmup_musicgen(self):
-        """Loads MusicGen model into GPU memory."""
-        if TransitionGenerator._model_cache is None:
-            try:
-                from audiocraft.models import MusicGen
-                import torch
-                print(f"[BOOT] Loading MusicGen ('facebook/musicgen-small') onto {self.device}...")
-                model = MusicGen.get_pretrained('facebook/musicgen-small', device=self.device)
-                model.set_generation_params(duration=4) # Default transition length
-                TransitionGenerator._model_cache = model
-            except Exception as e:
-                print(f"Error loading MusicGen: {e}. AI generation will fallback to noise.")
+        from src.core.config import AppConfig
+        self.remote_url = AppConfig.REMOTE_GEN_URL
 
     def get_transition_params(self, track_a, track_b):
         """Asks Gemini for transition characteristics based on track metadata."""
@@ -65,7 +50,7 @@ class TransitionGenerator:
         """
         try:
             response = self.client.models.generate_content(
-                model="gemini-2.5-flash",
+                model="gemini-2.0-flash",
                 contents=prompt
             )
             text = response.text
@@ -78,25 +63,26 @@ class TransitionGenerator:
             return {"noise_type": "white", "filter_type": "highpass", "reverb_amount": 0.5, "prompt": "cinematic riser"}
 
     def generate_riser(self, duration_sec, bpm, output_path, params=None):
-        """Generates a procedural noise riser OR a MusicGen neural riser."""
+        """Generates a procedural noise riser OR calls remote 4090 for neural riser."""
         prompt = params.get('prompt') if params else None
         
-        # Try Neural Generation first if model is loaded
-        if TransitionGenerator._model_cache and prompt:
+        if prompt:
             try:
-                print(f"Generating Neural Riser: '{prompt}'...")
-                model = TransitionGenerator._model_cache
-                model.set_generation_params(duration=duration_sec)
-                
-                descriptions = [prompt]
-                wav = model.generate(descriptions, progress=True) # [1, 1, samples]
-                
-                # Convert torch tensor to numpy
-                samples = wav[0].cpu().numpy().flatten()
-                sf.write(output_path, samples, 32000) # MusicGen small outputs 32kHz
-                return output_path
+                import requests
+                print(f"Requesting Remote Neural Riser: '{prompt}'...")
+                response = requests.post(
+                    self.remote_url,
+                    json={'prompt': prompt, 'duration': duration_sec},
+                    timeout=45 # Increased timeout for remote gen
+                )
+                if response.status_code == 200:
+                    with open(output_path, 'wb') as f:
+                        f.write(response.content)
+                    return output_path
+                else:
+                    print(f"Remote server error: {response.status_code}")
             except Exception as e:
-                print(f"Neural generation failed: {e}. Falling back to procedural noise.")
+                print(f"Remote neural generation failed: {e}. Falling back to procedural noise.")
 
         # Fallback: Procedural Noise
         sr = 44100
