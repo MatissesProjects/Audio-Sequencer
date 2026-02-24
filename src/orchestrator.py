@@ -322,7 +322,7 @@ class FullMixOrchestrator:
                 self.generator.generate_riser(duration_sec=4.0, bpm=target_bpm, output_path=op_riser, params=p)
                 # Auto-ingest
                 from src.ingestion import IngestionEngine
-                IngestionEngine(db_path=self.dm.db_path).analyze_and_store(op_riser)
+                IngestionEngine(db_path=self.dm.db_path).ingest_single_file(op_riser)
                 
                 segments.append({
                     'id': -1, 'filename': f"HYPER RISER ({p.get('description', 'Neural')})", 'file_path': op_riser,
@@ -337,7 +337,7 @@ class FullMixOrchestrator:
                 self.generator.generate_riser(duration_sec=4.0, bpm=target_bpm, output_path=op_drop, params=p)
                 # Auto-ingest
                 from src.ingestion import IngestionEngine
-                IngestionEngine(db_path=self.dm.db_path).analyze_and_store(op_drop)
+                IngestionEngine(db_path=self.dm.db_path).ingest_single_file(op_drop)
                 
                 segments.append({
                     'id': -1, 'filename': f"HYPER DROP ({p.get('description', 'Sub')})", 'file_path': op_drop,

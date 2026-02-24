@@ -945,7 +945,7 @@ class AudioSequencerApp(QMainWindow):
             # --- NEW: Ingest into permanent library ---
             from src.ingestion import IngestionEngine
             ie = IngestionEngine(db_path=self.dm.db_path)
-            ie.analyze_and_store(op)
+            ie.ingest_single_file(op)
             self.load_library() # Refresh library UI
             
             td = {

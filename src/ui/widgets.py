@@ -858,6 +858,7 @@ class TimelineWidget(QWidget):
     def mouseReleaseEvent(self, event):
         self.dragging = self.resizing = self.resizing_left = self.vol_dragging = self.fade_in_dragging = self.fade_out_dragging = self.slipping = self.setting_loop = self.resizing_timeline = self.keyframe_dragging = False
         self.update_geometry()
+        self.timelineChanged.emit()
 
     def wheelEvent(self, event):
         if event.modifiers() & Qt.KeyboardModifier.ControlModifier:

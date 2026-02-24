@@ -31,46 +31,50 @@ class IngestionEngine:
 
         print(f"Found {len(audio_files)} audio files. Starting analysis...")
         
+        for file_path in tqdm(audio_files):
+            self.ingest_single_file(file_path)
+
+        print("Ingestion complete.")
+
+    def ingest_single_file(self, file_path):
+        """Analyzes a single file, separates stems, and stores in DB."""
+        abs_path = os.path.abspath(file_path)
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
+        
+        cursor.execute("SELECT id, stems_path FROM tracks WHERE file_path = ?", (abs_path,))
+        row = cursor.fetchone()
+        if row and row[1]: # Already has stems
+            conn.close()
+            return
 
-        for file_path in tqdm(audio_files):
-            # Skip if already analyzed (simple path check)
-            cursor.execute("SELECT id, stems_path FROM tracks WHERE file_path = ?", (os.path.abspath(file_path),))
-            row = cursor.fetchone()
-            if row and row[1]: # Already has stems
-                continue
-
-            try:
-                features = self.analyzer.analyze_file(file_path)
-
-                # Trigger Stem Separation using Config path
-                stems_dir = AppConfig.get_stems_path(features['filename'])
-                self.processor.separate_stems(file_path, stems_dir)                
-                
-                # Update DB with stems_path
-                cursor.execute("UPDATE tracks SET stems_path = ? WHERE file_path = ?", (os.path.abspath(stems_dir), os.path.abspath(file_path)))
-                
-                if not row: # Only insert if it didn't exist
-                    cursor.execute('''
-                        INSERT INTO tracks (
-                            file_path, filename, duration, sample_rate, 
-                            bpm, harmonic_key, energy, onset_density,
-                            loop_start, loop_duration, onsets_json, stems_path, vocal_energy
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ''', (
-                        features['file_path'], features['filename'], features['duration'],
-                        features['sample_rate'], features['bpm'], features['harmonic_key'],
-                        features['energy'], features.get('onset_density', 0),
-                        features.get('loop_start', 0), features.get('loop_duration', 0),
-                        features['onsets_json'], os.path.abspath(stems_dir), features.get('vocal_energy', 0)
-                    ))
-                conn.commit()
-            except Exception as e:
-                print(f"Error processing {file_path}: {e}")
-
-        conn.close()
-        print("Ingestion complete.")
+        try:
+            features = self.analyzer.analyze_file(file_path)
+            stems_dir = AppConfig.get_stems_path(features['filename'])
+            self.processor.separate_stems(file_path, stems_dir)                
+            
+            # Update DB with stems_path
+            cursor.execute("UPDATE tracks SET stems_path = ? WHERE file_path = ?", (os.path.abspath(stems_dir), abs_path))
+            
+            if not row:
+                cursor.execute('''
+                    INSERT INTO tracks (
+                        file_path, filename, duration, sample_rate, 
+                        bpm, harmonic_key, energy, onset_density,
+                        loop_start, loop_duration, onsets_json, stems_path, vocal_energy
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    features['file_path'], features['filename'], features['duration'],
+                    features['sample_rate'], features['bpm'], features['harmonic_key'],
+                    features['energy'], features.get('onset_density', 0),
+                    features.get('loop_start', 0), features.get('loop_duration', 0),
+                    features['onsets_json'], os.path.abspath(stems_dir), features.get('vocal_energy', 0)
+                ))
+            conn.commit()
+        except Exception as e:
+            print(f"Error processing {file_path}: {e}")
+        finally:
+            conn.close()
 
 if __name__ == "__main__":
     import sys
