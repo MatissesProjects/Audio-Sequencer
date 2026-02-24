@@ -26,6 +26,7 @@ class TrackSegment:
         self.lane = lane
         self.is_primary = False
         self.waveform = []
+        self.stem_waveforms = {} # New: store envelopes for stems
         self.fade_in_ms = 2000
         self.fade_out_ms = 2000
         self.pitch_shift = 0

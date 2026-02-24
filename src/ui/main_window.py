@@ -588,8 +588,9 @@ class AudioSequencerApp(QMainWindow):
         self.waveform_loaders.append(l)
         l.start()
 
-    def on_waveform_loaded(self, seg, w):
+    def on_waveform_loaded(self, seg, w, sw):
         seg.waveform = w
+        seg.stem_waveforms = sw
         self.timeline_widget.update()
         self.waveform_loaders = [l for l in self.waveform_loaders if l.isRunning()]
 
@@ -906,7 +907,7 @@ class AudioSequencerApp(QMainWindow):
             self.player.setPosition(int(ms))
         self.update_status()
 
-    def generate_ai_transition(self, x):
+    def generate_ai_transition(self, x, prompt_type="riser"):
         if not self.ai_enabled:
             self.status_bar.showMessage("AI features disabled.")
             return
@@ -922,21 +923,32 @@ class AudioSequencerApp(QMainWindow):
         if not ps or not ns:
             self.status_bar.showMessage("Need track before AND after gap.")
             return
-        self.loading_overlay.show_loading("✨ Gemini: Orchestrating Transition...")
+        self.loading_overlay.show_loading(f"✨ Gemini: Orchestrating {prompt_type.title()}...")
         os.makedirs("generated_assets", exist_ok=True)
-        op = os.path.abspath(f"generated_assets/trans_{int(gm)}.wav")
+        op = os.path.abspath(f"generated_assets/trans_{prompt_type}_{int(gm)}.wav")
         try:
-            p = self.generator.get_transition_params(ps.__dict__, ns.__dict__)
+            # Custom prompt for Gemini based on type
+            context = f"The user wants a {prompt_type}. "
+            if prompt_type == "riser": context += "Make it a high-energy build-up riser."
+            elif prompt_type == "drop": context += "Make it a heavy bass impact drop."
+            elif prompt_type == "pad": context += "Make it a long, evolving ambient pad."
+            elif prompt_type == "percussion": context += "Make it a complex drum or percussion fill."
+            
+            p = self.generator.get_transition_params(ps.__dict__, ns.__dict__, type_context=context)
             self.generator.generate_riser(duration_sec=4.0, bpm=self.timeline_widget.target_bpm, output_path=op, params=p)
             td = {
                 'id': -1, 
-                'filename': f"AI Sweep ({p.get('description', 'Procedural')})", 
+                'filename': f"AI {prompt_type.upper()} ({p.get('description', 'Neural')})", 
                 'file_path': op, 
                 'bpm': self.timeline_widget.target_bpm, 
                 'harmonic_key': 'N/A', 
                 'onsets_json': ""
             }
-            sm = ns.start_ms - 4000
+            # Position logic
+            if prompt_type == "drop":
+                sm = ns.start_ms # Drop starts at next track
+            else:
+                sm = ns.start_ms - 4000 # Others lead into next track
             seg = self.timeline_widget.add_track(td, start_ms=sm, lane=4)
             seg.duration_ms = 4000
             seg.fade_in_ms = 3500

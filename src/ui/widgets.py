@@ -168,7 +168,7 @@ class TimelineWidget(QWidget):
     undoRequested = pyqtSignal()
     cursorJumped = pyqtSignal(float)
     bridgeRequested = pyqtSignal(float)
-    aiTransitionRequested = pyqtSignal(float)
+    aiTransitionRequested = pyqtSignal(float, str) # x_pos, prompt_type
     duplicateRequested = pyqtSignal(object) # TrackSegment
     captureRequested = pyqtSignal(object) # TrackSegment
     stemsRequested = pyqtSignal(object) # TrackSegment
@@ -419,16 +419,45 @@ class TimelineWidget(QWidget):
                 
             painter.drawRoundedRect(rect, 6, 6)
             
-            if self.show_waveforms and seg.waveform:
-                painter.setPen(QPen(QColor(255, 255, 255, 80), 1))
-                pts = len(seg.waveform)
+            if self.show_waveforms:
                 mid_y = rect.center().y()
                 max_h = rect.height() // 2
-                for i in range(0, rect.width(), 2):
-                    ri = (i / rect.width()) * (seg.duration_ms / 30000.0)
-                    idx = int((ri + (seg.offset_ms / 30000.0)) * pts) % pts
-                    val = seg.waveform[idx] * max_h
-                    painter.drawLine(rect.left() + i, int(mid_y - val), rect.left() + i, int(mid_y + val))
+                
+                # --- Multi-Stem Visualizer ---
+                if hasattr(seg, 'stem_waveforms') and seg.stem_waveforms:
+                    stems = [
+                        ("vocals", QColor(255, 204, 0, 180)), # Yellow
+                        ("drums", QColor(255, 51, 102, 180)),  # Pink
+                        ("bass", QColor(0, 204, 255, 180)),   # Blue
+                        ("other", QColor(153, 51, 255, 180))   # Purple
+                    ]
+                    
+                    # Split the vertical space into 4 lanes
+                    stem_h = rect.height() // 4
+                    for idx, (stype, scolor) in enumerate(stems):
+                        if stype in seg.stem_waveforms:
+                            sw = seg.stem_waveforms[stype]
+                            painter.setPen(QPen(scolor, 1))
+                            pts = len(sw)
+                            s_top = rect.top() + (idx * stem_h)
+                            s_mid = s_top + (stem_h // 2)
+                            s_max_h = stem_h // 2 - 2
+                            
+                            for i in range(0, rect.width(), 2):
+                                ri = (i / rect.width()) * (seg.duration_ms / 30000.0)
+                                s_idx = int((ri + (seg.offset_ms / 30000.0)) * pts) % pts
+                                val = sw[s_idx] * s_max_h
+                                painter.drawLine(rect.left() + i, int(s_mid - val), rect.left() + i, int(s_mid + val))
+                
+                # --- Single Waveform Fallback ---
+                elif seg.waveform:
+                    painter.setPen(QPen(QColor(255, 255, 255, 80), 1))
+                    pts = len(seg.waveform)
+                    for i in range(0, rect.width(), 2):
+                        ri = (i / rect.width()) * (seg.duration_ms / 30000.0)
+                        idx = int((ri + (seg.offset_ms / 30000.0)) * pts) % pts
+                        val = seg.waveform[idx] * max_h
+                        painter.drawLine(rect.left() + i, int(mid_y - val), rect.left() + i, int(mid_y + val))
                     
             painter.setPen(QPen(QColor(255, 255, 255, 180), 2))
             vy = rect.bottom() - int(rect.height() * (dv / 1.5))
@@ -613,7 +642,12 @@ class TimelineWidget(QWidget):
                 self.timelineChanged.emit()
             else:
                 ba = m.addAction("🪄 Find Bridge Track here")
-                ta = m.addAction("✨ Generate AI Transition")
+                
+                ai_menu = m.addMenu("✨ Generate AI Asset")
+                ar = ai_menu.addAction("📈 Cinematic Riser")
+                ad = ai_menu.addAction("📉 Bass Drop")
+                ap = ai_menu.addAction("🌌 Ambient Pad")
+                ab = ai_menu.addAction("🥁 Percussion Build")
                 
                 fa = fs = fe = None
                 if self.loop_enabled and (self.loop_end_ms - self.loop_start_ms) > 1000:
@@ -627,8 +661,14 @@ class TimelineWidget(QWidget):
                 act = m.exec(self.mapToGlobal(event.pos()))
                 if act == ba:
                     self.bridgeRequested.emit(event.pos().x())
-                elif act == ta:
-                    self.aiTransitionRequested.emit(event.pos().x())
+                elif act == ar:
+                    self.aiTransitionRequested.emit(event.pos().x(), "riser")
+                elif act == ad:
+                    self.aiTransitionRequested.emit(event.pos().x(), "drop")
+                elif act == ap:
+                    self.aiTransitionRequested.emit(event.pos().x(), "pad")
+                elif act == ab:
+                    self.aiTransitionRequested.emit(event.pos().x(), "percussion")
                 elif act == fa:
                     self.fillRangeRequested.emit(self.loop_start_ms, self.loop_end_ms)
                 elif act == fs:

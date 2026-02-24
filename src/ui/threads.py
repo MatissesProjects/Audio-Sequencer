@@ -62,7 +62,7 @@ class AIInitializerThread(QThread):
             self.error.emit(str(e))
 
 class WaveformLoader(QThread):
-    waveformLoaded = pyqtSignal(object, list)
+    waveformLoaded = pyqtSignal(object, list, dict) # segment, full_waveform, stem_waveforms
     
     def __init__(self, segment, processor):
         super().__init__()
@@ -72,7 +72,14 @@ class WaveformLoader(QThread):
     def run(self):
         try:
             w = self.processor.get_waveform_envelope(self.segment.file_path)
-            self.waveformLoaded.emit(self.segment, w)
+            sw = {}
+            if self.segment.stems_path and os.path.exists(self.segment.stems_path):
+                for s in ["vocals", "drums", "bass", "other"]:
+                    sp = os.path.join(self.segment.stems_path, f"{s}.wav")
+                    if os.path.exists(sp):
+                        sw[s] = self.processor.get_waveform_envelope(sp)
+            
+            self.waveformLoaded.emit(self.segment, w, sw)
         except:
             pass
 
