@@ -46,6 +46,11 @@ class TrackSegment:
         self.duck_low = 1.0 # Frequency-specific ducking multipliers
         self.duck_mid = 1.0
         self.duck_high = 1.0
+        
+        # KEYFRAMES: { 'volume': [(0, 1.0), (5000, 0.5)], 'low_cut': ... }
+        # Stored as relative MS from start of clip
+        self.keyframes = {} 
+        
         base_color = self.KEY_COLORS.get(self.key, QColor(70, 130, 180))
         self.color = QColor(base_color.red(), base_color.green(), base_color.blue(), 200)
         self.onsets = []
@@ -54,6 +59,39 @@ class TrackSegment:
                 self.onsets = [float(x) * 1000.0 for x in track_data['onsets_json'].split(',')]
             except:
                 pass
+
+    def add_keyframe(self, param, relative_ms, value):
+        """Adds a keyframe for a parameter. Overwrites if exists at same time."""
+        if param not in self.keyframes:
+            self.keyframes[param] = []
+        
+        # Remove existing at same time
+        self.keyframes[param] = [k for k in self.keyframes[param] if abs(k[0] - relative_ms) > 10]
+        self.keyframes[param].append((relative_ms, value))
+        self.keyframes[param].sort(key=lambda x: x[0])
+
+    def get_value_at(self, param, relative_ms, default_val):
+        """Linearly interpolates value for a parameter at a given time."""
+        if param not in self.keyframes or not self.keyframes[param]:
+            return default_val
+            
+        points = self.keyframes[param]
+        
+        # Before first point
+        if relative_ms <= points[0][0]:
+            return points[0][1]
+        # After last point
+        if relative_ms >= points[-1][0]:
+            return points[-1][1]
+            
+        # Interpolate
+        for i in range(len(points) - 1):
+            t1, v1 = points[i]
+            t2, v2 = points[i+1]
+            if t1 <= relative_ms <= t2:
+                ratio = (relative_ms - t1) / (t2 - t1)
+                return v1 + (v2 - v1) * ratio
+        return default_val
 
     def get_end_ms(self):
         """Returns the absolute end time of the segment on the timeline."""
@@ -87,7 +125,8 @@ class TrackSegment:
             'ducking_depth': self.ducking_depth,
             'duck_low': self.duck_low,
             'duck_mid': self.duck_mid,
-            'duck_high': self.duck_high
+            'duck_high': self.duck_high,
+            'keyframes': self.keyframes
         }
         d['onsets_json'] = ",".join([str(x/1000.0) for x in self.onsets])
         return d

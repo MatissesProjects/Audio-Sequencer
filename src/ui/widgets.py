@@ -492,6 +492,35 @@ class TimelineWidget(QWidget):
                 painter.setBrush(QBrush(QColor(255, 150, 0, int(255 * seg.harmonics))))
                 painter.drawEllipse(rect.right() - 45, rect.bottom() - 25, 12, 12)
 
+            # --- Keyframe Rendering ---
+            if hasattr(seg, 'keyframes'):
+                for param, points in seg.keyframes.items():
+                    if not points: continue
+                    # Different color per param? For now just one color
+                    k_color = QColor(255, 200, 0, 200)
+                    painter.setPen(QPen(k_color, 2))
+                    painter.setBrush(QBrush(k_color))
+                    
+                    # Sort points just in case
+                    sorted_pts = sorted(points, key=lambda x: x[0])
+                    prev_x = rect.left()
+                    prev_y = rect.bottom() - int(rect.height() * sorted_pts[0][1]) # Assuming 0-1 val
+                    
+                    for ms, val in sorted_pts:
+                        # Draw point
+                        x = rect.left() + int(ms * self.pixels_per_ms)
+                        y = rect.bottom() - int(rect.height() * max(0.0, min(1.0, val)))
+                        
+                        painter.drawLine(prev_x, prev_y, x, y)
+                        painter.drawEllipse(x - 3, y - 3, 6, 6)
+                        
+                        prev_x = x
+                        prev_y = y
+                        
+                    # Line to end?
+                    if prev_x < rect.right():
+                        painter.drawLine(prev_x, prev_y, rect.right(), prev_y)
+
             painter.setPen(Qt.GlobalColor.white)
             painter.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
             painter.drawText(rect.adjusted(8, 8, -8, -8), Qt.AlignmentFlag.AlignTop, seg.filename)
@@ -534,6 +563,21 @@ class TimelineWidget(QWidget):
             return
 
         if event.button() == Qt.MouseButton.LeftButton:
+            # Check for Keyframe Addition (Ctrl + Click)
+            if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+                for seg in self.segments:
+                    r = self.get_seg_rect(seg)
+                    if r.contains(event.pos()):
+                        rel_ms = (event.pos().x() - r.left()) / self.pixels_per_ms
+                        # Invert Y to get 0.0 - 1.0 value
+                        val = 1.0 - ((event.pos().y() - r.top()) / r.height())
+                        
+                        # Default to volume for now, extendable later
+                        seg.add_keyframe('volume', rel_ms, val)
+                        self.update()
+                        self.timelineChanged.emit()
+                        return
+
             cs = None
             for seg in reversed(self.segments):
                 r = self.get_seg_rect(seg)

@@ -53,8 +53,8 @@ def _process_single_segment(s, i, target_bpm, sr, time_range):
         except: pass
 
     # Create unique hash for this segment's heavy processing
-    # (file + bpm + pitch + duration + offset + stem mix + harmony + frequency ducking)
-    key_str = f"{s['file_path']}_{s['bpm']}_{target_bpm}_{s.get('pitch_shift',0)}_{s_dur}_{s_off}_{stems_dir}_{s.get('vocal_shift',0)}_{s.get('harmony_level',0)}_{s.get('vocal_vol',1.0)}_{s.get('drum_vol',1.0)}_{s.get('bass_vol',1.0)}_{s.get('instr_vol',1.0)}_{s.get('duck_low',1.0)}_{s.get('duck_mid',1.0)}_{s.get('duck_high',1.0)}"
+    # (file + bpm + pitch + duration + offset + stem mix + harmony + frequency ducking + keyframes)
+    key_str = f"{s['file_path']}_{s['bpm']}_{target_bpm}_{s.get('pitch_shift',0)}_{s_dur}_{s_off}_{stems_dir}_{s.get('vocal_shift',0)}_{s.get('harmony_level',0)}_{s.get('vocal_vol',1.0)}_{s.get('drum_vol',1.0)}_{s.get('bass_vol',1.0)}_{s.get('instr_vol',1.0)}_{s.get('duck_low',1.0)}_{s.get('duck_mid',1.0)}_{s.get('duck_high',1.0)}_{str(s.get('keyframes', {}))}"
     cache_hash = hashlib.md5(key_str.encode()).hexdigest()
     cache_file = os.path.join(cache_dir, f"{cache_hash}.npy")
     
@@ -199,6 +199,41 @@ def _process_single_segment(s, i, target_bpm, sr, time_range):
     
     seg_np *= (balancing_gain * vol_mult * envelope)
     
+    # --- KEYFRAME MODULATION ---
+    keyframes = s.get('keyframes', {})
+    if 'volume' in keyframes and keyframes['volume']:
+        # Generate modulation envelope
+        mod_env = np.ones(num_samples, dtype=np.float32)
+        points = sorted(keyframes['volume'], key=lambda x: x[0])
+        
+        # Convert ms points to sample indices
+        # points: [(ms, val), ...]
+        
+        # Pre-fill start
+        first_ms, first_val = points[0]
+        first_idx = int(first_ms * sr / 1000.0)
+        mod_env[:min(first_idx, num_samples)] = first_val
+        
+        for i in range(len(points) - 1):
+            t1, v1 = points[i]; t2, v2 = points[i+1]
+            idx1 = int(t1 * sr / 1000.0); idx2 = int(t2 * sr / 1000.0)
+            
+            # Clamp to segment bounds
+            if idx2 <= 0 or idx1 >= num_samples: continue
+            idx1 = max(0, idx1); idx2 = min(num_samples, idx2)
+            
+            if idx2 > idx1:
+                ramp = np.linspace(v1, v2, idx2 - idx1)
+                mod_env[idx1:idx2] = ramp
+                
+        # Fill end
+        last_ms, last_val = points[-1]
+        last_idx = int(last_ms * sr / 1000.0)
+        if last_idx < num_samples:
+            mod_env[last_idx:] = last_val
+            
+        seg_np *= mod_env
+
     # --- MODULAR FX CHAIN ---
     seg_np = fx_chain.process(seg_np, sr, s)
     

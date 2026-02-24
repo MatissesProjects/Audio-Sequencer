@@ -744,6 +744,7 @@ class AudioSequencerApp(QMainWindow):
             seg.duck_low = s.get('duck_low', 1.0)
             seg.duck_mid = s.get('duck_mid', 1.0)
             seg.duck_high = s.get('duck_high', 1.0)
+            seg.keyframes = s.get('keyframes', {})
             
             self.load_waveform_async(seg)
             self.timeline_widget.segments.append(seg)
@@ -1215,6 +1216,7 @@ class AudioSequencerApp(QMainWindow):
                 seg.duck_low = s.get('duck_low', 1.0)
                 seg.duck_mid = s.get('duck_mid', 1.0)
                 seg.duck_high = s.get('duck_high', 1.0)
+                seg.keyframes = s.get('keyframes', {})
                 
                 self.load_waveform_async(seg)
                 self.timeline_widget.segments.append(seg)
@@ -1445,6 +1447,7 @@ class AudioSequencerApp(QMainWindow):
             seg.duck_low = self.copy_buffer.get('duck_low', 1.0)
             seg.duck_mid = self.copy_buffer.get('duck_mid', 1.0)
             seg.duck_high = self.copy_buffer.get('duck_high', 1.0)
+            seg.keyframes = self.copy_buffer.get('keyframes', {})
             seg.is_primary = self.copy_buffer['is_primary']
             seg.is_ambient = self.copy_buffer.get('is_ambient', False)
             
