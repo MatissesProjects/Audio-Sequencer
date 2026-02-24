@@ -3,6 +3,7 @@ import sqlite3
 from src.analysis import AnalysisModule
 from src.processor import AudioProcessor
 from src.database import init_db
+from src.core.config import AppConfig
 from tqdm import tqdm
 
 class IngestionEngine:
@@ -10,13 +11,14 @@ class IngestionEngine:
     
     SUPPORTED_EXTENSIONS = ('.wav', '.mp3', '.flac', '.aiff', '.ogg')
 
-    def __init__(self, db_path="audio_library.db"):
-        self.db_path = db_path
+    def __init__(self, db_path=None):
+        self.db_path = db_path or AppConfig.DB_PATH
         self.analyzer = AnalysisModule()
         self.processor = AudioProcessor()
+        AppConfig.ensure_dirs()
         # Ensure DB exists
-        if not os.path.exists(db_path):
-            init_db(db_path)
+        if not os.path.exists(self.db_path):
+            init_db(self.db_path)
 
     def scan_directory(self, root_dir):
         """Recursively scans a directory for audio files and processes them."""
@@ -41,11 +43,10 @@ class IngestionEngine:
 
             try:
                 features = self.analyzer.analyze_file(file_path)
-                
-                # Trigger Stem Separation
-                stems_dir = os.path.join("stems_library", str(features['filename']).replace(" ", "_"))
-                self.processor.separate_stems(file_path, stems_dir)
-                
+
+                # Trigger Stem Separation using Config path
+                stems_dir = AppConfig.get_stems_path(features['filename'])
+                self.processor.separate_stems(file_path, stems_dir)                
                 if row: # Update existing record with stems_path
                     cursor.execute("UPDATE tracks SET stems_path = ? WHERE id = ?", (os.path.abspath(stems_dir), row[0]))
                 else:

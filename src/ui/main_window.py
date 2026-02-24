@@ -18,6 +18,7 @@ from src.processor import AudioProcessor
 from src.renderer import FlowRenderer
 
 # Modular Imports
+from src.core.config import AppConfig
 from src.core.models import TrackSegment
 from src.core.undo import UndoManager
 from src.ui.dialogs import show_error
@@ -36,9 +37,10 @@ class AudioSequencerApp(QMainWindow):
         super().__init__()
         print("[BOOT] Main Window Class Initialized")
         
+        AppConfig.ensure_dirs()
         self.dm = DataManager()
-        self.processor = AudioProcessor()
-        self.renderer = FlowRenderer()
+        self.processor = AudioProcessor(sample_rate=AppConfig.SAMPLE_RATE)
+        self.renderer = FlowRenderer(sample_rate=AppConfig.SAMPLE_RATE)
         self.undo_manager = UndoManager()
         
         # Placeholder AI state
@@ -53,7 +55,7 @@ class AudioSequencerApp(QMainWindow):
         self.audio_output = QAudioOutput()
         self.player.setAudioOutput(self.audio_output)
         self.audio_output.setVolume(0.8)
-        self.preview_path = "temp_preview.wav"
+        self.preview_path = os.path.join(AppConfig.GENERATED_ASSETS_DIR, "temp_preview.wav")
         self.preview_dirty = True
         
         self.play_timer = QTimer()

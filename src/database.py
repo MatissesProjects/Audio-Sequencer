@@ -2,14 +2,14 @@ import sqlite3
 import os
 import chromadb
 import numpy as np
-from chromadb.config import Settings
+from src.core.config import AppConfig
 
 class DataManager:
     """Unified manager for SQLite (metadata) and ChromaDB (vectors)."""
     
-    def __init__(self, db_path="audio_library.db", vector_dir="vector_db"):
-        self.db_path = db_path
-        self.vector_dir = vector_dir
+    def __init__(self, db_path=None, vector_dir=None):
+        self.db_path = db_path or AppConfig.DB_PATH
+        self.vector_dir = vector_dir or AppConfig.VECTOR_DB_DIR
         self.init_sqlite()
         self.init_chroma()
 
