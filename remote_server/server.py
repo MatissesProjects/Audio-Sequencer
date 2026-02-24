@@ -1,6 +1,7 @@
 from flask import Flask, request, send_file
 import torch
 import torchaudio
+import soundfile as sf
 from audiocraft.models import MusicGen
 import io
 import os
@@ -14,6 +15,14 @@ app = Flask(__name__)
 # Initialize MusicGen on 4090 (GPU)
 print("--- 🚀 AudioSequencer 4090 Generator Server ---")
 device = "cuda" if torch.cuda.is_available() else "cpu"
+
+try:
+    print("Loading MusicGen model...")
+    model = MusicGen.get_pretrained('facebook/musicgen-small')
+    print("MusicGen Loaded.")
+except Exception as e:
+    print(f"Failed to load MusicGen: {e}")
+    model = None
 
 @app.route('/')
 def health_check():
@@ -94,6 +103,9 @@ def generate():
     
     print(f"Generating: '{prompt}' ({duration}s) | CFG: {cfg_coef} | Temp: {temperature}...")
     
+    if model is None:
+        return "MusicGen model failed to load on server startup.", 503
+    
     try:
         model.set_generation_params(
             duration=duration,
@@ -109,11 +121,15 @@ def generate():
         
         # Convert to Bytes for transport
         # torchaudio expectations: (channels, samples)
-        samples = wav[0].cpu()
+        # soundfile expectations: (samples, channels)
+        samples = wav[0].cpu().numpy() # [channels, samples]
         
+        # Transpose for soundfile: [samples, channels]
+        samples = samples.T 
+
         # Save to memory-buffered WAV
         byte_io = io.BytesIO()
-        torchaudio.save(byte_io, samples, 32000, format="wav")
+        sf.write(byte_io, samples, 32000, format='WAV')
         byte_io.seek(0)
         
         return send_file(byte_io, mimetype="audio/wav")
@@ -124,4 +140,4 @@ def generate():
 
 if __name__ == '__main__':
     # Listen on all interfaces so your main machine can connect
-    app.run(host='0.0.0.0', port=5000)
+    app.run(host='0.0.0.0', port=5001)
