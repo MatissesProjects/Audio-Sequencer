@@ -63,8 +63,15 @@ class CompatibilityScorer:
 
     def get_total_score(self, track1, track2, emb1=None, emb2=None):
         """Combines all scores into a single 0-100 value."""
-        bpm_s = self.calculate_bpm_score(track1['bpm'], track2['bpm'])
-        har_s = self.calculate_harmonic_score(track1['harmonic_key'], track2['harmonic_key'])
+        # Robust access to keys (handles both DB dicts and Model dicts)
+        bpm1 = track1.get('bpm') or 120.0
+        bpm2 = track2.get('bpm') or 120.0
+        
+        key1 = track1.get('harmonic_key') or track1.get('key') or 'N/A'
+        key2 = track2.get('harmonic_key') or track2.get('key') or 'N/A'
+
+        bpm_s = self.calculate_bpm_score(bpm1, bpm2)
+        har_s = self.calculate_harmonic_score(key1, key2)
         sem_s = self.calculate_semantic_score(emb1, emb2)
         
         # Safe access to new fields with defaults (handling None values)

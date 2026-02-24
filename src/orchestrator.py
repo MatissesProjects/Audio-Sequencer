@@ -290,7 +290,8 @@ class FullMixOrchestrator:
             # --- LANE 1: Harmonic Body (Bass) ---
             if b_name in ['Intro', 'Verse 1', 'Drop', 'Verse 2', 'Outro']:
                 b_start = current_ms
-                if is_intro: b_start += 2000 # Bass comes in much earlier (2s) to anchor the ambient
+                # Intro/Outro: Bass MUST be present if Neural Cloud is there
+                if is_intro: b_start = current_ms 
                 
                 lane = find_free_lane(b_start, b_dur + overlap, preferred=1)
                 segments.append({
