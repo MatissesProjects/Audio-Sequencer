@@ -8,6 +8,7 @@ from src.database import DataManager
 from src.scoring import CompatibilityScorer
 from src.processor import AudioProcessor
 from src.renderer import FlowRenderer
+from src.generator import TransitionGenerator
 from tqdm import tqdm
 
 class FullMixOrchestrator:
@@ -18,6 +19,7 @@ class FullMixOrchestrator:
         self.scorer = CompatibilityScorer()
         self.processor = AudioProcessor()
         self.renderer = FlowRenderer()
+        self.generator = TransitionGenerator()
         self.min_score_threshold = 55.0
         self.lane_count = 8
 
@@ -230,6 +232,9 @@ class FullMixOrchestrator:
 
         segments = []
         current_ms = start_time_ms
+        target_bpm = 124.0
+        if seed_track:
+            target_bpm = seed_track.get('bpm', 124.0)
 
         main_drum = random.choice(drums)
         # Use seed track for harmonic compatibility if available
@@ -251,6 +256,19 @@ class FullMixOrchestrator:
                 source_p = seed_track['file_path'] if seed_track else random.choice(melodic_leads)['file_path']
                 self.processor.generate_grain_cloud(source_p, cloud_path, duration=20.0)
             except: cloud_path = melodic_leads[0]['file_path']
+
+        # Extra Randomness: 30% chance for a long Cinematic Atmosphere Pad in Intro
+        if random.random() > 0.7:
+            op_pad = os.path.abspath(f"generated_assets/intro_pad_{random.randint(0,999)}.wav")
+            try:
+                p = self.generator.get_transition_params(melodic_leads[0], melodic_leads[1], type_context="Create a long, evolving ethereal pad for the introduction.")
+                self.generator.generate_riser(duration_sec=16.0, bpm=target_bpm, output_path=op_pad, params=p)
+                segments.append({
+                    'id': -1, 'filename': f"INTRO PAD ({p.get('description', 'Neural')})", 'file_path': op_pad,
+                    'bpm': target_bpm, 'harmonic_key': 'N/A', 'start_ms': start_time_ms, 'duration_ms': 16000,
+                    'lane': 6, 'volume': 0.4, 'fade_in_ms': 8000, 'fade_out_ms': 4000, 'reverb': 0.8
+                })
+            except: pass
 
         overlap = 4000
 
@@ -438,6 +456,56 @@ class FullMixOrchestrator:
                     'pan': random.uniform(-0.4, 0.4), 'is_ambient': True, 'ducking_depth': 0.99, 'reverb': 0.8, 'duck_low': 0.1, 'duck_mid': 0.3
                 })
             current_ms += (b_dur - overlap)
+        
+        # --- PHASE 2: AI Generative Asset Injection ---
+        # Now that we have the full structure, we inject unique risers/drops
+        # based on the surrounding tracks.
+        print("[AI] Injecting generative assets into Hyper-Mix...")
+        ai_segments = []
+        for i in range(len(blocks) - 1):
+            curr_b = blocks[i]; next_b = blocks[i+1]
+            # Find tracks at the boundary
+            boundary_ms = current_ms - (sum(b['dur']-overlap for b in blocks[i+1:])) # Rough approx
+            # Better: get actual transition point
+            
+        # Refined Injection logic: iterate segments to find logical "Gaps" or "Build-to-Drop" points
+        ss = sorted(segments, key=lambda s: s['start_ms'])
+        
+        # Find the 'Build' block ending
+        build_end_ms = 0
+        running_ms = start_time_ms
+        for b in blocks:
+            if b['name'] == 'Build':
+                build_end_ms = running_ms + b['dur']
+                break
+            running_ms += (b['dur'] - overlap)
+
+        if build_end_ms > 0:
+            # 1. Inject a Neural Riser leading into the drop
+            op_riser = os.path.abspath(f"generated_assets/hyper_riser_{random.randint(0,999)}.wav")
+            # Analyze tracks near the build-to-drop transition
+            try:
+                p = self.generator.get_transition_params(melodic_leads[0], melodic_leads[1], type_context="Build a high-energy riser for a hyper-mix transition.")
+                self.generator.generate_riser(duration_sec=4.0, bpm=target_bpm, output_path=op_riser, params=p)
+                segments.append({
+                    'id': -1, 'filename': f"HYPER RISER ({p.get('description', 'Neural')})", 'file_path': op_riser,
+                    'bpm': target_bpm, 'harmonic_key': 'N/A', 'start_ms': build_end_ms - 4000, 'duration_ms': 4000,
+                    'lane': find_free_lane(build_end_ms - 4000, 4000, preferred=7), 'volume': 0.7, 'fade_in_ms': 3500, 'fade_out_ms': 500
+                })
+            except: pass
+
+            # 2. Inject a Bass Drop impact at the start of the drop
+            op_drop = os.path.abspath(f"generated_assets/hyper_drop_{random.randint(0,999)}.wav")
+            try:
+                p = self.generator.get_transition_params(melodic_leads[1], melodic_leads[2], type_context="Create a heavy sub-bass impact for the drop.")
+                self.generator.generate_riser(duration_sec=4.0, bpm=target_bpm, output_path=op_drop, params=p)
+                segments.append({
+                    'id': -1, 'filename': f"HYPER DROP ({p.get('description', 'Sub')})", 'file_path': op_drop,
+                    'bpm': target_bpm, 'harmonic_key': 'N/A', 'start_ms': build_end_ms, 'duration_ms': 4000,
+                    'lane': find_free_lane(build_end_ms, 4000, preferred=7), 'volume': 0.9, 'fade_in_ms': 50, 'fade_out_ms': 3500
+                })
+            except: pass
+
         return segments
 
     def find_best_filler_for_gap(self, prev_track_id=None, next_track_id=None):

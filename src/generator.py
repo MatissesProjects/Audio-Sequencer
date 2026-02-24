@@ -23,7 +23,7 @@ class TransitionGenerator:
         from src.core.config import AppConfig
         self.remote_url = AppConfig.REMOTE_GEN_URL
 
-    def get_transition_params(self, track_a, track_b):
+    def get_transition_params(self, track_a, track_b, type_context=""):
         """Asks Gemini for transition characteristics based on track metadata."""
         if not self.client:
             return {"noise_type": "white", "filter_type": "highpass", "reverb_amount": 0.7, "prompt": "cinematic riser sweep"}
@@ -37,7 +37,8 @@ class TransitionGenerator:
         name_b = track_b.get('filename', 'Track B')
 
         prompt = f"""
-        Analyze these two tracks and describe a 4-second audio transition (riser or sweep) to bridge them.
+        Analyze these two tracks and describe a 4-second audio transition to bridge them.
+        {type_context}
         Track A: {name_a}, {bpm_a} BPM, Key: {key_a}
         Track B: {name_b}, {bpm_b} BPM, Key: {key_b}
         
@@ -45,7 +46,7 @@ class TransitionGenerator:
         'noise_type' (white, pink, or brown),
         'filter_type' (lowpass or highpass),
         'reverb_amount' (float 0.0 to 1.0),
-        'prompt' (A text prompt for MusicGen generation, e.g. 'ethereal synth pad riser in {key_b}, {bpm_b} bpm'),
+        'prompt' (A text prompt for MusicGen generation, e.g. 'heavy sub bass impact with reverb in {key_b}, {bpm_b} bpm'),
         'description' (brief vibe description).
         """
         try:
