@@ -337,16 +337,41 @@ class FullMixOrchestrator:
                     v_energy = lead.get('vocal_energy') or 0.0
                     is_vocal_heavy = v_energy > 0.2
                     
+                    # 1. THE MAIN LEAD
                     segments.append({
                         'id': lead['id'], 'filename': lead['filename'], 'file_path': lead['file_path'], 'bpm': lead['bpm'], 'harmonic_key': lead['harmonic_key'],
                         'start_ms': current_ms, 'duration_ms': b_dur + overlap, 'offset_ms': (lead.get('loop_start') or 0)*1000,
-                        'volume': 0.85 if is_vocal_heavy else 0.7, 'pan': -0.5 if idx % 2 == 0 else 0.5, 'lane': lane, 'pitch_shift': ps, 'low_cut': 400, 'fade_in_ms': 4000, 'fade_out_ms': 4000,
+                        'volume': 0.85 if is_vocal_heavy else 0.7, 'pan': 0.0, 'lane': lane, 'pitch_shift': ps, 'low_cut': 400, 'fade_in_ms': 4000, 'fade_out_ms': 4000,
                         'vocal_vol': 1.3 if is_vocal_heavy else 0.8, # More vocal boost
                         'instr_vol': 0.4 if is_vocal_heavy else 0.9, # Deeper instrument cut for vocals
                         'vocal_shift': 12 if is_drop and is_vocal_heavy else 0,
                         'ducking_depth': 0.4 if is_vocal_heavy else 0.75,
                         'harmony_level': 0.5 if is_drop else 0.1
                     })
+
+                    # 2. THE HARMONY STACKS (Only for vocal-heavy leads)
+                    if is_vocal_heavy and not is_build:
+                        # Add a Perfect 5th Harmony (+7st)
+                        h1_lane = find_free_lane(current_ms, b_dur + overlap)
+                        segments.append({
+                            'id': lead['id'], 'filename': f"{lead['filename']} (H+7)", 'file_path': lead['file_path'], 'bpm': lead['bpm'], 'harmonic_key': lead['harmonic_key'],
+                            'start_ms': current_ms, 'duration_ms': b_dur + overlap, 'offset_ms': (lead.get('loop_start') or 0)*1000,
+                            'volume': 0.5, 'pan': -0.6, 'lane': h1_lane, 'pitch_shift': ps, 'low_cut': 800, 'fade_in_ms': 5000, 'fade_out_ms': 5000,
+                            'vocal_vol': 1.0, 'instr_vol': 0.0, # VOCAL ONLY for the stack
+                            'vocal_shift': 7, 
+                            'ducking_depth': 0.8, 'reverb': 0.4
+                        })
+
+                        # Add a Perfect 4th/Lower Harmony (-5st)
+                        h2_lane = find_free_lane(current_ms, b_dur + overlap)
+                        segments.append({
+                            'id': lead['id'], 'filename': f"{lead['filename']} (H-5)", 'file_path': lead['file_path'], 'bpm': lead['bpm'], 'harmonic_key': lead['harmonic_key'],
+                            'start_ms': current_ms, 'duration_ms': b_dur + overlap, 'offset_ms': (lead.get('loop_start') or 0)*1000,
+                            'volume': 0.5, 'pan': 0.6, 'lane': h2_lane, 'pitch_shift': ps, 'low_cut': 800, 'fade_in_ms': 5000, 'fade_out_ms': 5000,
+                            'vocal_vol': 1.0, 'instr_vol': 0.0, # VOCAL ONLY
+                            'vocal_shift': -5,
+                            'ducking_depth': 0.8, 'reverb': 0.4
+                        })
 
             # --- LANE 4/7: Atmosphere Glue ---
             if b_name not in ['Intro', 'Outro']:
