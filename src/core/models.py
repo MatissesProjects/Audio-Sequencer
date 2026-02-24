@@ -31,6 +31,8 @@ class TrackSegment:
         self.pitch_shift = 0
         self.reverb = 0.0 # 0.0 to 1.0 (Wet amount)
         self.harmonics = 0.0 # 0.0 to 1.0 (Saturation/Harmonic excitement)
+        self.delay = 0.0 # New: Echo intensity
+        self.chorus = 0.0 # New: Thickness intensity
         self.stems_path = track_data.get('stems_path')
         self.vocal_energy = track_data.get('vocal_energy', 0.0)
         self.vocal_shift = 0 # Independent pitch shift for vocals
@@ -68,6 +70,7 @@ class TrackSegment:
             'fade_in_ms': self.fade_in_ms, 'fade_out_ms': self.fade_out_ms, 
             'pitch_shift': self.pitch_shift,
             'reverb': self.reverb, 'harmonics': self.harmonics,
+            'delay': self.delay, 'chorus': self.chorus,
             'stems_path': self.stems_path,
             'vocal_energy': self.vocal_energy,
             'vocal_shift': self.vocal_shift,
