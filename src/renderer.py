@@ -248,6 +248,16 @@ class FlowRenderer:
         target_bpm = target_bpm or AppConfig.DEFAULT_BPM
         return self._render_internal(segments, output_path, target_bpm, mutes, solos, progress_cb, time_range)
 
+    def render_single_segment(self, segment_dict, output_path, target_bpm=None):
+        """High-speed single segment render for real-time auditioning."""
+        target_bpm = target_bpm or AppConfig.DEFAULT_BPM
+        # Use simple single-threaded processing for one segment
+        res = _process_single_segment(segment_dict, 0, target_bpm, self.sr, None)
+        if res:
+            self.numpy_to_segment(res['samples'], self.sr).export(output_path, format="mp3", bitrate="192k")
+            return output_path
+        return None
+
     def render_stems(self, segments, output_folder, target_bpm=None, progress_cb=None, time_range=None):
         target_bpm = target_bpm or AppConfig.DEFAULT_BPM
         if not os.path.exists(output_folder):

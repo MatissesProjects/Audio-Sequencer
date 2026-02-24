@@ -250,6 +250,11 @@ class AudioSequencerApp(QMainWindow):
         header = QLabel("TRACK INSPECTOR")
         header.setStyleSheet("font-size: 16px; color: #00ffcc; font-weight: bold; margin-bottom: 5px;")
         inspector_layout.addWidget(header)
+        
+        self.audition_btn = QPushButton("🎧 Audition FX")
+        self.audition_btn.setStyleSheet("background-color: #007acc; color: white; font-weight: bold; padding: 8px;")
+        self.audition_btn.clicked.connect(self.audition_selected_clip)
+        inspector_layout.addWidget(self.audition_btn)
 
         form = QFormLayout()
         form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
@@ -1205,6 +1210,29 @@ class AudioSequencerApp(QMainWindow):
                 self.player.setSource(QUrl.fromLocalFile(os.path.abspath(fp)))
             except:
                 pass
+
+    def audition_selected_clip(self):
+        sel = self.timeline_widget.selected_segment
+        if not sel:
+            self.status_bar.showMessage("Select a clip on the timeline first.")
+            return
+            
+        self.loading_overlay.show_loading("Auditioning FX...")
+        try:
+            # Single-threaded, high-speed render of just this one clip
+            out_path = os.path.join(AppConfig.GENERATED_ASSETS_DIR, "audition_temp.mp3")
+            tb = float(self.tbe.text()) if self.tbe.text() else 124.0
+            
+            res_path = self.renderer.render_single_segment(sel.to_dict(), out_path, target_bpm=tb)
+            if res_path:
+                self.is_library_preview = False
+                self.player.setSource(QUrl.fromLocalFile(os.path.abspath(res_path)))
+                self.player.play()
+                self.status_bar.showMessage(f"Auditioning: {sel.filename}")
+        except Exception as e:
+            show_error(self, "Audition Error", "Failed to render audition clip.", e)
+        finally:
+            self.loading_overlay.hide_loading()
 
     def play_library_preview(self):
         if self.player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
