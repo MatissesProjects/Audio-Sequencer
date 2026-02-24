@@ -13,8 +13,13 @@ class AppConfig:
     CACHE_DIR = "render_cache"
     STEMS_DIR = "stems_library"
     GENERATED_ASSETS_DIR = "generated_assets"
-    REMOTE_GEN_URL = "http://localhost:5000/generate" # Update this to your 4090 machine IP
-    REMOTE_SEP_URL = "http://localhost:5000/separate"
+    
+    # Remote AI Server (RTX 4090 machine)
+    # Set REMOTE_AI_HOST environment variable to switch (e.g., "192.168.1.x")
+    REMOTE_AI_HOST = os.getenv("REMOTE_AI_HOST", "matisse-INTEL") 
+    REMOTE_AI_PORT = os.getenv("REMOTE_AI_PORT", "5001")
+    REMOTE_GEN_URL = f"http://{REMOTE_AI_HOST}:{REMOTE_AI_PORT}/generate"
+    REMOTE_SEP_URL = f"http://{REMOTE_AI_HOST}:{REMOTE_AI_PORT}/separate"
     
     # Processing Settings
     DEFAULT_DUCKING_DEPTH = 0.7

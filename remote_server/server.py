@@ -15,6 +15,10 @@ app = Flask(__name__)
 print("--- 🚀 AudioSequencer 4090 Generator Server ---")
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
+@app.route('/')
+def health_check():
+    return {"status": "online", "device": device, "service": "AudioSequencer Gen Server"}, 200
+
 @app.route('/separate', methods=['POST'])
 def separate():
     if 'file' not in request.files:

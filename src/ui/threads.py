@@ -26,10 +26,19 @@ class AIInitializerThread(QThread):
     finished = pyqtSignal(object, object, object) # scorer, generator, orchestrator
     error = pyqtSignal(str)
     
-    def run(self):
-        try:
-            print("[BOOT] AI Warm-up started in background...")
+            from src.core.config import AppConfig
+            import requests
+            
+            print(f"[BOOT] AI Warm-up started in background... (Remote AI: {AppConfig.REMOTE_AI_HOST})")
             start = time.time()
+            
+            # Fast connectivity check
+            try:
+                # We just ping the root or generate without data to see if it's there
+                requests.get(f"http://{AppConfig.REMOTE_AI_HOST}:{AppConfig.REMOTE_AI_PORT}/", timeout=2)
+            except:
+                print(f"[BOOT] Warning: Remote AI Server ({AppConfig.REMOTE_AI_HOST}) seems offline.")
+
             from src.scoring import CompatibilityScorer
             from src.generator import TransitionGenerator
             from src.orchestrator import FullMixOrchestrator
