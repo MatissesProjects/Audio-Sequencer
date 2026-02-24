@@ -339,20 +339,55 @@ class FullMixOrchestrator:
                         sub_start += sd
                 else:
                     ps = -2 if b_name == 'Verse 2' else 0
-                    lane = find_free_lane(current_ms, b_dur + overlap, preferred=3 if idx % 2 == 0 else 6)
                     v_energy = lead.get('vocal_energy') or 0.0; is_vocal_heavy = v_energy > 0.2
                     
-                    segments.append({
-                        'id': lead['id'], 'filename': lead['filename'], 'file_path': lead['file_path'], 'bpm': lead['bpm'], 'harmonic_key': lead['harmonic_key'],
-                        'start_ms': current_ms, 'duration_ms': b_dur + overlap, 'offset_ms': (lead.get('loop_start') or 0)*1000,
-                        'volume': 0.85 if is_vocal_heavy else 0.7, 'pan': 0.0, 'lane': lane, 'pitch_shift': ps, 'low_cut': 400, 'fade_in_ms': 4000, 'fade_out_ms': 4000,
-                        'vocal_vol': 1.3 if is_vocal_heavy else 0.8, 'instr_vol': 0.4 if is_vocal_heavy else 0.9,
-                        'bass_vol': 0.6 if is_vocal_heavy else 0.8,
-                        'vocal_shift': 12 if is_drop and is_vocal_heavy else 0,
-                        'ducking_depth': 0.4 if is_vocal_heavy else 0.75,
-                        'harmony_level': 0.4 if is_drop else 0.1,
-                        'duck_low': 0.2 if is_vocal_heavy else 0.5
-                    })
+                    # --- STAGGERED STEM ORCHESTRATION ---
+                    # If stems exist, we split the lead into components for a pro build-up
+                    stems_path = lead.get('stems_path')
+                    if stems_path and os.path.exists(stems_path) and (b_name == 'Verse 1' or is_drop):
+                        # 1. Bass Component (Starts immediate)
+                        b_lane = find_free_lane(current_ms, b_dur + overlap, preferred=3)
+                        segments.append({
+                            'id': lead['id'], 'filename': f"{lead['filename']} (BASS)", 'file_path': lead['file_path'], 'bpm': lead['bpm'], 'harmonic_key': lead['harmonic_key'],
+                            'start_ms': current_ms, 'duration_ms': b_dur + overlap, 'offset_ms': (lead.get('loop_start') or 0)*1000,
+                            'volume': 0.9, 'lane': b_lane, 'pitch_shift': ps, 'fade_in_ms': 4000, 'fade_out_ms': 4000,
+                            'vocal_vol': 0.0, 'drum_vol': 0.0, 'bass_vol': 1.2, 'instr_vol': 0.0,
+                            'ducking_depth': 0.5
+                        })
+                        
+                        # 2. Drum Component (Starts after 4s)
+                        d_lane = find_free_lane(current_ms + 4000, b_dur + overlap - 4000, preferred=4)
+                        segments.append({
+                            'id': lead['id'], 'filename': f"{lead['filename']} (DRUMS)", 'file_path': lead['file_path'], 'bpm': lead['bpm'], 'harmonic_key': lead['harmonic_key'],
+                            'start_ms': current_ms + 4000, 'duration_ms': b_dur + overlap - 4000, 'offset_ms': ((lead.get('loop_start') or 0) + 4)*1000,
+                            'volume': 1.0, 'lane': d_lane, 'pitch_shift': ps, 'fade_in_ms': 2000, 'fade_out_ms': 4000,
+                            'vocal_vol': 0.0, 'drum_vol': 1.1, 'bass_vol': 0.0, 'instr_vol': 0.0,
+                            'is_primary': True
+                        })
+                        
+                        # 3. Melodic/Vocal Component (Starts after 8s)
+                        m_lane = find_free_lane(current_ms + 8000, b_dur + overlap - 8000, preferred=5)
+                        segments.append({
+                            'id': lead['id'], 'filename': f"{lead['filename']} (LEAD)", 'file_path': lead['file_path'], 'bpm': lead['bpm'], 'harmonic_key': lead['harmonic_key'],
+                            'start_ms': current_ms + 8000, 'duration_ms': b_dur + overlap - 8000, 'offset_ms': ((lead.get('loop_start') or 0) + 8)*1000,
+                            'volume': 0.8, 'lane': m_lane, 'pitch_shift': ps, 'fade_in_ms': 4000, 'fade_out_ms': 4000,
+                            'vocal_vol': 1.3 if is_vocal_heavy else 0.0, 'drum_vol': 0.0, 'bass_vol': 0.0, 'instr_vol': 1.0,
+                            'duck_low': 0.4 # Leave room for the separate bass lane
+                        })
+                    else:
+                        # Fallback to single-lane mix if no stems or not Verse 1/Drop
+                        lane = find_free_lane(current_ms, b_dur + overlap, preferred=3 if idx % 2 == 0 else 6)
+                        segments.append({
+                            'id': lead['id'], 'filename': lead['filename'], 'file_path': lead['file_path'], 'bpm': lead['bpm'], 'harmonic_key': lead['harmonic_key'],
+                            'start_ms': current_ms, 'duration_ms': b_dur + overlap, 'offset_ms': (lead.get('loop_start') or 0)*1000,
+                            'volume': 0.85 if is_vocal_heavy else 0.7, 'pan': 0.0, 'lane': lane, 'pitch_shift': ps, 'low_cut': 400, 'fade_in_ms': 4000, 'fade_out_ms': 4000,
+                            'vocal_vol': 1.3 if is_vocal_heavy else 0.8, 'instr_vol': 0.4 if is_vocal_heavy else 0.9,
+                            'bass_vol': 0.6 if is_vocal_heavy else 0.8,
+                            'vocal_shift': 12 if is_drop and is_vocal_heavy else 0,
+                            'ducking_depth': 0.4 if is_vocal_heavy else 0.75,
+                            'harmony_level': 0.4 if is_drop else 0.1,
+                            'duck_low': 0.2 if is_vocal_heavy else 0.5
+                        })
 
                     should_stack = is_vocal_heavy or (random.random() > 0.5)
                     if should_stack and not is_build:
