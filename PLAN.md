@@ -88,3 +88,23 @@ Export Module: Render the final sequenced arrangement as a single continuous aud
 Once the core application is stable, it can be expanded to generate new assets to fill in gaps.
 
 Local Audio Generation: Integrate open-source generation models like AudioCraft (MusicGen). If you have two beats that are structurally incompatible but you want to force a transition, you can prompt the local model to generate a custom 4-bar riser or transition sweep in the exact BPM and Key needed to bridge the gap seamlessly.
+
+
+---
+
+Next steps
+
+1. Unblock Phase 5: True Generative AI Transitions
+Currently, your TransitionGenerator in src/generator.py relies on Gemini to orchestrate a procedural noise sweep using white/pink noise and filters. You can unblock the ai-gen track by fully integrating audiocraft (MusicGen) to run locally on your RTX 4090. Instead of just noise sweeps, you can prompt MusicGen to synthesize custom 4-bar instrumental risers in the exact BPM and key needed to seamlessly bridge two structurally incompatible tracks.
+
+2. Stream Interaction Engine
+You can make the sequencer highly interactive by connecting it directly to your Twitch and YouTube streams. You could build a listener module that reads chat messages and feeds them into the EmbeddingEngine. If chat types "give me dark heavy bass" or "switch to chill piano," the app can convert that text into a 512-dimensional CLAP embedding and dynamically inject the most relevant track from your library into the FullMixOrchestrator's queue. Viewers could also use channel point redemptions to trigger the "Hyper-Mix" drops.
+
+3. Deep Learning Stem Separation
+In src/processor.py, your separate_stems method currently uses basic Harmonic/Percussive separation (HPSS) and frequency bandpassing. Upgrading this to use a deep learning model like Demucs or Spleeter would drastically improve the audio quality of isolated vocals and drums. This cleaner separation would allow your dynamic sidechain ducking and spectral masking to sound truly professional.
+
+4. Stochastic Production Edits (Auto-Chopping)
+To fix the issue of purely deterministic arrangements feeling repetitive, you can program genuine tension-building mechanics into your AudioProcessor. Implement a method that takes a 4-bar loop and automatically applies "micro-chopping"—slicing it into 2-bar, then 1-bar, then 1/4-beat stutters. By pairing this automated stutter with a rising pitch shift and a sweeping high-pass filter, the engine can autonomously generate massive EDM-style build-ups right before a drop.
+
+5. "Groove Lock" Smart Syncing
+While you are currently calculating the onset_density (beats per second) and using it in your scoring logic, you can utilize the actual onsets_json timestamps stored in the database to align the transients of different tracks. By slightly warping a background track so its transients lock perfectly onto the kick drum onsets of your foundation track, you eliminate rhythmic clashing entirely.
