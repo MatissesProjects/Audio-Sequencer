@@ -196,14 +196,34 @@ class TimelineWidget(QWidget):
         self.cursor_pos_ms = 0
         self.show_waveforms = True
         self.snap_to_grid = True
-        self.mutes = [False] * 8
-        self.solos = [False] * 8
+        self.lane_count = 8
+        self.mutes = [False] * self.lane_count
+        self.solos = [False] * self.lane_count
         self.loop_start_ms = 0
         self.loop_end_ms = 30000
         self.loop_enabled = False
         self.scorer = CompatibilityScorer()
         self.silence_regions = []
         self.update_geometry()
+
+    def add_lane(self):
+        self.lane_count += 1
+        self.mutes.append(False)
+        self.solos.append(False)
+        self.update_geometry()
+        self.timelineChanged.emit()
+
+    def remove_lane(self):
+        if self.lane_count > 1:
+            self.lane_count -= 1
+            self.mutes.pop()
+            self.solos.pop()
+            # Move any segments in the removed lane up one
+            for s in self.segments:
+                if s.lane >= self.lane_count:
+                    s.lane = self.lane_count - 1
+            self.update_geometry()
+            self.timelineChanged.emit()
 
     def find_silence_regions(self):
         """Analyzes timeline energy to find gaps where volume is below threshold."""
@@ -273,7 +293,7 @@ class TimelineWidget(QWidget):
             max_ms = max(max_ms, max(s.start_ms + s.duration_ms for s in self.segments) + 60000)
         self.setMinimumWidth(int(max_ms * self.pixels_per_ms))
         
-        total_h = 8 * (self.lane_height + self.lane_spacing) + 100
+        total_h = self.lane_count * (self.lane_height + self.lane_spacing) + 100
         self.setMinimumHeight(total_h)
         self.update()
 
@@ -309,7 +329,7 @@ class TimelineWidget(QWidget):
             painter.drawLine(lx + lw, 0, lx + lw, 40)
             
         any_solo = any(self.solos)
-        for i in range(8): 
+        for i in range(self.lane_count): 
             y = i * (self.lane_height + self.lane_spacing) + 40
             bg = QColor(32, 32, 32)
             if self.solos[i]:
@@ -460,7 +480,7 @@ class TimelineWidget(QWidget):
             self.drag_start_h = self.height()
             return
 
-        for i in range(8):
+        for i in range(self.lane_count):
             y = i * (self.lane_height + self.lane_spacing) + 40
             m_r = QRect(5, y + 25, 20, 20)
             s_r = QRect(30, y + 25, 20, 20)

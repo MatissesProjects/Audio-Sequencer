@@ -457,6 +457,15 @@ class AudioSequencerApp(QMainWindow):
         self.fill_btn.clicked.connect(self.smart_fill_all_gaps)
         th.addWidget(self.fill_btn)
         
+        th.addSpacing(10)
+        self.add_lane_btn = QPushButton("+ Lane")
+        self.add_lane_btn.clicked.connect(self.timeline_widget.add_lane)
+        th.addWidget(self.add_lane_btn)
+        
+        self.rem_lane_btn = QPushButton("- Lane")
+        self.rem_lane_btn.clicked.connect(self.timeline_widget.remove_lane)
+        th.addWidget(self.rem_lane_btn)
+        
         th.addWidget(QLabel("BPM:"))
         self.tbe = QLineEdit("124")
         self.tbe.setFixedWidth(40)
@@ -1483,6 +1492,8 @@ class AudioSequencerApp(QMainWindow):
         self.loading_overlay.show_loading("Synthesizing Hyper-Mix...")
         
         try:
+            # Sync orchestrator lane count with current timeline state
+            self.orchestrator.lane_count = self.timeline_widget.lane_count
             h_segs = self.orchestrator.get_hyper_segments(seed_track=seed, start_time_ms=start_ms)
             if h_segs:
                 for sd in h_segs:

@@ -19,6 +19,7 @@ class FullMixOrchestrator:
         self.processor = AudioProcessor()
         self.renderer = FlowRenderer()
         self.min_score_threshold = 55.0
+        self.lane_count = 8
 
     def find_curated_sequence(self, max_tracks=6, seed_track=None):
         """Finds a high-compatibility path, starting from a seed if provided."""
@@ -260,7 +261,7 @@ class FullMixOrchestrator:
                     busy_lanes.add(s['lane'])
             if preferred is not None and preferred not in busy_lanes:
                 return preferred
-            for l in range(8):
+            for l in range(self.lane_count):
                 if l not in busy_lanes: return l
             return preferred or 0
 
