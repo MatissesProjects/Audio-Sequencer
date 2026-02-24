@@ -406,6 +406,9 @@ class AudioSequencerApp(QMainWindow):
         
         self.main_splitter.addWidget(top_widget)
         
+        # Initialize timeline_widget early as toolbar buttons need it for connections
+        self.timeline_widget = TimelineWidget()
+        
         # --- BOTTOM AREA ---
         bt = QWidget()
         bl = QVBoxLayout(bt)
@@ -489,7 +492,6 @@ class AudioSequencerApp(QMainWindow):
         t_s = QScrollArea()
         t_s.setWidgetResizable(True)
         t_s.setStyleSheet("background-color: #1a1a1a;")
-        self.timeline_widget = TimelineWidget()
         t_s.setWidget(self.timeline_widget)
         bl.addWidget(t_s)
         self.main_splitter.addWidget(bt)
