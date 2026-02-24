@@ -39,15 +39,17 @@ def separate():
         
         try:
             # Call Demucs via subprocess for reliability and easy CUDA handling
-            # --two-stems=vocals can be used for faster processing if we only want vocals/other
-            # but we want full 4-stem separation
+            # Force torchaudio to use 'soundfile' backend to avoid torchcodec issues
+            env = os.environ.copy()
+            env["TORCHAUDIO_BACKEND"] = "soundfile"
+            
             cmd = [
                 "python", "-m", "demucs", 
                 "--out", output_dir, 
                 "--device", device,
                 input_path
             ]
-            subprocess.run(cmd, check=True)
+            subprocess.run(cmd, check=True, env=env)
             
             # Demucs creates a nested structure: output/htdemucs/input/drums.wav etc.
             model_name = "htdemucs" # default model

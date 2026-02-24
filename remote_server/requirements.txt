@@ -4,3 +4,4 @@ torchaudio
 audiocraft
 demucs
 zipstream-ng
+soundfile
