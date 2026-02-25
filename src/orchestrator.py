@@ -178,52 +178,49 @@ class FullMixOrchestrator:
             is_transition = any(k in b_name.lower() for k in ['transition', 'bridge'])
 
             # --- PERCUSSION (Lanes 0-1) ---
-            if not is_outro or is_outro: # Drums usually present unless definitive outro
-                f_start = current_ms
-                p_keys = {}
-                if is_intro:
-                    # Start subtle, then bring it in
-                    p_keys['drum_vol'] = [(0, 0.0), (8000, 0.5), (16000, 1.0)]
-                elif is_outro:
-                    # Fade out drums first
-                    p_keys['drum_vol'] = [(0, 1.0), (b_dur/2, 0.0)]
+            f_start = current_ms
+            p_keys = {}
+            if is_intro:
+                # Start subtle, then bring it in
+                p_keys['drum_vol'] = [(0, 0.0), (8000, 0.5), (16000, 1.0)]
+            elif is_outro:
+                # Fade out drums first
+                p_keys['drum_vol'] = [(0, 1.0), (b_dur/2, 0.0)]
 
-                lane = find_free_lane(f_start, b_dur + overlap, role="percussion", preferred=0)
-                segments.append({
-                    'id': main_drum['id'], 'filename': main_drum['filename'], 'file_path': main_drum['file_path'], 'bpm': main_drum['bpm'], 'harmonic_key': main_drum['harmonic_key'],
-                    'start_ms': f_start, 'duration_ms': b_dur + overlap, 'offset_ms': (main_drum.get('loop_start') or 0)*1000, 'stems_path': main_drum.get('stems_path'),
-                    'volume': 1.0 if is_drop else 0.8, 'is_primary': True, 'lane': lane,
-                    'fade_in_ms': 1000 if not is_intro else 4000, 'fade_out_ms': 4000,
-                    'drum_vol': 1.3 if is_drop else 1.0, 'instr_vol': 0.3 if is_drop else 0.6, 
-                    'ducking_depth': 0.3, 'keyframes': p_keys
-                })
+            lane = find_free_lane(f_start, b_dur + overlap, role="percussion", preferred=0)
+            segments.append({
+                'id': main_drum['id'], 'filename': main_drum['filename'], 'file_path': main_drum['file_path'], 'bpm': main_drum['bpm'], 'harmonic_key': main_drum['harmonic_key'],
+                'start_ms': f_start, 'duration_ms': b_dur + overlap, 'offset_ms': (main_drum.get('loop_start') or 0)*1000, 'stems_path': main_drum.get('stems_path'),
+                'volume': 1.0 if is_drop else 0.8, 'is_primary': True, 'lane': lane,
+                'fade_in_ms': 1000 if not is_intro else 4000, 'fade_out_ms': 4000,
+                'drum_vol': 1.3 if is_drop else 1.0, 'instr_vol': 0.3 if is_drop else 0.6, 
+                'ducking_depth': 0.3, 'keyframes': p_keys
+            })
 
             # --- BASS (Lanes 2-3) ---
-            if is_intro or is_drop or is_outro or is_transition or 'verse' in b_name.lower():
-                b_start = current_ms
-                bass_keys = {}
-                if is_intro:
-                    # Filter sweep on bass
-                    bass_keys['low_cut'] = [(0, 1000), (8000, 200), (16000, 20)]
-                    bass_keys['bass_vol'] = [(0, 0.5), (16000, 1.0)]
-                elif is_outro:
-                    # Fade out bass after drums
-                    bass_keys['bass_vol'] = [(b_dur/2, 1.0), (b_dur, 0.0)]
-                    bass_keys['low_cut'] = [(b_dur/2, 20), (b_dur, 800)]
+            b_start = current_ms
+            bass_keys = {}
+            if is_intro:
+                # Filter sweep on bass
+                bass_keys['low_cut'] = [(0, 1000), (8000, 200), (16000, 20)]
+                bass_keys['bass_vol'] = [(0, 0.5), (16000, 1.0)]
+            elif is_outro:
+                # Fade out bass after drums
+                bass_keys['bass_vol'] = [(b_dur/2, 1.0), (b_dur, 0.0)]
+                bass_keys['low_cut'] = [(b_dur/2, 20), (b_dur, 800)]
 
-                lane = find_free_lane(b_start, b_dur + overlap, role="bass", preferred=2)
-                segments.append({
-                    'id': bass_track['id'], 'filename': bass_track['filename'], 'file_path': bass_track['file_path'], 'bpm': bass_track['bpm'], 'harmonic_key': bass_track['harmonic_key'],
-                    'start_ms': b_start, 'duration_ms': b_dur + overlap, 'offset_ms': (bass_track.get('loop_start') or 0)*1000, 'stems_path': bass_track.get('stems_path'),
-                    'volume': 0.8, 'is_primary': False, 'lane': lane, 'fade_in_ms': 3000, 'fade_out_ms': 3000,
-                    'instr_vol': 1.1 if is_drop else 0.8, 'vocal_vol': 0.0, 'bass_vol': 1.2,
-                    'ducking_depth': 0.9 if is_drop else 0.7, 'duck_high': 0.4, 'low_cut': 20,
-                    'keyframes': bass_keys
-                })
+            lane = find_free_lane(b_start, b_dur + overlap, role="bass", preferred=2)
+            segments.append({
+                'id': bass_track['id'], 'filename': bass_track['filename'], 'file_path': bass_track['file_path'], 'bpm': bass_track['bpm'], 'harmonic_key': bass_track['harmonic_key'],
+                'start_ms': b_start, 'duration_ms': b_dur + overlap, 'offset_ms': (bass_track.get('loop_start') or 0)*1000, 'stems_path': bass_track.get('stems_path'),
+                'volume': 0.8, 'is_primary': False, 'lane': lane, 'fade_in_ms': 3000, 'fade_out_ms': 3000,
+                'instr_vol': 1.1 if is_drop else 0.8, 'vocal_vol': 0.0, 'bass_vol': 1.2,
+                'ducking_depth': 0.9 if is_drop else 0.7, 'duck_high': 0.4, 'low_cut': 20,
+                'keyframes': bass_keys
+            })
 
             # --- ATMOSPHERE / AMBIENT (Lanes 6-7) ---
-            # Reduced reliance on pure ambient for intro/outro
-            if is_intro or is_outro:
+            if is_intro or is_outro or is_transition:
                 lane = find_free_lane(current_ms, b_dur + 4000, role="atmosphere", preferred=6)
                 segments.append({
                     'id': -2, 'filename': "NEURAL CLOUD", 'file_path': cloud_path, 'bpm': 120, 'harmonic_key': 'N/A',
@@ -237,15 +234,13 @@ class FullMixOrchestrator:
             
             # --- MELODIC (Lanes 4-5) ---
             if is_intro or is_outro:
-                # Add a filtered version of a lead for intro/outro
+                # Filtered version for definitive edges
                 lead = melodic_leads[0] if is_intro else melodic_leads[-1]
                 m_keys = {}
                 if is_intro:
-                    # Evolving brightness for intro
                     m_keys['high_cut'] = [(0, 500), (b_dur*0.6, 3000), (b_dur, 18000)]
                     m_keys['instr_vol'] = [(0, 0.4), (b_dur, 0.8)]
                 else:
-                    # Dissolving brightness for outro
                     m_keys['high_cut'] = [(0, 18000), (b_dur, 600)]
                     m_keys['instr_vol'] = [(0, 0.8), (b_dur, 0.0)]
                 
@@ -256,7 +251,8 @@ class FullMixOrchestrator:
                     'volume': 0.6, 'lane': lane, 'fade_in_ms': 4000, 'fade_out_ms': 4000,
                     'vocal_vol': 0.0, 'instr_vol': 0.8, 'reverb': 0.6, 'keyframes': m_keys
                 })
-            elif not is_intro and not is_outro:
+            else:
+                # Regular melodic blocks (Verses, Bridges, Drops)
                 lead = melodic_leads[idx % len(melodic_leads)]
                 if is_build:
                     sub_durs = [4000, 4000, 2000, 2000, 1000, 1000, 1000, 1000]; sub_start = 0
@@ -273,11 +269,11 @@ class FullMixOrchestrator:
                         })
                         sub_start += sd
                 else:
-                    ps = -2 if b_name == 'Verse 2' else 0
+                    ps = -2 if 'verse 2' in b_name.lower() else 0
                     v_energy = lead.get('vocal_energy') or 0.0; is_vocal_heavy = v_energy > 0.2
                     stems_path = lead.get('stems_path')
                     
-                    if stems_path and os.path.exists(stems_path) and (b_name == 'Verse 1' or is_drop):
+                    if stems_path and os.path.exists(stems_path) and (is_drop or 'verse 1' in b_name.lower()):
                         # Sidechain Keyframes for Leads
                         m_keys = {}
                         if not is_vocal_heavy:
