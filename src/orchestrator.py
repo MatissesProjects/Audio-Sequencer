@@ -93,12 +93,30 @@ class FullMixOrchestrator:
         all_tracks = cursor.fetchall()
         conn.close()
 
-        if len(all_tracks) < 8: return []
+        if len(all_tracks) < 5: return []
 
-        random.shuffle(all_tracks)
-        all_tracks.sort(key=lambda x: x.get('energy', 0), reverse=True)
-        drums = all_tracks[:int(len(all_tracks)*0.3)]
-        others = all_tracks[int(len(all_tracks)*0.3):]
+        print(f"[AI] Orchestrating Hyper-Mix Depth {depth} (Pool: {len(all_tracks)} clips)")
+
+        # --- INTELLIGENT CATEGORIZATION ---
+        # 1. Vocal Tracks (Explicitly check for stems and energy or transcribed lyrics)
+        vocal_pool = [t for t in all_tracks if ((t.get('vocal_energy') or 0) > 0.02 or t.get('vocal_lyrics')) and t.get('stems_path')]
+        
+        # Log top 5 vocal energy candidates for debugging
+        all_tracks.sort(key=lambda x: x.get('vocal_energy') or 0, reverse=True)
+        print("[AI] Top Vocal Candidates Energy:")
+        for t in all_tracks[:5]:
+            print(f"  - {t['filename']}: {(t.get('vocal_energy') or 0):.4f} (Lyrics: {'Yes' if t.get('vocal_lyrics') else 'No'})")
+
+        # 2. Percussion (High onset density, but exclude vocal tracks)
+        remaining = [t for t in all_tracks if t not in vocal_pool]
+        remaining.sort(key=lambda x: x.get('onset_density') or 0, reverse=True)
+        drums = remaining[:max(1, int(len(remaining)*0.4))]
+        
+        # 3. Others (Melodic/FX)
+        others = [t for t in remaining if t not in drums]
+        if not others: others = all_tracks # Safety fallback
+
+        print(f"[AI] Pool Breakdown -> Vocals: {len(vocal_pool)} | Drums: {len(drums)} | Melodic: {len(others)}")
 
         def rnd_dur(base): return base + (random.randint(-1, 1) * 4000)
 
@@ -125,7 +143,7 @@ class FullMixOrchestrator:
         if seed_track:
             target_bpm = seed_track.get('bpm', 124.0)
 
-        main_drum = random.choice(drums)
+        main_drum = random.choice(drums) if drums else all_tracks[0]
         if seed_track:
             sk = seed_track.get('harmonic_key') or seed_track.get('key')
             if sk:
@@ -134,18 +152,9 @@ class FullMixOrchestrator:
 
         bass_track = random.choice([t for t in others if t['harmonic_key'] == main_drum['harmonic_key']] or [others[0]])
         
-        # Prioritize tracks with vocal energy and extracted stems for leads
-        vocal_tracks = [t for t in others if t.get('vocal_energy', 0) > 0.1 and t.get('stems_path')]
-        non_vocal_tracks = [t for t in others if t not in vocal_tracks]
-        
-        random.shuffle(vocal_tracks)
-        random.shuffle(non_vocal_tracks)
-        
-        sorted_others = vocal_tracks + non_vocal_tracks
-        melodic_leads = sorted_others[:6]
-        
-        # Ensure we have enough tracks for fx (use any remaining or wrap around)
-        fx_tracks = sorted_others[6:10] if len(sorted_others) >= 10 else sorted_others[:4]
+        # Melodic Pool for backgrounds
+        melodic_leads = others[:min(6, len(others))]
+        fx_tracks = others[6:10] if len(others) >= 10 else others[:4]
 
         used_vocal_ids = []
 
@@ -155,7 +164,7 @@ class FullMixOrchestrator:
             try: 
                 source_p = seed_track['file_path'] if seed_track else random.choice(melodic_leads)['file_path']
                 self.processor.generate_grain_cloud(source_p, cloud_path, duration=20.0)
-            except: cloud_path = melodic_leads[0]['file_path']
+            except: cloud_path = main_drum['file_path']
 
         overlap = 4000
 
@@ -200,15 +209,15 @@ class FullMixOrchestrator:
                 p_keys['drum_vol'] = [(0, 1.0), (b_dur/2, 0.0)]
 
             lane = find_free_lane(f_start, b_dur + overlap, role="percussion", preferred=0)
-                            segments.append({
-                                'id': main_drum['id'], 'filename': main_drum['filename'], 'file_path': main_drum['file_path'], 'bpm': main_drum['bpm'], 'harmonic_key': main_drum['harmonic_key'],
-                                'start_ms': f_start, 'duration_ms': b_dur + overlap, 'offset_ms': (main_drum.get('loop_start') or 0)*1000, 'stems_path': main_drum.get('stems_path'),
-                                'vocal_lyrics': main_drum.get('vocal_lyrics'), 'vocal_gender': main_drum.get('vocal_gender'),
-                                'volume': 1.0 if is_drop else 0.8, 'is_primary': True, 'lane': lane,
-                                'fade_in_ms': 1000 if not is_intro else 4000, 'fade_out_ms': 4000,
-                                'drum_vol': 1.3 if is_drop else 1.0, 'instr_vol': 0.3 if is_drop else 0.6, 
-                                'ducking_depth': 0.3, 'keyframes': p_keys
-                            })
+            segments.append({
+                'id': main_drum['id'], 'filename': main_drum['filename'], 'file_path': main_drum['file_path'], 'bpm': main_drum['bpm'], 'harmonic_key': main_drum['harmonic_key'],
+                'start_ms': f_start, 'duration_ms': b_dur + overlap, 'offset_ms': (main_drum.get('loop_start') or 0)*1000, 'stems_path': main_drum.get('stems_path'),
+                'vocal_lyrics': main_drum.get('vocal_lyrics'), 'vocal_gender': main_drum.get('vocal_gender'),
+                'volume': 1.0 if is_drop else 0.8, 'is_primary': True, 'lane': lane,
+                'fade_in_ms': 1000 if not is_intro else 4000, 'fade_out_ms': 4000,
+                'drum_vol': 1.3 if is_drop else 1.0, 'instr_vol': 0.3 if is_drop else 0.6, 
+                'ducking_depth': 0.3, 'keyframes': p_keys
+            })
             # --- BASS (Lanes 2-3) ---
             b_start = current_ms
             bass_keys = {}
@@ -269,18 +278,20 @@ class FullMixOrchestrator:
                 # Regular melodic blocks (Verses, Bridges, Drops)
                 
                 # Vocal Selection Strategy: Try to pick a new vocal track for each block
-                available_vocals = [t for t in vocal_tracks if t['id'] not in used_vocal_ids]
-                if not available_vocals:
+                available_vocals = [t for t in vocal_pool if t['id'] not in used_vocal_ids]
+                if not available_vocals and vocal_pool:
                     # Reset memory if we run out of unique vocalists
                     used_vocal_ids = []
-                    available_vocals = vocal_tracks
+                    available_vocals = vocal_pool
                 
                 if available_vocals:
                     lead = random.choice(available_vocals)
                     used_vocal_ids.append(lead['id'])
+                    print(f"[AI] Block '{b_name}' -> Selected Vocal: {lead['filename']}")
                 else:
                     # Fallback to melodic pool if no vocals at all in library
                     lead = melodic_leads[idx % len(melodic_leads)]
+                    print(f"[AI] Block '{b_name}' -> No vocals found, using melodic: {lead['filename']}")
 
                 if is_build:
                     sub_durs = [4000, 4000, 2000, 2000, 1000, 1000, 1000, 1000]; sub_start = 0
@@ -298,7 +309,7 @@ class FullMixOrchestrator:
                         sub_start += sd
                 else:
                     ps = -2 if 'verse 2' in b_name.lower() else 0
-                    v_energy = lead.get('vocal_energy') or 0.0; is_vocal_heavy = v_energy > 0.2
+                    v_energy = lead.get('vocal_energy') or 0.0; is_vocal_heavy = v_energy > 0.02
                     stems_path = lead.get('stems_path')
                     
                     if stems_path and os.path.exists(stems_path) and (is_drop or 'verse 1' in b_name.lower()):
@@ -440,7 +451,7 @@ class FullMixOrchestrator:
                 n_emb = self.dm.get_embedding(next_track['clp_embedding_id']) if next_track['clp_embedding_id'] else None
                 score = self.scorer.get_total_score(next_track, cand, n_emb, c_emb)['total']
             else:
-                score = cand.get('energy', 0) * 100
+                score = (cand.get('energy') or 0) * 100
             scored.append((score, cand))
         scored.sort(key=lambda x: x[0], reverse=True)
         return scored[0][1] if scored else None

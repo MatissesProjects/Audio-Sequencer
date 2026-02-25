@@ -37,6 +37,7 @@ Always attempt to build anything that needs to be built
 - **Draggable Splitters:** In high-density layouts (Library + Mixer + Timeline), using `QSplitter` is mandatory to prevent automatic layout "shrinking" and allow users to manually balance their workspace.
 
 ### Architectural Best Practices
+- **Robust Data Handling:** When retrieving numeric values from SQLite (which may return `NULL`), always use the `(value or 0)` pattern (e.g., `track.get('energy') or 0`) instead of `get('energy', 0)`. The latter only applies if the key is missing entirely, whereas `NULL` in the database results in a `None` value which will crash sorting and numeric comparisons.
 - **Signal/Slot Decoupling:** Large UI components (like a Timeline) should never call `self.window()`. Instead, they should emit signals (`undoRequested`, `trackDropped`) that the Controller/Main Window handles. This enables modular testing.
 - **Model/View Separation:** Keep audio data structures (`TrackSegment`) in a dedicated `models.py` separate from the painting logic to allow for headless rendering or CLI automation.
 - **Data Robustness:** When adding new analysis fields to a database, always use the `value or 0` (fallback) pattern when loading to ensure compatibility with older tracks that have `NULL` values.

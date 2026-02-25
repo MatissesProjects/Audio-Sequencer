@@ -35,7 +35,9 @@ class TrackSegment:
         self.delay = 0.0 # New: Echo intensity
         self.chorus = 0.0 # New: Thickness intensity
         self.stems_path = track_data.get('stems_path')
-        self.vocal_energy = track_data.get('vocal_energy', 0.0)
+        self.vocal_energy = track_data.get('vocal_energy') or 0.0
+        self.vocal_lyrics = track_data.get('vocal_lyrics')
+        self.vocal_gender = track_data.get('vocal_gender')
         self.vocal_shift = 0 # Independent pitch shift for vocals
         self.harmony_level = 0.0 # 0.0 to 1.0 (Mix of rhythmic harmonic layer)
         self.vocal_vol = 1.0
@@ -116,6 +118,8 @@ class TrackSegment:
             'delay': self.delay, 'chorus': self.chorus,
             'stems_path': self.stems_path,
             'vocal_energy': self.vocal_energy,
+            'vocal_lyrics': self.vocal_lyrics,
+            'vocal_gender': self.vocal_gender,
             'vocal_shift': self.vocal_shift,
             'harmony_level': self.harmony_level,
             'vocal_vol': self.vocal_vol,
