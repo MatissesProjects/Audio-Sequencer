@@ -147,6 +147,8 @@ class FullMixOrchestrator:
         # Ensure we have enough tracks for fx (use any remaining or wrap around)
         fx_tracks = sorted_others[6:10] if len(sorted_others) >= 10 else sorted_others[:4]
 
+        used_vocal_ids = []
+
         os.makedirs("generated_assets", exist_ok=True)
         cloud_path = os.path.abspath(f"generated_assets/grain_cloud_{main_drum['id']}_{random.randint(0,999)}.wav")
         if not os.path.exists(cloud_path):
@@ -265,7 +267,21 @@ class FullMixOrchestrator:
                 })
             else:
                 # Regular melodic blocks (Verses, Bridges, Drops)
-                lead = melodic_leads[idx % len(melodic_leads)]
+                
+                # Vocal Selection Strategy: Try to pick a new vocal track for each block
+                available_vocals = [t for t in vocal_tracks if t['id'] not in used_vocal_ids]
+                if not available_vocals:
+                    # Reset memory if we run out of unique vocalists
+                    used_vocal_ids = []
+                    available_vocals = vocal_tracks
+                
+                if available_vocals:
+                    lead = random.choice(available_vocals)
+                    used_vocal_ids.append(lead['id'])
+                else:
+                    # Fallback to melodic pool if no vocals at all in library
+                    lead = melodic_leads[idx % len(melodic_leads)]
+
                 if is_build:
                     sub_durs = [4000, 4000, 2000, 2000, 1000, 1000, 1000, 1000]; sub_start = 0
                     for c_idx, sd in enumerate(sub_durs):
