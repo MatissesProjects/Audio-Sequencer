@@ -1,4 +1,5 @@
 from PyQt6.QtGui import QColor
+import json
 
 class TrackSegment:
     KEY_COLORS = {
@@ -41,7 +42,6 @@ class TrackSegment:
         self.sections = []
         if 'sections_json' in track_data and track_data['sections_json']:
             try:
-                import json
                 self.sections = json.loads(track_data['sections_json'])
             except:
                 pass
