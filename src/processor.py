@@ -281,8 +281,10 @@ class AudioProcessor:
             times = librosa.frames_to_time(range(len(rms)), sr=sr, hop_length=hop_length)
             
             # Normalize RMS
-            if np.max(rms) > 0:
-                rms = rms / np.max(rms)
+            if rms.size > 0:
+                max_val = np.max(rms)
+                if max_val > 0:
+                    rms = rms / max_val
             
             keyframes = []
             # We add points where energy crosses the sensitivity threshold

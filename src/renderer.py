@@ -198,9 +198,13 @@ def _process_single_segment(s, i, target_bpm, sr, time_range):
                     envelope = np.repeat(rms[::512], 512)[:combined_seg_np.shape[1]]
                     if len(envelope) < combined_seg_np.shape[1]:
                         envelope = np.pad(envelope, (0, combined_seg_np.shape[1]-len(envelope)))
-                    if np.max(envelope) > 0: envelope /= np.max(envelope)
-                    ducking = 1.0 - (envelope * 0.5)
-                    stem_np *= ducking
+                    
+                    if len(envelope) > 0:
+                        max_val = np.max(envelope)
+                        if max_val > 0:
+                            envelope /= max_val
+                        ducking = 1.0 - (envelope * 0.5)
+                        stem_np *= ducking
                 
                 min_l = min(combined_seg_np.shape[1], stem_np.shape[1])
                 combined_seg_np[:, :min_l] += stem_np[:, :min_l]
@@ -337,6 +341,8 @@ class FlowRenderer:
 
     def numpy_to_segment(self, samples, sr):
         """Helper to convert numpy float32 back to pydub segment."""
+        if samples.size == 0:
+            return AudioSegment.empty()
         peak = np.max(np.abs(samples))
         if peak > 1.0:
             samples /= (peak + 1e-6)
@@ -414,8 +420,10 @@ class FlowRenderer:
             
         # Invert envelope for ducking
         # Normalize envelope 0-1
-        if np.max(envelope) > 0:
-            envelope /= np.max(envelope)
+        if len(envelope) > 0:
+            max_val = np.max(envelope)
+            if max_val > 0:
+                envelope /= max_val
             
         # Apply ducking curve: 1.0 - (env * amount)
         ducking_curve = 1.0 - (envelope * amount)
