@@ -533,6 +533,7 @@ class AudioSequencerApp(QMainWindow):
         self.timeline_widget.trackDropped.connect(self.on_track_dropped)
         self.timeline_widget.fillRangeRequested.connect(self.smart_fill_all_gaps)
         self.timeline_widget.stemsRequested.connect(self.request_stem_separation)
+        self.timeline_widget.sidechainRequested.connect(self.auto_generate_sidechain)
         
         self.setStyleSheet("""
             QMainWindow { background-color: #121212; color: #e0e0e0; font-family: 'Segoe UI'; } 
@@ -581,6 +582,53 @@ class AudioSequencerApp(QMainWindow):
     def on_stems_error(self, e):
         self.loading_overlay.hide_loading()
         show_error(self, "Separation Error", "Failed to separate stems on remote 4090.", e)
+
+    def auto_generate_sidechain(self, target_seg, source_lane):
+        # 1. Find tracks on the source lane that overlap with target_seg
+        source_segments = [s for s in self.timeline_widget.segments 
+                           if s.lane == source_lane and s.overlaps_with(target_seg)]
+        
+        if not source_segments:
+            self.status_bar.showMessage("No overlapping tracks found on that lane.")
+            return
+            
+        self.loading_overlay.show_loading("🔗 Calculating Sidechain...")
+        try:
+            self.push_undo()
+            all_pts = []
+            
+            for src in source_segments:
+                # Analyze this specific source's energy
+                # Calculate relative offset for analysis
+                # Source might start before target
+                pts = self.processor.calculate_sidechain_keyframes(src.file_path, src.duration_ms)
+                
+                # Align points to timeline then back to target relative time
+                for src_rel_ms, vol in pts:
+                    abs_ms = src.start_ms + src_rel_ms
+                    target_rel_ms = abs_ms - target_seg.start_ms
+                    
+                    if 0 <= target_rel_ms <= target_seg.duration_ms:
+                        all_pts.append((target_rel_ms, vol))
+            
+            # Write to target
+            if all_pts:
+                # Group by time and take minimum volume if multiple overlap
+                merged = {}
+                for t, v in all_pts:
+                    merged[int(t)] = min(v, merged.get(int(t), 1.0))
+                
+                # Convert back to sorted list
+                final_pts = sorted(merged.items())
+                target_seg.keyframes['volume'] = final_pts
+                
+                self.status_bar.showMessage(f"Generated {len(final_pts)} sidechain keyframes.")
+                self.timeline_widget.update()
+                self.preview_dirty = True
+        except Exception as e:
+            show_error(self, "Sidechain Error", "Failed to generate automation.", e)
+        finally:
+            self.loading_overlay.hide_loading()
 
     def on_track_dropped(self, tid_str, x, y):
         # tid_str might be "tid" or "tid:start:end"
@@ -1564,8 +1612,8 @@ class AudioSequencerApp(QMainWindow):
         
         if self.timeline_widget.segments:
             last_seg = max(self.timeline_widget.segments, key=lambda s: s.get_end_ms())
-            # Use 15% overlap of the last segment's duration
-            overlap_ms = int(last_seg.duration_ms * 0.15)
+            # Use 15 seconds overlap for deep meshing, or 30% of clip if it's very short
+            overlap_ms = min(15000, int(last_seg.duration_ms * 0.30))
             start_ms = last_seg.get_end_ms() - overlap_ms
             
             # If no seed track selected, use properties of the last track for compatibility

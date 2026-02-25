@@ -172,6 +172,7 @@ class TimelineWidget(QWidget):
     duplicateRequested = pyqtSignal(object) # TrackSegment
     captureRequested = pyqtSignal(object) # TrackSegment
     stemsRequested = pyqtSignal(object) # TrackSegment
+    sidechainRequested = pyqtSignal(object, int) # segment, source_lane
     zoomChanged = pyqtSignal(int)
     trackDropped = pyqtSignal(object, int, int) # tid_str, x, y
     fillRangeRequested = pyqtSignal(float, float) # start_ms, end_ms
@@ -683,6 +684,11 @@ class TimelineWidget(QWidget):
                 da_rem = m.addAction("🗑 Remove Track")
                 m.addSeparator()
                 ra_keys = m.addAction("🧹 Remove Keyframes")
+                m.addSeparator()
+                scm = m.addMenu("🔗 Auto-Sidechain to Lane")
+                for i in range(self.lane_count):
+                    la = scm.addAction(f"Lane {i+1}")
+                    la.setData(i)
                 
                 act = m.exec(self.mapToGlobal(event.pos()))
                 
@@ -711,6 +717,8 @@ class TimelineWidget(QWidget):
                 elif act == ra_keys:
                     self.undoRequested.emit()
                     ts.keyframes = {}
+                elif act in scm.actions():
+                    self.sidechainRequested.emit(ts, act.data())
                     
                 if self.selected_segment == ts:
                     self.selected_segment = None

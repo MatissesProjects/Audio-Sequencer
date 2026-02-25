@@ -267,3 +267,37 @@ class AudioProcessor:
             
         return paths
 
+    def calculate_sidechain_keyframes(self, source_path, duration_ms, depth=0.8, sensitivity=0.1):
+        """
+        Analyzes audio energy and returns a list of (ms, volume) keyframes.
+        Perfect for visible, editable sidechaining.
+        """
+        try:
+            y, sr = librosa.load(source_path, sr=22050, duration=duration_ms/1000.0)
+            
+            # Use RMS energy to find peaks
+            hop_length = 512
+            rms = librosa.feature.rms(y=y, hop_length=hop_length)[0]
+            times = librosa.frames_to_time(range(len(rms)), sr=sr, hop_length=hop_length)
+            
+            # Normalize RMS
+            if np.max(rms) > 0:
+                rms = rms / np.max(rms)
+            
+            keyframes = []
+            # We add points where energy crosses the sensitivity threshold
+            # To keep keyframe count reasonable, we sample every ~50ms
+            for i in range(0, len(rms), 4): # Every 4 frames at 22k sr / 512 hop is ~100ms
+                t_ms = times[i] * 1000.0
+                energy = rms[i]
+                
+                # Invert energy for ducking (High energy = Low volume)
+                # target_vol = 1.0 - (energy * depth)
+                val = 1.0 - (min(1.0, energy / sensitivity) * depth)
+                keyframes.append((t_ms, float(val)))
+                
+            return keyframes
+        except Exception as e:
+            print(f"Error calculating sidechain: {e}")
+            return []
+
