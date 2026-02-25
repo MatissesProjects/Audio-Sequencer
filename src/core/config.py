@@ -16,7 +16,7 @@ class AppConfig:
     
     # Remote AI Server (RTX 4090 machine)
     # Set REMOTE_AI_HOST environment variable to switch (e.g., "192.168.1.x")
-    REMOTE_AI_HOST = os.getenv("REMOTE_AI_HOST", "matisse-INTEL") 
+    REMOTE_AI_HOST = os.getenv("REMOTE_AI_HOST", "192.168.4.165") 
     REMOTE_AI_PORT = os.getenv("REMOTE_AI_PORT", "5001")
     REMOTE_GEN_URL = f"http://{REMOTE_AI_HOST}:{REMOTE_AI_PORT}/generate"
     REMOTE_SEP_URL = f"http://{REMOTE_AI_HOST}:{REMOTE_AI_PORT}/separate"
