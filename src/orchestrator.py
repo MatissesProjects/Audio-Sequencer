@@ -189,6 +189,35 @@ class FullMixOrchestrator:
                 if l not in busy_lanes: return l
             return preferred or 0
 
+        def get_best_offset(track, block_type):
+            """Uses MIR section data to find the most appropriate start point."""
+            # Default to stored loop_start
+            default_offset = (track.get('loop_start') or 0) * 1000.0
+            
+            s_json = track.get('sections_json')
+            if not s_json: return default_offset
+            
+            try:
+                import json
+                sections = json.loads(s_json)
+                if not sections: return default_offset
+                
+                # Try to match block type to detected section
+                target = "Verse"
+                bt_l = block_type.lower()
+                if any(k in bt_l for k in ['drop', 'climax', 'finale']): target = "Drop"
+                elif any(k in bt_l for k in ['build', 'riser']): target = "Build"
+                elif any(k in bt_l for k in ['intro', 'start']): target = "Intro"
+                
+                # Find first matching section
+                for s in sections:
+                    if s['label'] == target:
+                        print(f"[AI] Section Match! Track {track['filename']} using {target} at {s['start']:.1f}s")
+                        return s['start'] * 1000.0
+            except:
+                pass
+            return default_offset
+
         for idx, block in enumerate(blocks):
             b_name = block['name']; b_dur = block['dur']
             
@@ -212,7 +241,7 @@ class FullMixOrchestrator:
             lane = find_free_lane(f_start, b_dur + overlap, role="percussion", preferred=0)
             segments.append({
                 'id': main_drum['id'], 'filename': main_drum['filename'], 'file_path': main_drum['file_path'], 'bpm': main_drum['bpm'], 'harmonic_key': main_drum['harmonic_key'],
-                'start_ms': f_start, 'duration_ms': b_dur + overlap, 'offset_ms': (main_drum.get('loop_start') or 0)*1000, 'stems_path': main_drum.get('stems_path'),
+                'start_ms': f_start, 'duration_ms': b_dur + overlap, 'offset_ms': get_best_offset(main_drum, b_name), 'stems_path': main_drum.get('stems_path'),
                 'vocal_lyrics': main_drum.get('vocal_lyrics'), 'vocal_gender': main_drum.get('vocal_gender'),
                 'volume': 1.0 if is_drop else 0.8, 'is_primary': True, 'lane': lane,
                 'fade_in_ms': 1000 if not is_intro else 4000, 'fade_out_ms': 4000,
@@ -234,7 +263,7 @@ class FullMixOrchestrator:
             lane = find_free_lane(b_start, b_dur + overlap, role="bass", preferred=2)
             segments.append({
                 'id': bass_track['id'], 'filename': bass_track['filename'], 'file_path': bass_track['file_path'], 'bpm': bass_track['bpm'], 'harmonic_key': bass_track['harmonic_key'],
-                'start_ms': b_start, 'duration_ms': b_dur + overlap, 'offset_ms': (bass_track.get('loop_start') or 0)*1000, 'stems_path': bass_track.get('stems_path'),
+                'start_ms': b_start, 'duration_ms': b_dur + overlap, 'offset_ms': get_best_offset(bass_track, b_name), 'stems_path': bass_track.get('stems_path'),
                 'vocal_lyrics': bass_track.get('vocal_lyrics'), 'vocal_gender': bass_track.get('vocal_gender'),
                 'volume': 0.8, 'is_primary': False, 'lane': lane, 'fade_in_ms': 3000, 'fade_out_ms': 3000,
                 'instr_vol': 1.1 if is_drop else 0.8, 'vocal_vol': 0.0, 'bass_vol': 1.2,
@@ -270,7 +299,7 @@ class FullMixOrchestrator:
                 lane = find_free_lane(current_ms, b_dur + overlap, role="melodic")
                 segments.append({
                     'id': lead['id'], 'filename': f"{lead['filename']} ({'INTRO' if is_intro else 'OUTRO'})", 'file_path': lead['file_path'], 'bpm': lead['bpm'], 'harmonic_key': lead['harmonic_key'],
-                    'start_ms': current_ms, 'duration_ms': b_dur + overlap, 'offset_ms': (lead.get('loop_start') or 0)*1000, 'stems_path': lead.get('stems_path'),
+                    'start_ms': current_ms, 'duration_ms': b_dur + overlap, 'offset_ms': get_best_offset(lead, b_name), 'stems_path': lead.get('stems_path'),
                     'vocal_lyrics': lead.get('vocal_lyrics'), 'vocal_gender': lead.get('vocal_gender'),
                     'volume': 0.6, 'lane': lane, 'fade_in_ms': 4000, 'fade_out_ms': 4000,
                     'vocal_vol': 0.0, 'instr_vol': 0.8, 'reverb': 0.6, 'keyframes': m_keys
@@ -323,20 +352,20 @@ class FullMixOrchestrator:
 
                         segments.append({
                             'id': lead['id'], 'filename': f"{lead['filename']} (BASS)", 'file_path': lead['file_path'], 'bpm': lead['bpm'], 'harmonic_key': lead['harmonic_key'],
-                            'start_ms': current_ms, 'duration_ms': b_dur + overlap, 'offset_ms': (lead.get('loop_start') or 0)*1000, 'stems_path': stems_path,
+                            'start_ms': current_ms, 'duration_ms': b_dur + overlap, 'offset_ms': get_best_offset(lead, b_name), 'stems_path': stems_path,
                             'volume': 0.9, 'lane': find_free_lane(current_ms, b_dur + overlap, role="bass"), 'pitch_shift': ps, 'fade_in_ms': 4000, 'fade_out_ms': 4000,
                             'vocal_vol': 0.0, 'drum_vol': 0.0, 'bass_vol': 1.2, 'instr_vol': 0.0, 'ducking_depth': 0.5, 'keyframes': {}
                         })
                         segments.append({
                             'id': lead['id'], 'filename': f"{lead['filename']} (DRUMS)", 'file_path': lead['file_path'], 'bpm': lead['bpm'], 'harmonic_key': lead['harmonic_key'],
-                            'start_ms': current_ms + 4000, 'duration_ms': b_dur + overlap - 4000, 'offset_ms': ((lead.get('loop_start') or 0) + 4)*1000, 'stems_path': stems_path,
+                            'start_ms': current_ms + 4000, 'duration_ms': b_dur + overlap - 4000, 'offset_ms': get_best_offset(lead, b_name) + 4000, 'stems_path': stems_path,
                             'vocal_lyrics': lead.get('vocal_lyrics'), 'vocal_gender': lead.get('vocal_gender'),
                             'volume': 1.0, 'lane': find_free_lane(current_ms + 4000, b_dur + overlap - 4000, role="percussion"), 'pitch_shift': ps, 'fade_in_ms': 2000, 'fade_out_ms': 4000,
                             'vocal_vol': 0.0, 'drum_vol': 1.1, 'bass_vol': 0.0, 'instr_vol': 0.0, 'is_primary': True, 'keyframes': {}
                         })
                         segments.append({
                             'id': lead['id'], 'filename': f"{lead['filename']} (LEAD)", 'file_path': lead['file_path'], 'bpm': lead['bpm'], 'harmonic_key': lead['harmonic_key'],
-                            'start_ms': current_ms + 8000, 'duration_ms': b_dur + overlap - 8000, 'offset_ms': ((lead.get('loop_start') or 0) + 8)*1000, 'stems_path': stems_path,
+                            'start_ms': current_ms + 8000, 'duration_ms': b_dur + overlap - 8000, 'offset_ms': get_best_offset(lead, b_name) + 8000, 'stems_path': stems_path,
                             'vocal_lyrics': lead.get('vocal_lyrics'), 'vocal_gender': lead.get('vocal_gender'),
                             'volume': 0.8, 'lane': find_free_lane(current_ms + 8000, b_dur + overlap - 8000, role="melodic"), 'pitch_shift': ps, 'fade_in_ms': 4000, 'fade_out_ms': 4000,
                             'vocal_vol': 1.3 if is_vocal_heavy else 0.0, 'drum_vol': 0.0, 'bass_vol': 0.0, 'instr_vol': 1.0, 'duck_low': 0.4,
@@ -352,7 +381,7 @@ class FullMixOrchestrator:
                             except: pass
                         segments.append({
                             'id': lead['id'], 'filename': lead['filename'], 'file_path': lead['file_path'], 'bpm': lead['bpm'], 'harmonic_key': lead['harmonic_key'],
-                            'start_ms': current_ms, 'duration_ms': b_dur + overlap, 'offset_ms': (lead.get('loop_start') or 0)*1000, 'stems_path': lead.get('stems_path'),
+                            'start_ms': current_ms, 'duration_ms': b_dur + overlap, 'offset_ms': get_best_offset(lead, b_name), 'stems_path': lead.get('stems_path'),
                             'vocal_lyrics': lead.get('vocal_lyrics'), 'vocal_gender': lead.get('vocal_gender'),
                             'volume': 0.85 if is_vocal_heavy else 0.7, 'pan': 0.0, 'lane': lane, 'pitch_shift': ps, 'low_cut': 400, 'fade_in_ms': 4000, 'fade_out_ms': 4000,
                             'vocal_vol': 1.3 if is_vocal_heavy else 0.8, 'instr_vol': 0.4 if is_vocal_heavy else 0.9, 'bass_vol': 0.6 if is_vocal_heavy else 0.8,
@@ -366,7 +395,7 @@ class FullMixOrchestrator:
                             lane = find_free_lane(current_ms, b_dur + overlap, role="atmosphere")
                             segments.append({
                                 'id': lead['id'], 'filename': f"{lead['filename']} (H{s_shift:+})", 'file_path': lead['file_path'], 'bpm': lead['bpm'], 'harmonic_key': lead['harmonic_key'],
-                                'start_ms': current_ms, 'duration_ms': b_dur + overlap, 'offset_ms': (lead.get('loop_start') or 0)*1000, 'stems_path': lead.get('stems_path'),
+                                'start_ms': current_ms, 'duration_ms': b_dur + overlap, 'offset_ms': get_best_offset(lead, b_name), 'stems_path': lead.get('stems_path'),
                                 'volume': 0.4, 'pan': -0.7 if s_shift > 0 else 0.7, 'lane': lane, 'pitch_shift': ps, 'low_cut': 800, 'fade_in_ms': 5000, 'fade_out_ms': 5000,
                                 'vocal_vol': 1.0 if is_vocal_heavy else 0.0, 'instr_vol': 0.0 if is_vocal_heavy else 0.8, 'bass_vol': 0.0, 'vocal_shift': s_shift, 'ducking_depth': 0.8, 'reverb': 0.5, 'duck_low': 0.1, 'duck_mid': 0.6,
                                 'keyframes': {}
