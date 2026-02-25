@@ -84,7 +84,7 @@ class FullMixOrchestrator:
         print(f"SUCCESS: Hyper-journey created at {os.path.abspath(output_path)}")
         return output_path
 
-    def get_hyper_segments(self, seed_track=None, start_time_ms=0):
+    def get_hyper_segments(self, seed_track=None, start_time_ms=0, depth=0):
         """Returns organized segment data for a hyper-mix."""
         conn = self.dm.get_conn()
         conn.row_factory = lambda cursor, row: {col[0]: row[idx] for idx, col in enumerate(cursor.description)}
@@ -102,15 +102,8 @@ class FullMixOrchestrator:
 
         def rnd_dur(base): return base + (random.randint(-1, 1) * 4000)
 
-        is_extension = start_time_ms > 0
-        blocks = [
-            {'name': 'Intro' if not is_extension else 'Connect', 'dur': 16000},
-            {'name': 'Verse 1', 'dur': rnd_dur(32000)},
-            {'name': 'Build', 'dur': 16000},
-            {'name': 'Drop', 'dur': rnd_dur(32000)},
-            {'name': 'Verse 2', 'dur': rnd_dur(32000)},
-            {'name': 'Outro', 'dur': 20000}
-        ]
+        # Get dynamic structure from generator
+        blocks = self.generator.get_journey_structure(depth=depth)
 
         segments = []
         current_ms = start_time_ms
@@ -162,8 +155,12 @@ class FullMixOrchestrator:
 
         for idx, block in enumerate(blocks):
             b_name = block['name']; b_dur = block['dur']
-            is_drop = (b_name == 'Drop'); is_build = (b_name == 'Build'); is_intro = (b_name == 'Intro')
-            is_outro = (b_name == 'Outro')
+            
+            # More flexible block detection based on keywords
+            is_drop = any(k in b_name.lower() for k in ['drop', 'finale', 'climax'])
+            is_build = any(k in b_name.lower() for k in ['build', 'riser', 'tension'])
+            is_intro = any(k in b_name.lower() for k in ['intro', 'connect', 'start'])
+            is_outro = any(k in b_name.lower() for k in ['outro', 'fade', 'end', 'transition'])
 
             # --- PERCUSSION (Lanes 0-1) ---
             if b_name != 'Outro' or b_name == 'Outro':
@@ -337,7 +334,9 @@ class FullMixOrchestrator:
         # --- PHASE 2: AI Generative Asset Injection ---
         build_end_ms = 0; running_ms = start_time_ms
         for b in blocks:
-            if b['name'] == 'Build':
+            b_name_l = b['name'].lower()
+            is_b = any(k in b_name_l for k in ['build', 'riser', 'tension'])
+            if is_b:
                 build_end_ms = running_ms + b['dur']
                 break
             running_ms += (b['dur'] - overlap)

@@ -1609,6 +1609,7 @@ class AudioSequencerApp(QMainWindow):
         
         start_ms = 0
         seed = self.selected_library_track
+        depth = 0
         
         if self.timeline_widget.segments:
             last_seg = max(self.timeline_widget.segments, key=lambda s: s.get_end_ms())
@@ -1616,6 +1617,9 @@ class AudioSequencerApp(QMainWindow):
             overlap_ms = min(15000, int(last_seg.duration_ms * 0.30))
             start_ms = last_seg.get_end_ms() - overlap_ms
             
+            # Estimate depth based on total journey time (approx 150s per 'song')
+            depth = int(last_seg.get_end_ms() / 150000) + 1
+
             # If no seed track selected, use properties of the last track for compatibility
             if not seed:
                 seed = {
@@ -1626,12 +1630,12 @@ class AudioSequencerApp(QMainWindow):
                 }
             
         self.push_undo()
-        self.loading_overlay.show_loading("Synthesizing Hyper-Mix...")
+        self.loading_overlay.show_loading(f"Synthesizing Hyper-Mix (Journey Depth {depth})...")
         
         try:
             # Sync orchestrator lane count with current timeline state
             self.orchestrator.lane_count = self.timeline_widget.lane_count
-            h_segs = self.orchestrator.get_hyper_segments(seed_track=seed, start_time_ms=start_ms)
+            h_segs = self.orchestrator.get_hyper_segments(seed_track=seed, start_time_ms=start_ms, depth=depth)
             if h_segs:
                 for sd in h_segs:
                     seg = self.timeline_widget.add_track(sd, start_ms=sd['start_ms'], lane=sd['lane'])
