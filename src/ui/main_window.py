@@ -136,9 +136,9 @@ class AudioSequencerApp(QMainWindow):
         self.embed_btn.clicked.connect(self.run_embedding)
         la.addWidget(self.embed_btn)
         
-        self.vocals_btn = QPushButton("🎤 Vocals")
-        self.vocals_btn.clicked.connect(self.run_vocal_analysis)
-        la.addWidget(self.vocals_btn)
+        self.pro_scan_btn = QPushButton("🚀 Pro Scan")
+        self.pro_scan_btn.clicked.connect(self.run_pro_scan)
+        la.addWidget(self.pro_scan_btn)
         
         ll.addLayout(la)
         
@@ -1850,33 +1850,79 @@ class AudioSequencerApp(QMainWindow):
             self.loading_overlay.hide_loading()
             show_error(self, "AI Error", "Failed.", e)
 
-    def run_vocal_analysis(self):
-        self.loading_overlay.show_loading("AI Vocal Analysis...")
+    def run_pro_scan(self):
+        self.loading_overlay.show_loading("4090 Pro Analysis...", total=100)
         try:
             from src.vocal_analyzer import VocalAnalyzer
             va = VocalAnalyzer()
+            from src.core.config import AppConfig
+            import requests
+            import json
+            
             conn = self.dm.get_conn()
             cursor = conn.cursor()
-            # Find tracks with some vocal energy but no transcribed lyrics
-            cursor.execute("SELECT id, stems_path FROM tracks WHERE vocal_energy > 0.05 AND (vocal_lyrics IS NULL OR vocal_lyrics = '')")
-            tracks = cursor.fetchall()
             
-            analyzed = 0
-            for tid, s_path in tracks:
-                if s_path and os.path.exists(os.path.join(s_path, "vocals.wav")):
-                    res = va.analyze_vocals(os.path.join(s_path, "vocals.wav"))
-                    if res and res.get("lyrics"):
-                        cursor.execute("UPDATE tracks SET vocal_lyrics = ?, vocal_gender = ? WHERE id = ?", 
-                                       (res["lyrics"], res["gender"], tid))
-                        analyzed += 1
+            # 1. Identify what needs scanning
+            # Find tracks missing vocal lyrics OR missing sections_json
+            cursor.execute("SELECT id, stems_path, file_path, vocal_energy, vocal_lyrics, sections_json FROM tracks")
+            all_tracks = cursor.fetchall()
             
-            conn.commit()
+            to_analyze_vocals = [t for t in all_tracks if (t[3] or 0) > 0.02 and (not t[4])]
+            to_analyze_sections = [t for t in all_tracks if (not t[5] or t[5] == "[]")]
+            
+            targets = list(set([t[0] for t in to_analyze_vocals] + [t[0] for t in to_analyze_sections]))
+            
+            print(f"[PRO] Starting batch scan. Vocals: {len(to_analyze_vocals)} | Sections: {len(to_analyze_sections)}")
+            
+            analyzed_count = 0
+            for tid in targets:
+                track = next(t for t in all_tracks if t[0] == tid)
+                tid, s_path, f_path, v_energy, v_lyrics, s_json = track
+                
+                # Update progress
+                pct = int((analyzed_count / max(1, len(targets))) * 100)
+                self.loading_overlay.set_progress(pct)
+                self.status_bar.showMessage(f"Pro Scan: {os.path.basename(f_path)}...")
+
+                # A. Vocal Analysis (if needed)
+                new_lyrics = None
+                new_gender = None
+                if tid in [t[0] for t in to_analyze_vocals]:
+                    v_stem = os.path.join(s_path, "vocals.wav") if s_path else ""
+                    if os.path.exists(v_stem):
+                        res = va.analyze_vocals(v_stem)
+                        new_lyrics = res.get("lyrics")
+                        new_gender = res.get("gender")
+                
+                # B. Section Analysis (if needed)
+                new_sections = None
+                if tid in [t[0] for t in to_analyze_sections]:
+                    try:
+                        with open(f_path, 'rb') as f:
+                            r = requests.post(AppConfig.REMOTE_SECTIONS_URL, files={'file': f}, timeout=20)
+                        if r.status_code == 200:
+                            new_sections = json.dumps(r.json().get("sections", []))
+                    except Exception as e:
+                        print(f"Section skip {tid}: {e}")
+
+                # C. Save back to DB
+                if new_lyrics or new_gender or new_sections:
+                    if new_lyrics and new_sections:
+                        cursor.execute("UPDATE tracks SET vocal_lyrics = ?, vocal_gender = ?, sections_json = ? WHERE id = ?", (new_lyrics, new_gender, new_sections, tid))
+                    elif new_lyrics:
+                        cursor.execute("UPDATE tracks SET vocal_lyrics = ?, vocal_gender = ? WHERE id = ?", (new_lyrics, new_gender, tid))
+                    elif new_sections:
+                        cursor.execute("UPDATE tracks SET sections_json = ? WHERE id = ?", (new_sections, tid))
+                    conn.commit()
+                
+                analyzed_count += 1
+
             conn.close()
             self.loading_overlay.hide_loading()
-            QMessageBox.information(self, "Complete", f"Vocal Analysis Complete.\n{analyzed} tracks analyzed.")
+            QMessageBox.information(self, "Complete", f"4090 Pro Scan Complete.\nProcessed {analyzed_count} tracks.")
         except Exception as e:
             self.loading_overlay.hide_loading()
-            show_error(self, "Vocal AI Error", "Failed.", e)
+            show_error(self, "Pro Scan Error", "Failed.", e)
 
     def update_recommendations(self, tid):
         if not self.scorer:
