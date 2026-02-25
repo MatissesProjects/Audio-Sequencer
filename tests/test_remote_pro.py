@@ -17,8 +17,7 @@ def test_pro_features():
         return
 
     # 1. Test Spectral Pad
-    print("
-1. Testing Spectral Pad-ification...")
+    print("1. Testing Spectral Pad-ification...")
     try:
         with open(test_file, 'rb') as f:
             r = requests.post(AppConfig.REMOTE_PAD_URL, files={'file': f}, data={'duration': 5.0})
@@ -32,8 +31,7 @@ def test_pro_features():
         print(f"❌ Spectral Pad Error: {e}")
 
     # 2. Test Harmonization
-    print("
-2. Testing Neural Harmonization...")
+    print("2. Testing Neural Harmonization...")
     try:
         # For test, we use the same file (assuming it has some vocal-like content)
         with open(test_file, 'rb') as f:
@@ -48,8 +46,7 @@ def test_pro_features():
         print(f"❌ Harmonization Error: {e}")
 
     # 3. Test Structural Analysis
-    print("
-3. Testing Structural Analysis (Deep MIR)...")
+    print("3. Testing Structural Analysis (Deep MIR)...")
     try:
         with open(test_file, 'rb') as f:
             r = requests.post(AppConfig.REMOTE_SECTIONS_URL, files={'file': f})
