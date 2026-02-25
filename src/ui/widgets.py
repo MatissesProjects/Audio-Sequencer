@@ -202,7 +202,7 @@ class TimelineWidget(QWidget):
         self.cursor_pos_ms = 0
         self.show_waveforms = True
         self.snap_to_grid = True
-        self.lane_count = 8
+        self.lane_count = 20
         self.mutes = [False] * self.lane_count
         self.solos = [False] * self.lane_count
         self.loop_start_ms = 0

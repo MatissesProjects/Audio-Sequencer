@@ -21,7 +21,7 @@ class FullMixOrchestrator:
         self.renderer = FlowRenderer()
         self.generator = TransitionGenerator()
         self.min_score_threshold = 55.0
-        self.lane_count = 8
+        self.lane_count = 20
 
     def find_curated_sequence(self, max_tracks=6, seed_track=None):
         """Finds a high-compatibility path, starting from a seed if provided."""
@@ -171,10 +171,10 @@ class FullMixOrchestrator:
 
         def find_free_lane(start, dur, role="melodic", preferred=None):
             neighborhoods = {
-                "percussion": [0, 1, 8],
-                "bass": [2, 3, 9],
-                "melodic": [4, 5, 10],
-                "atmosphere": [6, 7, 11]
+                "percussion": [0, 1, 8, 12, 16],
+                "bass": [2, 3, 9, 13, 17],
+                "melodic": [4, 5, 10, 14, 18],
+                "atmosphere": [6, 7, 11, 15, 19]
             }
             candidates = neighborhoods.get(role, neighborhoods["melodic"])
             busy_lanes = set()
