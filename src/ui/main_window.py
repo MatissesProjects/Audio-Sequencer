@@ -135,6 +135,11 @@ class AudioSequencerApp(QMainWindow):
         self.embed_btn = QPushButton("🧠 AI Index")
         self.embed_btn.clicked.connect(self.run_embedding)
         la.addWidget(self.embed_btn)
+        
+        self.vocals_btn = QPushButton("🎤 Vocals")
+        self.vocals_btn.clicked.connect(self.run_vocal_analysis)
+        la.addWidget(self.vocals_btn)
+        
         ll.addLayout(la)
         
         sl = QHBoxLayout()
@@ -174,6 +179,12 @@ class AudioSequencerApp(QMainWindow):
         self.l_wave_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.l_wave_label.setStyleSheet("color: #666; font-size: 10px;")
         ll.addWidget(self.l_wave_label)
+
+        self.l_lyrics_label = QLabel("")
+        self.l_lyrics_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.l_lyrics_label.setWordWrap(True)
+        self.l_lyrics_label.setStyleSheet("color: #88a; font-size: 10px; font-style: italic;")
+        ll.addWidget(self.l_lyrics_label)
         top_layout.addWidget(lp)
         
         # 2. Production Mixer & Analytics (Middle)
@@ -1389,15 +1400,24 @@ class AudioSequencerApp(QMainWindow):
             try:
                 conn = self.dm.get_conn()
                 cursor = conn.cursor()
-                cursor.execute("SELECT file_path FROM tracks WHERE id = ?", (tid,))
-                fp = cursor.fetchone()[0]
+                cursor.execute("SELECT file_path, vocal_lyrics, vocal_gender FROM tracks WHERE id = ?", (tid,))
+                row = cursor.fetchone()
+                fp = row[0]
+                lyrics = row[1]
+                gender = row[2]
                 conn.close()
                 w = self.processor.get_waveform_envelope(fp)
                 self.l_preview.set_waveform(w)
                 self.l_wave_label.setText(os.path.basename(fp))
+                
+                lyric_text = ""
+                if gender: lyric_text += f"[{gender}] "
+                if lyrics: lyric_text += f'"{lyrics}"'
+                self.l_lyrics_label.setText(lyric_text)
+                
                 self.player.setSource(QUrl.fromLocalFile(os.path.abspath(fp)))
-            except:
-                pass
+            except Exception as e:
+                print(f"Library selection error: {e}")
 
     def audition_selected_clip(self):
         sel = self.timeline_widget.selected_segment
@@ -1825,6 +1845,34 @@ class AudioSequencerApp(QMainWindow):
         except Exception as e:
             self.loading_overlay.hide_loading()
             show_error(self, "AI Error", "Failed.", e)
+
+    def run_vocal_analysis(self):
+        self.loading_overlay.show_loading("AI Vocal Analysis...")
+        try:
+            from src.vocal_analyzer import VocalAnalyzer
+            va = VocalAnalyzer()
+            conn = self.dm.get_conn()
+            cursor = conn.cursor()
+            # Find tracks with some vocal energy but no transcribed lyrics
+            cursor.execute("SELECT id, stems_path FROM tracks WHERE vocal_energy > 0.05 AND (vocal_lyrics IS NULL OR vocal_lyrics = '')")
+            tracks = cursor.fetchall()
+            
+            analyzed = 0
+            for tid, s_path in tracks:
+                if s_path and os.path.exists(os.path.join(s_path, "vocals.wav")):
+                    res = va.analyze_vocals(os.path.join(s_path, "vocals.wav"))
+                    if res and res.get("lyrics"):
+                        cursor.execute("UPDATE tracks SET vocal_lyrics = ?, vocal_gender = ? WHERE id = ?", 
+                                       (res["lyrics"], res["gender"], tid))
+                        analyzed += 1
+            
+            conn.commit()
+            conn.close()
+            self.loading_overlay.hide_loading()
+            QMessageBox.information(self, "Complete", f"Vocal Analysis Complete.\n{analyzed} tracks analyzed.")
+        except Exception as e:
+            self.loading_overlay.hide_loading()
+            show_error(self, "Vocal AI Error", "Failed.", e)
 
     def update_recommendations(self, tid):
         if not self.scorer:
