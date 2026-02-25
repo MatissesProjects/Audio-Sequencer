@@ -476,6 +476,28 @@ class TimelineWidget(QWidget):
                     if 0 <= adj <= seg.duration_ms:
                         tx = rect.left() + int(adj * self.pixels_per_ms)
                         painter.drawLine(tx, rect.top() + 5, tx, rect.bottom() - 5)
+
+            # --- Visual Section Markers (Remote MIR) ---
+            if hasattr(seg, 'sections') and seg.sections:
+                s_f = self.target_bpm / seg.bpm
+                for sec in seg.sections:
+                    s_ms = sec['start'] * 1000.0
+                    adj = (s_ms - seg.offset_ms) * s_f
+                    if 0 <= adj <= seg.duration_ms:
+                        tx = rect.left() + int(adj * self.pixels_per_ms)
+                        label = sec['label'].upper()
+                        
+                        # Style based on section type
+                        if label == "DROP": s_color = QColor(255, 50, 50, 180)
+                        elif label == "BUILD": s_color = QColor(255, 200, 0, 180)
+                        else: s_color = QColor(255, 255, 255, 100)
+                        
+                        painter.setPen(QPen(s_color, 1, Qt.PenStyle.DashLine))
+                        painter.drawLine(tx, rect.top(), tx, rect.bottom())
+                        
+                        painter.setPen(s_color)
+                        painter.setFont(QFont("Segoe UI", 7, QFont.Weight.Bold))
+                        painter.drawText(tx + 3, rect.bottom() - 5, label)
                         
             fi_w = int(seg.fade_in_ms * self.pixels_per_ms)
             fo_w = int(seg.fade_out_ms * self.pixels_per_ms)
@@ -768,6 +790,14 @@ class TimelineWidget(QWidget):
             for seg in self.segments:
                 r = self.get_seg_rect(seg)
                 if r.contains(event.pos()):
+                    # Tooltip for vocals
+                    if hasattr(seg, 'vocal_lyrics') and (seg.vocal_lyrics or seg.vocal_gender):
+                        tip = ""
+                        if seg.vocal_gender: tip += f"[{seg.vocal_gender}] "
+                        if seg.vocal_lyrics: tip += f'"{seg.vocal_lyrics}"'
+                        from PyQt6.QtWidgets import QToolTip
+                        QToolTip.showText(event.globalPosition().toPoint(), tip, self)
+
                     if event.position().x() < (r.left() + 20) or event.position().x() > (r.right() - 20):
                         self.setCursor(Qt.CursorShape.SizeHorCursor)
                         over_edge = True
