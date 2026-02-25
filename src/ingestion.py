@@ -53,6 +53,18 @@ class IngestionEngine:
             stems_dir = AppConfig.get_stems_path(features['filename'])
             self.processor.separate_stems(file_path, stems_dir)                
             
+            # Vocal Analysis
+            vocal_lyrics = None
+            vocal_gender = None
+            if features.get('vocal_energy', 0) > 0.1:
+                vocal_path = os.path.join(stems_dir, "vocals.wav")
+                if os.path.exists(vocal_path):
+                    from src.vocal_analyzer import VocalAnalyzer
+                    va = VocalAnalyzer()
+                    res = va.analyze_vocals(vocal_path)
+                    vocal_lyrics = res.get("lyrics")
+                    vocal_gender = res.get("gender")
+
             # Update DB with stems_path
             cursor.execute("UPDATE tracks SET stems_path = ? WHERE file_path = ?", (os.path.abspath(stems_dir), abs_path))
             
@@ -61,15 +73,21 @@ class IngestionEngine:
                     INSERT INTO tracks (
                         file_path, filename, duration, sample_rate, 
                         bpm, harmonic_key, energy, onset_density,
-                        loop_start, loop_duration, onsets_json, stems_path, vocal_energy
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        loop_start, loop_duration, onsets_json, stems_path, vocal_energy, vocal_lyrics, vocal_gender
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     features['file_path'], features['filename'], features['duration'],
                     features['sample_rate'], features['bpm'], features['harmonic_key'],
                     features['energy'], features.get('onset_density', 0),
                     features.get('loop_start', 0), features.get('loop_duration', 0),
-                    features['onsets_json'], os.path.abspath(stems_dir), features.get('vocal_energy', 0)
+                    features['onsets_json'], os.path.abspath(stems_dir), features.get('vocal_energy', 0),
+                    vocal_lyrics, vocal_gender
                 ))
+            else:
+                 cursor.execute('''
+                    UPDATE tracks SET vocal_lyrics = ?, vocal_gender = ? WHERE file_path = ?
+                 ''', (vocal_lyrics, vocal_gender, abs_path))
+                 
             conn.commit()
         except Exception as e:
             print(f"Error processing {file_path}: {e}")

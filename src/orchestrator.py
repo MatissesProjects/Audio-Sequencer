@@ -133,9 +133,19 @@ class FullMixOrchestrator:
                 if comp_drums: main_drum = random.choice(comp_drums)
 
         bass_track = random.choice([t for t in others if t['harmonic_key'] == main_drum['harmonic_key']] or [others[0]])
-        random.shuffle(others)
-        melodic_leads = others[:6]
-        fx_tracks = others[6:10]
+        
+        # Prioritize tracks with vocal energy and extracted stems for leads
+        vocal_tracks = [t for t in others if t.get('vocal_energy', 0) > 0.1 and t.get('stems_path')]
+        non_vocal_tracks = [t for t in others if t not in vocal_tracks]
+        
+        random.shuffle(vocal_tracks)
+        random.shuffle(non_vocal_tracks)
+        
+        sorted_others = vocal_tracks + non_vocal_tracks
+        melodic_leads = sorted_others[:6]
+        
+        # Ensure we have enough tracks for fx (use any remaining or wrap around)
+        fx_tracks = sorted_others[6:10] if len(sorted_others) >= 10 else sorted_others[:4]
 
         os.makedirs("generated_assets", exist_ok=True)
         cloud_path = os.path.abspath(f"generated_assets/grain_cloud_{main_drum['id']}_{random.randint(0,999)}.wav")
@@ -188,15 +198,15 @@ class FullMixOrchestrator:
                 p_keys['drum_vol'] = [(0, 1.0), (b_dur/2, 0.0)]
 
             lane = find_free_lane(f_start, b_dur + overlap, role="percussion", preferred=0)
-            segments.append({
-                'id': main_drum['id'], 'filename': main_drum['filename'], 'file_path': main_drum['file_path'], 'bpm': main_drum['bpm'], 'harmonic_key': main_drum['harmonic_key'],
-                'start_ms': f_start, 'duration_ms': b_dur + overlap, 'offset_ms': (main_drum.get('loop_start') or 0)*1000, 'stems_path': main_drum.get('stems_path'),
-                'volume': 1.0 if is_drop else 0.8, 'is_primary': True, 'lane': lane,
-                'fade_in_ms': 1000 if not is_intro else 4000, 'fade_out_ms': 4000,
-                'drum_vol': 1.3 if is_drop else 1.0, 'instr_vol': 0.3 if is_drop else 0.6, 
-                'ducking_depth': 0.3, 'keyframes': p_keys
-            })
-
+                            segments.append({
+                                'id': main_drum['id'], 'filename': main_drum['filename'], 'file_path': main_drum['file_path'], 'bpm': main_drum['bpm'], 'harmonic_key': main_drum['harmonic_key'],
+                                'start_ms': f_start, 'duration_ms': b_dur + overlap, 'offset_ms': (main_drum.get('loop_start') or 0)*1000, 'stems_path': main_drum.get('stems_path'),
+                                'vocal_lyrics': main_drum.get('vocal_lyrics'), 'vocal_gender': main_drum.get('vocal_gender'),
+                                'volume': 1.0 if is_drop else 0.8, 'is_primary': True, 'lane': lane,
+                                'fade_in_ms': 1000 if not is_intro else 4000, 'fade_out_ms': 4000,
+                                'drum_vol': 1.3 if is_drop else 1.0, 'instr_vol': 0.3 if is_drop else 0.6, 
+                                'ducking_depth': 0.3, 'keyframes': p_keys
+                            })
             # --- BASS (Lanes 2-3) ---
             b_start = current_ms
             bass_keys = {}
@@ -213,6 +223,7 @@ class FullMixOrchestrator:
             segments.append({
                 'id': bass_track['id'], 'filename': bass_track['filename'], 'file_path': bass_track['file_path'], 'bpm': bass_track['bpm'], 'harmonic_key': bass_track['harmonic_key'],
                 'start_ms': b_start, 'duration_ms': b_dur + overlap, 'offset_ms': (bass_track.get('loop_start') or 0)*1000, 'stems_path': bass_track.get('stems_path'),
+                'vocal_lyrics': bass_track.get('vocal_lyrics'), 'vocal_gender': bass_track.get('vocal_gender'),
                 'volume': 0.8, 'is_primary': False, 'lane': lane, 'fade_in_ms': 3000, 'fade_out_ms': 3000,
                 'instr_vol': 1.1 if is_drop else 0.8, 'vocal_vol': 0.0, 'bass_vol': 1.2,
                 'ducking_depth': 0.9 if is_drop else 0.7, 'duck_high': 0.4, 'low_cut': 20,
@@ -248,6 +259,7 @@ class FullMixOrchestrator:
                 segments.append({
                     'id': lead['id'], 'filename': f"{lead['filename']} ({'INTRO' if is_intro else 'OUTRO'})", 'file_path': lead['file_path'], 'bpm': lead['bpm'], 'harmonic_key': lead['harmonic_key'],
                     'start_ms': current_ms, 'duration_ms': b_dur + overlap, 'offset_ms': (lead.get('loop_start') or 0)*1000, 'stems_path': lead.get('stems_path'),
+                    'vocal_lyrics': lead.get('vocal_lyrics'), 'vocal_gender': lead.get('vocal_gender'),
                     'volume': 0.6, 'lane': lane, 'fade_in_ms': 4000, 'fade_out_ms': 4000,
                     'vocal_vol': 0.0, 'instr_vol': 0.8, 'reverb': 0.6, 'keyframes': m_keys
                 })
@@ -290,12 +302,14 @@ class FullMixOrchestrator:
                         segments.append({
                             'id': lead['id'], 'filename': f"{lead['filename']} (DRUMS)", 'file_path': lead['file_path'], 'bpm': lead['bpm'], 'harmonic_key': lead['harmonic_key'],
                             'start_ms': current_ms + 4000, 'duration_ms': b_dur + overlap - 4000, 'offset_ms': ((lead.get('loop_start') or 0) + 4)*1000, 'stems_path': stems_path,
+                            'vocal_lyrics': lead.get('vocal_lyrics'), 'vocal_gender': lead.get('vocal_gender'),
                             'volume': 1.0, 'lane': find_free_lane(current_ms + 4000, b_dur + overlap - 4000, role="percussion"), 'pitch_shift': ps, 'fade_in_ms': 2000, 'fade_out_ms': 4000,
                             'vocal_vol': 0.0, 'drum_vol': 1.1, 'bass_vol': 0.0, 'instr_vol': 0.0, 'is_primary': True, 'keyframes': {}
                         })
                         segments.append({
                             'id': lead['id'], 'filename': f"{lead['filename']} (LEAD)", 'file_path': lead['file_path'], 'bpm': lead['bpm'], 'harmonic_key': lead['harmonic_key'],
                             'start_ms': current_ms + 8000, 'duration_ms': b_dur + overlap - 8000, 'offset_ms': ((lead.get('loop_start') or 0) + 8)*1000, 'stems_path': stems_path,
+                            'vocal_lyrics': lead.get('vocal_lyrics'), 'vocal_gender': lead.get('vocal_gender'),
                             'volume': 0.8, 'lane': find_free_lane(current_ms + 8000, b_dur + overlap - 8000, role="melodic"), 'pitch_shift': ps, 'fade_in_ms': 4000, 'fade_out_ms': 4000,
                             'vocal_vol': 1.3 if is_vocal_heavy else 0.0, 'drum_vol': 0.0, 'bass_vol': 0.0, 'instr_vol': 1.0, 'duck_low': 0.4,
                             'ducking_depth': 0.2 if is_vocal_heavy else 0.7,
@@ -311,6 +325,7 @@ class FullMixOrchestrator:
                         segments.append({
                             'id': lead['id'], 'filename': lead['filename'], 'file_path': lead['file_path'], 'bpm': lead['bpm'], 'harmonic_key': lead['harmonic_key'],
                             'start_ms': current_ms, 'duration_ms': b_dur + overlap, 'offset_ms': (lead.get('loop_start') or 0)*1000, 'stems_path': lead.get('stems_path'),
+                            'vocal_lyrics': lead.get('vocal_lyrics'), 'vocal_gender': lead.get('vocal_gender'),
                             'volume': 0.85 if is_vocal_heavy else 0.7, 'pan': 0.0, 'lane': lane, 'pitch_shift': ps, 'low_cut': 400, 'fade_in_ms': 4000, 'fade_out_ms': 4000,
                             'vocal_vol': 1.3 if is_vocal_heavy else 0.8, 'instr_vol': 0.4 if is_vocal_heavy else 0.9, 'bass_vol': 0.6 if is_vocal_heavy else 0.8,
                             'vocal_shift': 12 if is_drop and is_vocal_heavy else 0, 'ducking_depth': 0.15 if is_vocal_heavy else 0.75, 'harmony_level': 0.4 if is_drop else 0.1, 'duck_low': 0.1 if is_vocal_heavy else 0.5,

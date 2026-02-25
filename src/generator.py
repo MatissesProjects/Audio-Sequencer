@@ -31,14 +31,23 @@ class TransitionGenerator:
         bpm_a = track_a.get('bpm', 120)
         key_a = track_a.get('harmonic_key') or track_a.get('key') or 'Unknown'
         name_a = track_a.get('filename', 'Track A')
+        lyrics_a = track_a.get('vocal_lyrics')
         
         bpm_b = track_b.get('bpm', 120)
         key_b = track_b.get('harmonic_key') or track_b.get('key') or 'Unknown'
         name_b = track_b.get('filename', 'Track B')
+        lyrics_b = track_b.get('vocal_lyrics')
+
+        lyrics_context = ""
+        if lyrics_a or lyrics_b:
+            lyrics_context = "Consider the lyrics/vocals to make the transition make narrative sense:\n"
+            if lyrics_a: lyrics_context += f"Track A Lyrics: '{lyrics_a}'\n"
+            if lyrics_b: lyrics_context += f"Track B Lyrics: '{lyrics_b}'\n"
 
         prompt = f"""
         Analyze these two tracks and describe a 4-second audio transition to bridge them.
         {type_context}
+        {lyrics_context}
         Track A: {name_a}, {bpm_a} BPM, Key: {key_a}
         Track B: {name_b}, {bpm_b} BPM, Key: {key_b}
         
@@ -46,7 +55,7 @@ class TransitionGenerator:
         'noise_type' (white, pink, or brown),
         'filter_type' (lowpass or highpass),
         'reverb_amount' (float 0.0 to 1.0),
-        'prompt' (A text prompt for MusicGen generation, e.g. 'heavy sub bass impact with reverb in {key_b}, {bpm_b} bpm'),
+        'prompt' (A text prompt for MusicGen generation, e.g. 'heavy sub bass impact with reverb in {key_b}, {bpm_b} bpm. If vocals are present, match their thematic vibe.'),
         'description' (brief vibe description).
         """
         try:
