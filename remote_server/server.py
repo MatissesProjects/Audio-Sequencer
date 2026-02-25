@@ -171,7 +171,7 @@ def generate():
             top_k=top_k,
             top_p=top_p,
             temperature=temperature,
-            cfg_coeff=cfg_coef
+            cfg_coef=cfg_coef
         )
         
         # Multi-prompt generation (if array provided)
