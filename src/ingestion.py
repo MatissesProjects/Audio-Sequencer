@@ -65,6 +65,9 @@ class IngestionEngine:
                     vocal_lyrics = res.get("lyrics")
                     vocal_gender = res.get("gender")
 
+            import json
+            sections_json = json.dumps(features.get('sections', []))
+
             # Update DB with stems_path
             cursor.execute("UPDATE tracks SET stems_path = ? WHERE file_path = ?", (os.path.abspath(stems_dir), abs_path))
             
@@ -73,20 +76,20 @@ class IngestionEngine:
                     INSERT INTO tracks (
                         file_path, filename, duration, sample_rate, 
                         bpm, harmonic_key, energy, onset_density,
-                        loop_start, loop_duration, onsets_json, stems_path, vocal_energy, vocal_lyrics, vocal_gender
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        loop_start, loop_duration, onsets_json, stems_path, vocal_energy, vocal_lyrics, vocal_gender, sections_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     features['file_path'], features['filename'], features['duration'],
                     features['sample_rate'], features['bpm'], features['harmonic_key'],
                     features['energy'], features.get('onset_density', 0),
                     features.get('loop_start', 0), features.get('loop_duration', 0),
                     features['onsets_json'], os.path.abspath(stems_dir), features.get('vocal_energy', 0),
-                    vocal_lyrics, vocal_gender
+                    vocal_lyrics, vocal_gender, sections_json
                 ))
             else:
                  cursor.execute('''
-                    UPDATE tracks SET vocal_lyrics = ?, vocal_gender = ? WHERE file_path = ?
-                 ''', (vocal_lyrics, vocal_gender, abs_path))
+                    UPDATE tracks SET vocal_lyrics = ?, vocal_gender = ?, sections_json = ? WHERE file_path = ?
+                 ''', (vocal_lyrics, vocal_gender, sections_json, abs_path))
                  
             conn.commit()
         except Exception as e:

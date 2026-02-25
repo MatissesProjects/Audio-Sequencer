@@ -199,6 +199,33 @@ class AudioProcessor:
         sf.write(output_path, output, sr)
         return output_path
 
+    def generate_spectral_pad_remote(self, source_path, output_path, duration=20.0):
+        """Calls remote 4090 for high-fidelity spectral blurring."""
+        from src.core.config import AppConfig
+        url = AppConfig.REMOTE_PAD_URL
+        
+        try:
+            import requests
+            print(f"Requesting Remote Spectral Pad: {os.path.basename(source_path)}...")
+            with open(source_path, 'rb') as f:
+                response = requests.post(
+                    url,
+                    files={'file': f},
+                    data={'duration': duration},
+                    timeout=60
+                )
+            
+            if response.status_code == 200:
+                with open(output_path, 'wb') as f:
+                    f.write(response.content)
+                return output_path
+            else:
+                print(f"Remote pad failed ({response.status_code}). Using grain cloud fallback.")
+        except Exception as e:
+            print(f"Remote pad error: {e}. Using grain cloud fallback.")
+            
+        return self.generate_grain_cloud(source_path, output_path, duration=duration)
+
     def separate_stems(self, input_path, output_dir):
         """
         Extracts stems using high-quality remote Demucs OR local HPSS fallback.

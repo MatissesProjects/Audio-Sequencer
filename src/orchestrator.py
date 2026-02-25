@@ -159,11 +159,12 @@ class FullMixOrchestrator:
         used_vocal_ids = []
 
         os.makedirs("generated_assets", exist_ok=True)
-        cloud_path = os.path.abspath(f"generated_assets/grain_cloud_{main_drum['id']}_{random.randint(0,999)}.wav")
+        cloud_path = os.path.abspath(f"generated_assets/spectral_pad_{main_drum['id']}_{random.randint(0,999)}.wav")
         if not os.path.exists(cloud_path):
             try: 
                 source_p = seed_track['file_path'] if seed_track else random.choice(melodic_leads)['file_path']
-                self.processor.generate_grain_cloud(source_p, cloud_path, duration=20.0)
+                # Use high-fidelity remote pad if possible
+                self.processor.generate_spectral_pad_remote(source_p, cloud_path, duration=20.0)
             except: cloud_path = main_drum['file_path']
 
         overlap = 4000

@@ -8,3 +8,5 @@ soundfile
 faster-whisper
 librosa
 numpy
+pedalboard
+scipy

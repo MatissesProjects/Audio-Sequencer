@@ -38,6 +38,13 @@ class TrackSegment:
         self.vocal_energy = track_data.get('vocal_energy') or 0.0
         self.vocal_lyrics = track_data.get('vocal_lyrics')
         self.vocal_gender = track_data.get('vocal_gender')
+        self.sections = []
+        if 'sections_json' in track_data and track_data['sections_json']:
+            try:
+                import json
+                self.sections = json.loads(track_data['sections_json'])
+            except:
+                pass
         self.vocal_shift = 0 # Independent pitch shift for vocals
         self.harmony_level = 0.0 # 0.0 to 1.0 (Mix of rhythmic harmonic layer)
         self.vocal_vol = 1.0
@@ -120,6 +127,7 @@ class TrackSegment:
             'vocal_energy': self.vocal_energy,
             'vocal_lyrics': self.vocal_lyrics,
             'vocal_gender': self.vocal_gender,
+            'sections_json': json.dumps(self.sections),
             'vocal_shift': self.vocal_shift,
             'harmony_level': self.harmony_level,
             'vocal_vol': self.vocal_vol,

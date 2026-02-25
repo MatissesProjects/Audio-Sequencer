@@ -21,6 +21,10 @@ class AppConfig:
     REMOTE_GEN_URL = f"http://{REMOTE_AI_HOST}:{REMOTE_AI_PORT}/generate"
     REMOTE_SEP_URL = f"http://{REMOTE_AI_HOST}:{REMOTE_AI_PORT}/separate"
     REMOTE_ANALYZE_URL = f"http://{REMOTE_AI_HOST}:{REMOTE_AI_PORT}/analyze"
+    REMOTE_PAD_URL = f"http://{REMOTE_AI_HOST}:{REMOTE_AI_PORT}/process/pad"
+    REMOTE_SECTIONS_URL = f"http://{REMOTE_AI_HOST}:{REMOTE_AI_PORT}/analyze/sections"
+    REMOTE_HARMONIZE_URL = f"http://{REMOTE_AI_HOST}:{REMOTE_AI_PORT}/process/harmonize"
+    REMOTE_CONTINUE_URL = f"http://{REMOTE_AI_HOST}:{REMOTE_AI_PORT}/process/continue"
     
     # Ollama Settings (Local AI on remote 4090)
     OLLAMA_URL = f"http://{REMOTE_AI_HOST}:11434/api/generate"

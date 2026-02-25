@@ -41,7 +41,8 @@ class DataManager:
                 stems_path TEXT, -- New: Path to directory containing extracted stems
                 vocal_energy REAL, -- New: Detected vocal prominence
                 vocal_lyrics TEXT, -- New: Transcribed lyrics
-                vocal_gender TEXT -- New: Detected gender
+                vocal_gender TEXT, -- New: Detected gender
+                sections_json TEXT -- New: Structural sections metadata
             )
         ''')
         
@@ -66,6 +67,9 @@ class DataManager:
         except sqlite3.OperationalError: pass
         try:
             cursor.execute("ALTER TABLE tracks ADD COLUMN vocal_gender TEXT")
+        except sqlite3.OperationalError: pass
+        try:
+            cursor.execute("ALTER TABLE tracks ADD COLUMN sections_json TEXT")
         except sqlite3.OperationalError: pass
         
         conn.commit()

@@ -47,8 +47,20 @@ class AnalysisModule:
         loop_start, loop_dur = self.detect_best_loop(y, sr, beat_times, bars=4)
 
         # 5. Vocal Prominence (Mid-range energy vs total)
-        # 300Hz to 3000Hz is where most vocal energy sits
         vocal_energy = self.detect_vocal_prominence(y, sr)
+
+        # 6. Deep Structural MIR (Remote)
+        sections = []
+        try:
+            from src.core.config import AppConfig
+            import requests
+            print(f"Requesting Remote Structural Analysis for: {os.path.basename(file_path)}...")
+            with open(file_path, 'rb') as f:
+                r = requests.post(AppConfig.REMOTE_SECTIONS_URL, files={'file': f}, timeout=15)
+            if r.status_code == 200:
+                sections = r.json().get("sections", [])
+        except:
+            pass
 
         return {
             "file_path": os.path.abspath(file_path),
@@ -62,7 +74,8 @@ class AnalysisModule:
             "vocal_energy": vocal_energy,
             "onset_density": onset_density,
             "loop_start": loop_start,
-            "loop_duration": loop_dur
+            "loop_duration": loop_dur,
+            "sections": sections
         }
 
     def detect_vocal_prominence(self, y, sr):
