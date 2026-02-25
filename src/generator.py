@@ -30,7 +30,8 @@ class TransitionGenerator:
         try:
             import requests
             full_prompt = f"{system_instruction}\n\n{prompt}" if system_instruction else prompt
-            print(f"[AI] Calling Ollama ({self.ollama_model})...")
+            print(f"[AI] Attempting Ollama connection: {self.ollama_url} (Model: {self.ollama_model})")
+            
             response = requests.post(
                 self.ollama_url,
                 json={
@@ -39,24 +40,29 @@ class TransitionGenerator:
                     "stream": False,
                     "format": "json"
                 },
-                timeout=30
+                timeout=15 # Reduced timeout for faster fallback detection
             )
             if response.status_code == 200:
+                print(f"[AI] Ollama Success.")
                 return response.json().get("response")
+            else:
+                print(f"[AI] Ollama returned error status {response.status_code}: {response.text}")
+        except requests.exceptions.Timeout:
+            print(f"[AI] Ollama connection timed out at {self.ollama_url}")
         except Exception as e:
-            print(f"[AI] Ollama error: {e}")
+            print(f"[AI] Ollama connection failed: {e}")
 
         # 2. Gemini Fallback
         if self.client:
             try:
-                print("[AI] Calling Gemini (Fallback)...")
+                print("[AI] Falling back to Gemini...")
                 response = self.client.models.generate_content(
                     model="gemini-2.0-flash",
                     contents=prompt
                 )
                 return response.text
             except Exception as e:
-                print(f"[AI] Gemini error: {e}")
+                print(f"[AI] Gemini fallback error: {e}")
         
         return None
 
