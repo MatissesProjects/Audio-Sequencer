@@ -9,7 +9,19 @@ from src.core.config import AppConfig
 
 def test_pro_features():
     print("--- 🚀 4090 Pro Feature Test ---")
+    print(f"Target Host: {AppConfig.REMOTE_AI_HOST}")
     
+    # 0. Test Name Resolution
+    print("\n0. Testing Hostname Resolution...")
+    try:
+        import socket
+        ip = socket.gethostbyname(AppConfig.REMOTE_AI_HOST)
+        print(f"✅ Resolved '{AppConfig.REMOTE_AI_HOST}' to {ip}")
+    except Exception as e:
+        print(f"❌ FAILED to resolve '{AppConfig.REMOTE_AI_HOST}': {e}")
+        print("💡 Suggestion: Try using the IP address directly in REMOTE_AI_HOST.")
+        return
+
     # Use an example file if available, otherwise skip
     test_file = "musicExamples/track_1771971118.mp3"
     if not os.path.exists(test_file):

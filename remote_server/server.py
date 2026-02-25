@@ -92,6 +92,7 @@ def analyze():
 @app.route('/analyze/sections', methods=['POST'])
 def analyze_sections():
     """Identifies musical sections (Intro, Verse, Build, Drop) using spectral clustering."""
+    print(f"[REQ] /analyze/sections from {request.remote_addr}")
     if 'file' not in request.files:
         return "No file part", 400
     
@@ -151,13 +152,18 @@ def analyze_sections():
 @app.route('/process/pad', methods=['POST'])
 def process_pad():
     """Transforms audio into a lush spectral pad using GPU-accelerated blurring."""
+    print(f"[REQ] /process/pad from {request.remote_addr}")
     if 'file' not in request.files:
-        return "No file part", 400
+        print("[ERR] No file part in request")
+        return "Missing 'file' parameter (multipart/form-data expected)", 400
     
     file = request.files['file']
-    duration = float(request.form.get('duration', 10.0))
+    if file.filename == '':
+        print("[ERR] Empty filename")
+        return "No selected file", 400
     
-    with tempfile.TemporaryDirectory() as tmpdir:
+    duration = float(request.form.get('duration', 10.0))
+    print(f"[PROC] Generating {duration}s spectral pad for {file.filename}...")
         input_path = os.path.join(tmpdir, "input.wav")
         file.save(input_path)
         
@@ -210,6 +216,7 @@ def process_pad():
 @app.route('/process/harmonize', methods=['POST'])
 def harmonize_vocals():
     """Generates a 3-part backing harmony for a vocal stem."""
+    print(f"[REQ] /process/harmonize from {request.remote_addr}")
     if 'file' not in request.files:
         return "No file part", 400
     

@@ -1851,12 +1851,27 @@ class AudioSequencerApp(QMainWindow):
             show_error(self, "AI Error", "Failed.", e)
 
     def run_pro_scan(self):
-        self.loading_overlay.show_loading("4090 Pro Analysis...", total=100)
+        self.loading_overlay.show_loading("Verifying Connection...")
         try:
-            from src.vocal_analyzer import VocalAnalyzer
-            va = VocalAnalyzer()
             from src.core.config import AppConfig
             import requests
+            import socket
+            
+            # Fast check for hostname resolution
+            try:
+                socket.gethostbyname(AppConfig.REMOTE_AI_HOST)
+            except Exception as e:
+                raise Exception(f"Could not find machine '{AppConfig.REMOTE_AI_HOST}' on your network.\n\nTry using the machine's IP address in settings.")
+
+            # Ping the server
+            try:
+                requests.get(f"http://{AppConfig.REMOTE_AI_HOST}:{AppConfig.REMOTE_AI_PORT}/", timeout=3)
+            except:
+                raise Exception(f"4090 Server is reachable but not responding on port {AppConfig.REMOTE_AI_PORT}.\n\nIs the server script running on the other machine?")
+
+            self.loading_overlay.show_loading("4090 Pro Analysis...", total=100)
+            from src.vocal_analyzer import VocalAnalyzer
+            va = VocalAnalyzer()
             import json
             
             conn = self.dm.get_conn()
@@ -1916,6 +1931,8 @@ class AudioSequencerApp(QMainWindow):
                     conn.commit()
                 
                 analyzed_count += 1
+                import time
+                time.sleep(0.5) # Prevent socket flooding on the 4090 server
 
             conn.close()
             self.loading_overlay.hide_loading()
