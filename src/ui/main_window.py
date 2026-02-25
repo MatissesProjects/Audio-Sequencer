@@ -472,6 +472,11 @@ class AudioSequencerApp(QMainWindow):
         self.h_mix_btn.setStyleSheet("background-color: #528;")
         self.h_mix_btn.clicked.connect(self.auto_populate_hyper_mix)
         th.addWidget(self.h_mix_btn)
+
+        self.h_mix_end_btn = QPushButton("🏁 Hyper-Mix Ending")
+        self.h_mix_end_btn.setStyleSheet("background-color: #258;")
+        self.h_mix_end_btn.clicked.connect(self.auto_populate_hyper_mix_ending)
+        th.addWidget(self.h_mix_end_btn)
         
         self.fill_btn = QPushButton("🩹 Fill Gaps")
         self.fill_btn.setStyleSheet("background-color: #264;")
@@ -1662,6 +1667,65 @@ class AudioSequencerApp(QMainWindow):
                     self.load_waveform_async(seg)
                 self.timeline_widget.update_geometry()
                 self.status_bar.showMessage(f"AI: Appended Hyper-Mix structure to the journey.")
+            self.loading_overlay.hide_loading()
+        except Exception as e:
+            self.loading_overlay.hide_loading()
+            show_error(self, "Hyper Error", "Failed.", e)
+
+    def auto_populate_hyper_mix_ending(self):
+        if not self.ai_enabled:
+            QMessageBox.warning(self, "AI Disabled", "AI Engine Offline.")
+            return
+        
+        if not self.timeline_widget.segments:
+            QMessageBox.information(self, "Empty", "Add some segments first to end the journey.")
+            return
+
+        last_seg = max(self.timeline_widget.segments, key=lambda s: s.get_end_ms())
+        overlap_ms = min(15000, int(last_seg.duration_ms * 0.30))
+        start_ms = last_seg.get_end_ms() - overlap_ms
+        
+        seed = self.selected_library_track
+        if not seed:
+            seed = {
+                'id': last_seg.id,
+                'file_path': last_seg.file_path,
+                'bpm': last_seg.bpm,
+                'harmonic_key': last_seg.key
+            }
+
+        self.push_undo()
+        self.loading_overlay.show_loading("Finalizing the Journey...")
+        
+        try:
+            self.orchestrator.lane_count = self.timeline_widget.lane_count
+            h_segs = self.orchestrator.get_hyper_segments(seed_track=seed, start_time_ms=start_ms, force_ending=True)
+            if h_segs:
+                for sd in h_segs:
+                    seg = self.timeline_widget.add_track(sd, start_ms=sd['start_ms'], lane=sd['lane'])
+                    seg.duration_ms = sd['duration_ms']
+                    seg.offset_ms = sd['offset_ms']
+                    seg.volume = sd['volume']
+                    seg.pan = sd.get('pan', 0.0)
+                    seg.is_primary = sd.get('is_primary', False)
+                    seg.pitch_shift = sd.get('pitch_shift', 0)
+                    seg.low_cut = sd.get('low_cut', 20)
+                    seg.high_cut = sd.get('high_cut', 20000)
+                    seg.fade_in_ms = sd['fade_in_ms']
+                    seg.fade_out_ms = sd['fade_out_ms']
+                    # New props
+                    seg.vocal_vol = sd.get('vocal_vol', 1.0)
+                    seg.drum_vol = sd.get('drum_vol', 1.0)
+                    seg.instr_vol = sd.get('instr_vol', 1.0)
+                    seg.ducking_depth = sd.get('ducking_depth', 0.7)
+                    seg.reverb = sd.get('reverb', 0.0)
+                    seg.harmony_level = sd.get('harmony_level', 0.0)
+                    seg.vocal_shift = sd.get('vocal_shift', 0)
+                    seg.keyframes = sd.get('keyframes', {})
+                    
+                    self.load_waveform_async(seg)
+                self.timeline_widget.update_geometry()
+                self.status_bar.showMessage(f"AI: Grand Finale appended to the journey.")
             self.loading_overlay.hide_loading()
         except Exception as e:
             self.loading_overlay.hide_loading()

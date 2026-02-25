@@ -66,40 +66,16 @@ class TransitionGenerator:
     def get_journey_structure(self, depth=0):
         """Asks Gemini for a musically logical sequence of blocks for the current depth."""
         if not self.client:
-            # Fallback deterministic structures
-            if depth == 0:
-                return [
-                    {'name': 'Intro', 'dur': 16000},
-                    {'name': 'Verse 1', 'dur': 32000},
-                    {'name': 'Build', 'dur': 16000},
-                    {'name': 'Drop', 'dur': 32000},
-                    {'name': 'Verse 2', 'dur': 32000},
-                    {'name': 'Outro', 'dur': 20000}
-                ]
-            elif depth == 1:
-                return [
-                    {'name': 'Connect', 'dur': 8000},
-                    {'name': 'Verse 3', 'dur': 32000},
-                    {'name': 'Bridge', 'dur': 24000},
-                    {'name': 'Build', 'dur': 16000},
-                    {'name': 'Power Drop', 'dur': 48000},
-                    {'name': 'Transition', 'dur': 12000}
-                ]
-            else:
-                return [
-                    {'name': 'Connect', 'dur': 16000},
-                    {'name': 'Atmospheric Breakdown', 'dur': 32000},
-                    {'name': 'Build', 'dur': 16000},
-                    {'name': 'Grand Finale', 'dur': 64000},
-                    {'name': 'Extended Outro', 'dur': 40000}
-                ]
+            return self.get_journey_structure_fallback(depth=depth)
 
         prompt = f"""
         Suggest a list of musical blocks for an AI-generated music journey at depth {depth}.
         Depth 0 is the start of the mix. Depth 1+ are extensions.
         
+        CRITICAL: If depth > 0, do NOT include an 'Outro' or 'End' block. Instead, end with a 'Transition' or 'Connector' block so the journey can continue.
+        
         Provide ONLY valid JSON output as a list of objects with keys:
-        'name' (e.g., Intro, Verse, Build, Drop, Bridge, Connect, Outro),
+        'name' (e.g., Intro, Verse, Build, Drop, Bridge, Connect, Transition),
         'dur' (duration in milliseconds, usually multiples of 4000 or 8000).
         
         Ensure the structure flows logically from the previous sections.
@@ -116,7 +92,36 @@ class TransitionGenerator:
         except Exception as e:
             print(f"Structure Gemini error: {e}")
         
-        return self.get_journey_structure(depth=-1) # Recursive call to fallback logic
+        return self.get_journey_structure_fallback(depth=depth)
+
+    def get_journey_structure_fallback(self, depth=0):
+        """Fallback deterministic structures if Gemini fails."""
+        if depth == 0:
+            return [
+                {'name': 'Intro', 'dur': 16000},
+                {'name': 'Verse 1', 'dur': 32000},
+                {'name': 'Build', 'dur': 16000},
+                {'name': 'Drop', 'dur': 32000},
+                {'name': 'Verse 2', 'dur': 32000},
+                {'name': 'Outro', 'dur': 20000}
+            ]
+        elif depth == 1:
+            return [
+                {'name': 'Connect', 'dur': 8000},
+                {'name': 'Verse 3', 'dur': 32000},
+                {'name': 'Bridge', 'dur': 24000},
+                {'name': 'Build', 'dur': 16000},
+                {'name': 'Power Drop', 'dur': 48000},
+                {'name': 'Transition', 'dur': 12000}
+            ]
+        else:
+            return [
+                {'name': 'Connect', 'dur': 16000},
+                {'name': 'Atmospheric Breakdown', 'dur': 32000},
+                {'name': 'Build', 'dur': 16000},
+                {'name': 'Grand Finale', 'dur': 64000},
+                {'name': 'Transition', 'dur': 12000}
+            ]
 
     def generate_riser(self, duration_sec, bpm, output_path, params=None):
         """Generates a procedural noise riser OR calls remote 4090 for neural riser."""

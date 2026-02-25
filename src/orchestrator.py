@@ -84,7 +84,7 @@ class FullMixOrchestrator:
         print(f"SUCCESS: Hyper-journey created at {os.path.abspath(output_path)}")
         return output_path
 
-    def get_hyper_segments(self, seed_track=None, start_time_ms=0, depth=0):
+    def get_hyper_segments(self, seed_track=None, start_time_ms=0, depth=0, force_ending=False):
         """Returns organized segment data for a hyper-mix."""
         conn = self.dm.get_conn()
         conn.row_factory = lambda cursor, row: {col[0]: row[idx] for idx, col in enumerate(cursor.description)}
@@ -103,7 +103,21 @@ class FullMixOrchestrator:
         def rnd_dur(base): return base + (random.randint(-1, 1) * 4000)
 
         # Get dynamic structure from generator
-        blocks = self.generator.get_journey_structure(depth=depth)
+        if force_ending:
+            blocks = [
+                {'name': 'Connect', 'dur': 8000},
+                {'name': 'Pre-Finale Build', 'dur': 16000},
+                {'name': 'Grand Finale', 'dur': 32000},
+                {'name': 'Extended Outro', 'dur': 24000}
+            ]
+        else:
+            blocks = self.generator.get_journey_structure(depth=depth)
+            # If not forcing ending and not depth 0, ensure it doesn't end with a definitive "Outro"
+            if depth > 0:
+                for b in blocks:
+                    if 'outro' in b['name'].lower():
+                        b['name'] = 'Transition'
+                        b['dur'] = 8000
 
         segments = []
         current_ms = start_time_ms
@@ -160,10 +174,11 @@ class FullMixOrchestrator:
             is_drop = any(k in b_name.lower() for k in ['drop', 'finale', 'climax'])
             is_build = any(k in b_name.lower() for k in ['build', 'riser', 'tension'])
             is_intro = any(k in b_name.lower() for k in ['intro', 'connect', 'start'])
-            is_outro = any(k in b_name.lower() for k in ['outro', 'fade', 'end', 'transition'])
+            is_outro = any(k in b_name.lower() for k in ['outro', 'fade', 'end'])
+            is_transition = any(k in b_name.lower() for k in ['transition', 'bridge'])
 
             # --- PERCUSSION (Lanes 0-1) ---
-            if b_name != 'Outro' or b_name == 'Outro':
+            if not is_outro or is_outro: # Drums usually present unless definitive outro
                 f_start = current_ms
                 p_keys = {}
                 if is_intro:
@@ -184,7 +199,7 @@ class FullMixOrchestrator:
                 })
 
             # --- BASS (Lanes 2-3) ---
-            if b_name in ['Intro', 'Verse 1', 'Drop', 'Verse 2', 'Outro']:
+            if is_intro or is_drop or is_outro or is_transition or 'verse' in b_name.lower():
                 b_start = current_ms
                 bass_keys = {}
                 if is_intro:
@@ -265,9 +280,10 @@ class FullMixOrchestrator:
                     if stems_path and os.path.exists(stems_path) and (b_name == 'Verse 1' or is_drop):
                         # Sidechain Keyframes for Leads
                         m_keys = {}
-                        try:
-                            m_keys['volume'] = self.processor.calculate_sidechain_keyframes(main_drum['file_path'], b_dur + overlap)
-                        except: pass
+                        if not is_vocal_heavy:
+                            try:
+                                m_keys['volume'] = self.processor.calculate_sidechain_keyframes(main_drum['file_path'], b_dur + overlap)
+                            except: pass
 
                         segments.append({
                             'id': lead['id'], 'filename': f"{lead['filename']} (BASS)", 'file_path': lead['file_path'], 'bpm': lead['bpm'], 'harmonic_key': lead['harmonic_key'],
@@ -286,20 +302,22 @@ class FullMixOrchestrator:
                             'start_ms': current_ms + 8000, 'duration_ms': b_dur + overlap - 8000, 'offset_ms': ((lead.get('loop_start') or 0) + 8)*1000, 'stems_path': stems_path,
                             'volume': 0.8, 'lane': find_free_lane(current_ms + 8000, b_dur + overlap - 8000, role="melodic"), 'pitch_shift': ps, 'fade_in_ms': 4000, 'fade_out_ms': 4000,
                             'vocal_vol': 1.3 if is_vocal_heavy else 0.0, 'drum_vol': 0.0, 'bass_vol': 0.0, 'instr_vol': 1.0, 'duck_low': 0.4,
+                            'ducking_depth': 0.2 if is_vocal_heavy else 0.7,
                             'keyframes': m_keys
                         })
                     else:
                         lane = find_free_lane(current_ms, b_dur + overlap, role="melodic")
                         m_keys = {}
-                        try:
-                            m_keys['volume'] = self.processor.calculate_sidechain_keyframes(main_drum['file_path'], b_dur + overlap)
-                        except: pass
+                        if not is_vocal_heavy:
+                            try:
+                                m_keys['volume'] = self.processor.calculate_sidechain_keyframes(main_drum['file_path'], b_dur + overlap)
+                            except: pass
                         segments.append({
                             'id': lead['id'], 'filename': lead['filename'], 'file_path': lead['file_path'], 'bpm': lead['bpm'], 'harmonic_key': lead['harmonic_key'],
                             'start_ms': current_ms, 'duration_ms': b_dur + overlap, 'offset_ms': (lead.get('loop_start') or 0)*1000, 'stems_path': lead.get('stems_path'),
                             'volume': 0.85 if is_vocal_heavy else 0.7, 'pan': 0.0, 'lane': lane, 'pitch_shift': ps, 'low_cut': 400, 'fade_in_ms': 4000, 'fade_out_ms': 4000,
                             'vocal_vol': 1.3 if is_vocal_heavy else 0.8, 'instr_vol': 0.4 if is_vocal_heavy else 0.9, 'bass_vol': 0.6 if is_vocal_heavy else 0.8,
-                            'vocal_shift': 12 if is_drop and is_vocal_heavy else 0, 'ducking_depth': 0.4 if is_vocal_heavy else 0.75, 'harmony_level': 0.4 if is_drop else 0.1, 'duck_low': 0.2 if is_vocal_heavy else 0.5,
+                            'vocal_shift': 12 if is_drop and is_vocal_heavy else 0, 'ducking_depth': 0.15 if is_vocal_heavy else 0.75, 'harmony_level': 0.4 if is_drop else 0.1, 'duck_low': 0.1 if is_vocal_heavy else 0.5,
                             'keyframes': m_keys
                         })
 
