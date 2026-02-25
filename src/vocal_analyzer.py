@@ -19,6 +19,8 @@ class VocalAnalyzer:
             self.client = None
         
         self.remote_url = AppConfig.REMOTE_ANALYZE_URL
+        self.ollama_url = AppConfig.OLLAMA_URL
+        self.ollama_model = AppConfig.OLLAMA_MODEL
 
     def analyze_vocals(self, stem_path):
         """Sends vocal stem to remote 4090 server for local analysis."""
@@ -63,7 +65,7 @@ class VocalAnalyzer:
             """
             
             response = self.client.models.generate_content(
-                model="gemini-3-flash-preview",
+                model="gemini-2.0-flash",
                 contents=[audio_file, prompt]
             )
             

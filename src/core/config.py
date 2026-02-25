@@ -22,6 +22,11 @@ class AppConfig:
     REMOTE_SEP_URL = f"http://{REMOTE_AI_HOST}:{REMOTE_AI_PORT}/separate"
     REMOTE_ANALYZE_URL = f"http://{REMOTE_AI_HOST}:{REMOTE_AI_PORT}/analyze"
     
+    # Ollama Settings (Local AI on remote 4090)
+    OLLAMA_URL = f"http://{REMOTE_AI_HOST}:11434/api/generate"
+    OLLAMA_MODEL = "qwen3:8b" 
+
+    
     # Processing Settings
     DEFAULT_DUCKING_DEPTH = 0.7
     CROSSFADE_MS = 500

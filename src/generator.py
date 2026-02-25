@@ -10,18 +10,55 @@ import json
 load_dotenv()
 
 class TransitionGenerator:
-    """Uses Gemini to orchestrate transitions and a remote 4090 machine to generate them via network."""
+    """Uses Ollama (Local) or Gemini to orchestrate transitions and a remote 4090 machine to generate them."""
     
     def __init__(self, api_key=None):
+        from src.core.config import AppConfig
         api_key = api_key or os.getenv("GOOGLE_API_KEY")
         if api_key:
             self.client = genai.Client(api_key=api_key)
         else:
             self.client = None
-            print("Warning: GOOGLE_API_KEY not found. Gemini orchestration disabled.")
         
-        from src.core.config import AppConfig
         self.remote_url = AppConfig.REMOTE_GEN_URL
+        self.ollama_url = AppConfig.OLLAMA_URL
+        self.ollama_model = AppConfig.OLLAMA_MODEL
+
+    def _call_ai(self, prompt, system_instruction=""):
+        """Tries Ollama first, then Gemini as fallback."""
+        # 1. Try Ollama (Local)
+        try:
+            import requests
+            full_prompt = f"{system_instruction}\n\n{prompt}" if system_instruction else prompt
+            print(f"[AI] Calling Ollama ({self.ollama_model})...")
+            response = requests.post(
+                self.ollama_url,
+                json={
+                    "model": self.ollama_model,
+                    "prompt": full_prompt,
+                    "stream": False,
+                    "format": "json"
+                },
+                timeout=30
+            )
+            if response.status_code == 200:
+                return response.json().get("response")
+        except Exception as e:
+            print(f"[AI] Ollama error: {e}")
+
+        # 2. Gemini Fallback
+        if self.client:
+            try:
+                print("[AI] Calling Gemini (Fallback)...")
+                response = self.client.models.generate_content(
+                    model="gemini-2.0-flash",
+                    contents=prompt
+                )
+                return response.text
+            except Exception as e:
+                print(f"[AI] Gemini error: {e}")
+        
+        return None
 
     def get_transition_params(self, track_a, track_b, type_context=""):
         """Asks Gemini for transition characteristics based on track metadata."""
@@ -58,19 +95,14 @@ class TransitionGenerator:
         'prompt' (A text prompt for MusicGen generation, e.g. 'heavy sub bass impact with reverb in {key_b}, {bpm_b} bpm. If vocals are present, match their thematic vibe.'),
         'description' (brief vibe description).
         """
-        try:
-            response = self.client.models.generate_content(
-                model="gemini-3-flash-preview",
-                contents=prompt
-            )
-            text = response.text
-            match = re.search(r'\{.*\}', text, re.DOTALL)
+        res_text = self._call_ai(prompt)
+        if res_text:
+            match = re.search(r'\{.*\}', res_text, re.DOTALL)
             if match:
-                return json.loads(match.group())
-            return {"noise_type": "white", "filter_type": "highpass", "reverb_amount": 0.7, "prompt": "cinematic riser"}
-        except Exception as e:
-            print(f"Gemini error: {e}")
-            return {"noise_type": "white", "filter_type": "highpass", "reverb_amount": 0.5, "prompt": "cinematic riser"}
+                try: return json.loads(match.group())
+                except: pass
+        
+        return {"noise_type": "white", "filter_type": "highpass", "reverb_amount": 0.7, "prompt": "cinematic riser"}
 
     def get_journey_structure(self, depth=0):
         """Asks Gemini for a musically logical sequence of blocks for the current depth."""
@@ -81,25 +113,22 @@ class TransitionGenerator:
         Suggest a list of musical blocks for an AI-generated music journey at depth {depth}.
         Depth 0 is the start of the mix. Depth 1+ are extensions.
         
-        CRITICAL: If depth > 0, do NOT include an 'Outro' or 'End' block. Instead, end with a 'Transition' or 'Connector' block so the journey can continue.
+        CRITICAL: 
+        - Return exactly 5 to 7 blocks total.
+        - If depth > 0, do NOT include an 'Outro' or 'End' block. Instead, end with a 'Transition' or 'Connector' block so the journey can continue.
         
         Provide ONLY valid JSON output as a list of objects with keys:
         'name' (e.g., Intro, Verse, Build, Drop, Bridge, Connect, Transition),
-        'dur' (duration in milliseconds, usually multiples of 4000 or 8000).
+        'dur' (duration in milliseconds, between 16000 and 32000, usually multiples of 4000 or 8000).
         
         Ensure the structure flows logically from the previous sections.
         """
-        try:
-            response = self.client.models.generate_content(
-                model="gemini-3-flash-preview",
-                contents=prompt
-            )
-            text = response.text
-            match = re.search(r'\[.*\]', text, re.DOTALL)
+        res_text = self._call_ai(prompt)
+        if res_text:
+            match = re.search(r'\[.*\]', res_text, re.DOTALL)
             if match:
-                return json.loads(match.group())
-        except Exception as e:
-            print(f"Structure Gemini error: {e}")
+                try: return json.loads(match.group())
+                except: pass
         
         return self.get_journey_structure_fallback(depth=depth)
 
@@ -112,24 +141,24 @@ class TransitionGenerator:
                 {'name': 'Build', 'dur': 16000},
                 {'name': 'Drop', 'dur': 32000},
                 {'name': 'Verse 2', 'dur': 32000},
-                {'name': 'Outro', 'dur': 20000}
+                {'name': 'Transition', 'dur': 16000}
             ]
         elif depth == 1:
             return [
-                {'name': 'Connect', 'dur': 8000},
+                {'name': 'Connect', 'dur': 16000},
                 {'name': 'Verse 3', 'dur': 32000},
                 {'name': 'Bridge', 'dur': 24000},
                 {'name': 'Build', 'dur': 16000},
-                {'name': 'Power Drop', 'dur': 48000},
-                {'name': 'Transition', 'dur': 12000}
+                {'name': 'Power Drop', 'dur': 32000},
+                {'name': 'Transition', 'dur': 16000}
             ]
         else:
             return [
                 {'name': 'Connect', 'dur': 16000},
                 {'name': 'Atmospheric Breakdown', 'dur': 32000},
                 {'name': 'Build', 'dur': 16000},
-                {'name': 'Grand Finale', 'dur': 64000},
-                {'name': 'Transition', 'dur': 12000}
+                {'name': 'Grand Finale', 'dur': 32000},
+                {'name': 'Transition', 'dur': 16000}
             ]
 
     def generate_riser(self, duration_sec, bpm, output_path, params=None):
