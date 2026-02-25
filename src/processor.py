@@ -140,8 +140,10 @@ class AudioProcessor:
             envelope = []
             for i in range(0, len(y), hop_length):
                 chunk = y[i : i + hop_length]
-                if len(chunk) > 0:
+                if chunk.size > 0:
                     envelope.append(float(np.max(np.abs(chunk))))
+                else:
+                    envelope.append(0.0)
             return envelope
         except:
             return []
