@@ -39,7 +39,9 @@ class DataManager:
                 last_analyzed DATETIME,
                 clp_embedding_id TEXT, -- Link to vector database ID
                 stems_path TEXT, -- New: Path to directory containing extracted stems
-                vocal_energy REAL -- New: Detected vocal prominence
+                vocal_energy REAL, -- New: Detected vocal prominence
+                vocal_lyrics TEXT, -- New: Transcribed lyrics
+                vocal_gender TEXT -- New: Detected gender
             )
         ''')
         
@@ -58,6 +60,12 @@ class DataManager:
         except sqlite3.OperationalError: pass
         try:
             cursor.execute("ALTER TABLE tracks ADD COLUMN vocal_energy REAL")
+        except sqlite3.OperationalError: pass
+        try:
+            cursor.execute("ALTER TABLE tracks ADD COLUMN vocal_lyrics TEXT")
+        except sqlite3.OperationalError: pass
+        try:
+            cursor.execute("ALTER TABLE tracks ADD COLUMN vocal_gender TEXT")
         except sqlite3.OperationalError: pass
         
         conn.commit()

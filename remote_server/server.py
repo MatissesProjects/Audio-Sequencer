@@ -9,10 +9,13 @@ import shutil
 import tempfile
 import zipfile
 import subprocess
+from faster_whisper import WhisperModel
+import librosa
+import numpy as np
 
 app = Flask(__name__)
 
-# Initialize MusicGen on 4090 (GPU)
+# Initialize Models on 4090 (GPU)
 print("--- 🚀 AudioSequencer 4090 Generator Server ---")
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -24,9 +27,65 @@ except Exception as e:
     print(f"Failed to load MusicGen: {e}")
     model = None
 
+try:
+    print("Loading Whisper model (Faster-Whisper)...")
+    # Using 'base' or 'small' for speed, 'large-v3' for maximum accuracy
+    whisper_model = WhisperModel("small", device=device, compute_type="float16" if device=="cuda" else "int8")
+    print("Whisper Loaded.")
+except Exception as e:
+    print(f"Failed to load Whisper: {e}")
+    whisper_model = None
+
 @app.route('/')
 def health_check():
-    return {"status": "online", "device": device, "service": "AudioSequencer Gen Server"}, 200
+    return {"status": "online", "device": device, "services": ["Separation", "Generation", "Analysis"]}, 200
+
+@app.route('/analyze', methods=['POST'])
+def analyze():
+    if 'file' not in request.files:
+        return "No file part", 400
+    
+    file = request.files['file']
+    if file.filename == '':
+        return "No selected file", 400
+
+    if whisper_model is None:
+        return "Whisper model not available.", 503
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        input_path = os.path.join(tmpdir, "vocal.wav")
+        file.save(input_path)
+        
+        print(f"Analyzing Vocals for: {file.filename}...")
+        
+        try:
+            # 1. Transcription (Whisper)
+            segments, info = whisper_model.transcribe(input_path, beam_size=5)
+            lyrics = " ".join([s.text for s in segments]).strip()
+            
+            # 2. Gender Detection (Pitch-based heuristic)
+            # Male usually 85-155Hz, Female 165-255Hz
+            y, sr = librosa.load(input_path, sr=16000)
+            f0, voiced_flag, voiced_probs = librosa.pyin(y, fmin=librosa.note_to_hz('C2'), fmax=librosa.note_to_hz('C7'))
+            
+            gender = "Unknown"
+            if f0 is not None and len(f0[voiced_flag]) > 0:
+                mean_f0 = np.nanmean(f0[voiced_flag])
+                if mean_f0 < 165:
+                    gender = "Male"
+                else:
+                    gender = "Female"
+                print(f"Detected Mean Pitch: {mean_f0:.1f}Hz -> {gender}")
+
+            return {
+                "lyrics": lyrics if lyrics else None,
+                "gender": gender,
+                "language": info.language
+            }, 200
+            
+        except Exception as e:
+            print(f"Analysis Error: {e}")
+            return str(e), 500
 
 @app.route('/separate', methods=['POST'])
 def separate():

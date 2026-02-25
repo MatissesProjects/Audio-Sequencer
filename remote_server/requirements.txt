@@ -5,3 +5,6 @@ audiocraft
 demucs
 zipstream-ng
 soundfile
+faster-whisper
+librosa
+numpy

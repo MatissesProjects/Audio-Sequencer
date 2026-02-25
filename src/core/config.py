@@ -20,6 +20,7 @@ class AppConfig:
     REMOTE_AI_PORT = os.getenv("REMOTE_AI_PORT", "5001")
     REMOTE_GEN_URL = f"http://{REMOTE_AI_HOST}:{REMOTE_AI_PORT}/generate"
     REMOTE_SEP_URL = f"http://{REMOTE_AI_HOST}:{REMOTE_AI_PORT}/separate"
+    REMOTE_ANALYZE_URL = f"http://{REMOTE_AI_HOST}:{REMOTE_AI_PORT}/analyze"
     
     # Processing Settings
     DEFAULT_DUCKING_DEPTH = 0.7
