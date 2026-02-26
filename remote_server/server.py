@@ -166,6 +166,7 @@ def process_pad():
 
 @app.route('/process/harmonize', methods=['POST'])
 def harmonize_vocals():
+    """Generates a sophisticated 3-part backing harmony with formant-aware characters."""
     print(f"[REQ] /process/harmonize from {request.remote_addr}")
     if 'file' not in request.files:
         return "No file part", 400
@@ -175,16 +176,33 @@ def harmonize_vocals():
         file.save(input_path)
         try:
             y, sr = librosa.load(input_path, sr=44100)
+            
+            # 1. 'The Deep' (-5st, Low Formant)
             v_low = librosa.effects.pitch_shift(y, sr=sr, n_steps=-5)
-            v_high = librosa.effects.pitch_shift(y, sr=sr, n_steps=7)
-            board_low = Pedalboard([LowpassFilter(cutoff_frequency_hz=1000), Chorus()])
-            board_high = Pedalboard([HighpassFilter(cutoff_frequency_hz=800), Chorus()])
+            board_low = Pedalboard([
+                LowpassFilter(cutoff_frequency_hz=2000), # Darker
+                Chorus(rate_hz=0.3, depth=0.2),
+                Compressor(threshold_db=-15, ratio=4)
+            ])
             v_low_p = board_low(v_low.reshape(1, -1).astype(np.float32), sr).flatten()
+            
+            # 2. 'The Bright' (+7st, High Formant)
+            v_high = librosa.effects.pitch_shift(y, sr=sr, n_steps=7)
+            board_high = Pedalboard([
+                HighpassFilter(cutoff_frequency_hz=500), # Thinner/Airy
+                Chorus(rate_hz=0.8, depth=0.3),
+                Compressor(threshold_db=-20, ratio=6)
+            ])
             v_high_p = board_high(v_high.reshape(1, -1).astype(np.float32), sr).flatten()
+            
+            # Mix: Orig (1.0) + Character Backing
             min_len = min(len(y), len(v_low_p), len(v_high_p))
-            mixed = y[:min_len] + (v_low_p[:min_len] * 0.6) + (v_high_p[:min_len] * 0.5)
-            master = Pedalboard([Reverb(room_size=0.3, wet_level=0.2)])
+            mixed = y[:min_len] + (v_low_p[:min_len] * 0.55) + (v_high_p[:min_len] * 0.45)
+            
+            # Master Polish
+            master = Pedalboard([Reverb(room_size=0.4, wet_level=0.25)])
             final = master(mixed.reshape(1, -1).astype(np.float32), sr)
+            
             byte_io = io.BytesIO()
             sf.write(byte_io, final.T, sr, format='WAV')
             byte_io.seek(0)
