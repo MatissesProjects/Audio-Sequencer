@@ -325,17 +325,31 @@ class AudioSequencerApp(QMainWindow):
         for i in range(-12, 13):
             self.vocal_shift_combo.addItem(f"{i:+} st", i)
         self.vocal_shift_combo.setCurrentIndex(12)
-                self.vocal_shift_combo.currentIndexChanged.connect(self.on_prop_changed)
-                form.addRow("Vocal Shift:", self.vocal_shift_combo)
-        
-                self.gender_combo = QComboBox()
-                self.gender_combo.addItem("None", "none")
-                self.gender_combo.addItem("Male (Formant Shift Down)", "male")
-                self.gender_combo.addItem("Female (Formant Shift Up)", "female")
-                self.gender_combo.currentIndexChanged.connect(self.on_prop_changed)
-                form.addRow("Gender Transform:", self.gender_combo)
-        
-                self.harmony_slider = QSlider(Qt.Orientation.Horizontal)        self.harmony_slider.setRange(0, 100)
+        self.vocal_shift_combo.currentIndexChanged.connect(self.on_prop_changed)
+        form.addRow("Vocal Shift:", self.vocal_shift_combo)
+
+        self.gender_combo = QComboBox()
+        self.gender_combo.addItem("None", "none")
+        self.gender_combo.addItem("Male (Formant Shift Down)", "male")
+        self.gender_combo.addItem("Female (Formant Shift Up)", "female")
+        self.gender_combo.currentIndexChanged.connect(self.on_prop_changed)
+        form.addRow("Gender Transform:", self.gender_combo)
+
+        # Individual Stem Tuning
+        self.bass_shift_s = QSpinBox(); self.bass_shift_s.setRange(-24, 24); self.bass_shift_s.setSuffix(" st")
+        self.bass_shift_s.valueChanged.connect(self.on_prop_changed)
+        form.addRow("Bass Shift:", self.bass_shift_s)
+
+        self.drum_shift_s = QSpinBox(); self.drum_shift_s.setRange(-24, 24); self.drum_shift_s.setSuffix(" st")
+        self.drum_shift_s.valueChanged.connect(self.on_prop_changed)
+        form.addRow("Drum Shift:", self.drum_shift_s)
+
+        self.instr_shift_s = QSpinBox(); self.instr_shift_s.setRange(-24, 24); self.instr_shift_s.setSuffix(" st")
+        self.instr_shift_s.valueChanged.connect(self.on_prop_changed)
+        form.addRow("Instr Shift:", self.instr_shift_s)
+
+        self.harmony_slider = QSlider(Qt.Orientation.Horizontal)
+        self.harmony_slider.setRange(0, 100)
         self.harmony_slider.valueChanged.connect(self.on_prop_changed)
         form.addRow("Voc Rhythm:", self.harmony_slider)
         
@@ -883,6 +897,10 @@ class AudioSequencerApp(QMainWindow):
             idx = self.gender_combo.findData(s.gender_swap)
             self.gender_combo.setCurrentIndex(idx if idx >= 0 else 0)
             self.gender_combo.blockSignals(False)
+
+            self.bass_shift_s.blockSignals(True); self.bass_shift_s.setValue(s.bass_shift); self.bass_shift_s.blockSignals(False)
+            self.drum_shift_s.blockSignals(True); self.drum_shift_s.setValue(s.drum_shift); self.drum_shift_s.blockSignals(False)
+            self.instr_shift_s.blockSignals(True); self.instr_shift_s.setValue(s.instr_shift); self.instr_shift_s.blockSignals(False)
             
             self.harmony_slider.blockSignals(True)
             self.harmony_slider.setValue(int(s.harmony_level * 100))
@@ -948,6 +966,9 @@ class AudioSequencerApp(QMainWindow):
             sel.chorus = self.chorus_slider.value() / 100.0
             sel.vocal_shift = self.vocal_shift_combo.currentData()
             sel.gender_swap = self.gender_combo.currentData()
+            sel.bass_shift = self.bass_shift_s.value()
+            sel.drum_shift = self.drum_shift_s.value()
+            sel.instr_shift = self.instr_shift_s.value()
             sel.harmony_level = self.harmony_slider.value() / 100.0
             
             sel.vocal_vol = self.v_vol_s.value() / 100.0
@@ -1655,6 +1676,22 @@ class AudioSequencerApp(QMainWindow):
         seed = self.selected_library_track
         depth = 0
         
+        if mode == "start" and not seed:
+            # Pick a random high-energy track from the database to start things off
+            try:
+                conn = self.dm.get_conn()
+                cursor = conn.cursor()
+                cursor.execute("SELECT id, file_path, bpm, harmonic_key, filename FROM tracks WHERE energy > 0.05 ORDER BY RANDOM() LIMIT 1")
+                row = cursor.fetchone()
+                if row:
+                    seed = {
+                        'id': row[0], 'file_path': row[1], 'bpm': row[2], 
+                        'harmonic_key': row[3], 'filename': row[4]
+                    }
+                    print(f"[AI] Randomly selected seed: {seed['filename']}")
+                conn.close()
+            except: pass
+
         if self.timeline_widget.segments:
             last_seg = max(self.timeline_widget.segments, key=lambda s: s.get_end_ms())
             # Use 15 seconds overlap for deep meshing, or 30% of clip if it's very short
@@ -1731,6 +1768,17 @@ class AudioSequencerApp(QMainWindow):
         current_ms = 0
         depth = 0
         seed = self.selected_library_track
+
+        if not seed:
+            try:
+                conn = self.dm.get_conn()
+                cursor = conn.cursor()
+                cursor.execute("SELECT id, file_path, bpm, harmonic_key, filename FROM tracks WHERE energy > 0.05 ORDER BY RANDOM() LIMIT 1")
+                row = cursor.fetchone()
+                if row:
+                    seed = {'id': row[0], 'file_path': row[1], 'bpm': row[2], 'harmonic_key': row[3], 'filename': row[4]}
+                conn.close()
+            except: pass
         
         self.loading_overlay.show_loading(f"Generating {minutes}min Journey...", total=target_ms)
         

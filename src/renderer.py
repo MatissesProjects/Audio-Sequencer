@@ -147,6 +147,18 @@ def _process_single_segment(s, i, target_bpm, sr, time_range):
                     v_ps += s.get('vocal_shift', 0)
                 if v_ps != 0:
                     y_sync = proc.shift_pitch_numpy(y_sync, sr, v_ps)
+            elif stype == "bass":
+                b_ps = s.get('pitch_shift', 0) + s.get('bass_shift', 0)
+                if b_ps != 0:
+                    y_sync = proc.shift_pitch_numpy(y_sync, sr, b_ps)
+            elif stype == "drums":
+                d_ps = s.get('pitch_shift', 0) + s.get('drum_shift', 0)
+                if d_ps != 0:
+                    y_sync = proc.shift_pitch_numpy(y_sync, sr, d_ps)
+            elif stype == "other":
+                i_ps = s.get('pitch_shift', 0) + s.get('instr_shift', 0)
+                if i_ps != 0:
+                    y_sync = proc.shift_pitch_numpy(y_sync, sr, i_ps)
             else:
                 ps = s.get('pitch_shift', 0)
                 if ps != 0:

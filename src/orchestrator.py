@@ -145,6 +145,40 @@ class FullMixOrchestrator:
 
         # Dynamic Pool Selection based on depth (DJ-style swapping)
         d_idx = int(depth)
+        
+        # 1. Select Melodic/Vocal Pools using Smart Scoring against the seed
+        scored_others = []
+        for t in others:
+            # Score against seed (or random rotation if no seed)
+            if seed_track:
+                # We don't have embeddings here easily, so we use BPM/Harmonic/Energy/Groove
+                score = self.scorer.get_total_score(seed_track, t)['total']
+            else:
+                score = random.random() * 100
+            scored_others.append((score, t))
+        scored_others.sort(key=lambda x: x[0], reverse=True)
+        
+        # Take top compatible tracks for this depth section
+        pool_start = (d_idx * 6) % max(1, len(scored_others))
+        melodic_leads = [x[1] for x in scored_others[pool_start : pool_start+10]]
+        if not melodic_leads: melodic_leads = [x[1] for x in scored_others[:10]]
+        
+        fx_tracks = melodic_leads[6:10] if len(melodic_leads) >= 10 else melodic_leads[:4]
+
+        # 2. Select Vocal Pool using Smart Scoring
+        scored_vocals = []
+        for t in vocal_pool:
+            if seed_track:
+                score = self.scorer.get_total_score(seed_track, t)['total']
+            else:
+                score = random.random() * 100
+            scored_vocals.append((score, t))
+        scored_vocals.sort(key=lambda x: x[0], reverse=True)
+        
+        v_start = (d_idx * 3) % max(1, len(scored_vocals))
+        rotated_vocals = [x[1] for x in scored_vocals[v_start : v_start+10]]
+        if not rotated_vocals and vocal_pool: rotated_vocals = [x[1] for x in scored_vocals[:10]]
+
         main_drum = drums[d_idx % len(drums)] if drums else all_tracks[0]
         if seed_track and depth == 0: # Only seed key on start
             sk = seed_track.get('harmonic_key') or seed_track.get('key')
@@ -152,16 +186,8 @@ class FullMixOrchestrator:
                 comp_drums = [t for t in drums if self.scorer.calculate_harmonic_score(sk, t['harmonic_key']) >= 80]
                 if comp_drums: main_drum = random.choice(comp_drums)
 
-        # Rotate bass and melodic pools based on depth
-        rotated_others = others[d_idx % len(others):] + others[:d_idx % len(others)]
-        bass_track = random.choice([t for t in rotated_others if t['harmonic_key'] == main_drum['harmonic_key']] or [rotated_others[0]])
+        bass_track = random.choice([t for t in melodic_leads if t['harmonic_key'] == main_drum['harmonic_key']] or [melodic_leads[0]])
         
-        # Melodic Pool for backgrounds
-        melodic_leads = rotated_others[:min(6, len(rotated_others))]
-        fx_tracks = rotated_others[6:10] if len(rotated_others) >= 10 else rotated_others[:4]
-
-        # Rotate vocal pool too
-        rotated_vocals = vocal_pool[d_idx % len(vocal_pool):] + vocal_pool[:d_idx % len(vocal_pool)] if vocal_pool else []
         used_vocal_ids = []
 
         os.makedirs("generated_assets", exist_ok=True)
@@ -348,6 +374,13 @@ class FullMixOrchestrator:
                     v_energy = lead.get('vocal_energy') or 0.0; is_vocal_heavy = v_energy > 0.02
                     stems_path = lead.get('stems_path')
                     
+                    # AI Intelligence: Randomly apply gender transform to the MAIN lead for variety
+                    g_swap = "none"
+                    if is_vocal_heavy and random.random() > 0.7:
+                        orig_g = (lead.get('vocal_gender') or "unknown").lower()
+                        g_swap = "female" if "male" in orig_g and "female" not in orig_g else "male"
+                        print(f"[AI] Transforming Lead Gender: {lead['filename']} -> {g_swap.upper()}")
+
                     if stems_path and os.path.exists(stems_path) and (is_drop or 'verse 1' in b_name.lower()):
                         # Sidechain Keyframes for Leads
                         m_keys = {}
@@ -375,6 +408,7 @@ class FullMixOrchestrator:
                             'vocal_lyrics': lead.get('vocal_lyrics'), 'vocal_gender': lead.get('vocal_gender'),
                             'volume': 0.8, 'lane': find_free_lane(current_ms + 8000, b_dur + overlap - 8000, role="melodic"), 'pitch_shift': ps, 'fade_in_ms': 4000, 'fade_out_ms': 4000,
                             'vocal_vol': 1.3 if is_vocal_heavy else 0.0, 'drum_vol': 0.0, 'bass_vol': 0.0, 'instr_vol': 1.0, 'duck_low': 0.4,
+                            'gender_swap': g_swap,
                             'ducking_depth': 0.2 if is_vocal_heavy else 0.7,
                             'keyframes': m_keys
                         })
@@ -391,7 +425,9 @@ class FullMixOrchestrator:
                             'vocal_lyrics': lead.get('vocal_lyrics'), 'vocal_gender': lead.get('vocal_gender'),
                             'volume': 0.85 if is_vocal_heavy else 0.7, 'pan': 0.0, 'lane': lane, 'pitch_shift': ps, 'low_cut': 400, 'fade_in_ms': 4000, 'fade_out_ms': 4000,
                             'vocal_vol': 1.3 if is_vocal_heavy else 0.8, 'instr_vol': 0.4 if is_vocal_heavy else 0.9, 'bass_vol': 0.6 if is_vocal_heavy else 0.8,
-                            'vocal_shift': 12 if is_drop and is_vocal_heavy else 0, 'ducking_depth': 0.15 if is_vocal_heavy else 0.75, 'harmony_level': 0.4 if is_drop else 0.1, 'duck_low': 0.1 if is_vocal_heavy else 0.5,
+                            'vocal_shift': 12 if is_drop and is_vocal_heavy else 0, 
+                            'gender_swap': g_swap,
+                            'ducking_depth': 0.15 if is_vocal_heavy else 0.75, 'harmony_level': 0.4 if is_drop else 0.1, 'duck_low': 0.1 if is_vocal_heavy else 0.5,
                             'keyframes': m_keys
                         })
 
