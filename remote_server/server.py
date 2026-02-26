@@ -13,7 +13,7 @@ from faster_whisper import WhisperModel
 import librosa
 import numpy as np
 import pedalboard
-from pedalboard import Pedalboard, Reverb, Chorus, HighpassFilter, LowpassFilter
+from pedalboard import Pedalboard, Reverb, Chorus, HighpassFilter, LowpassFilter, Compressor
 
 app = Flask(__name__)
 
@@ -31,7 +31,6 @@ except Exception as e:
 
 try:
     print("Loading Whisper model (Faster-Whisper)...")
-    # Using 'base' or 'small' for speed, 'large-v3' for maximum accuracy
     whisper_model = WhisperModel("small", device=device, compute_type="float16" if device=="cuda" else "int8")
     print("Whisper Loaded.")
 except Exception as e:
@@ -57,7 +56,6 @@ def analyze():
     with tempfile.TemporaryDirectory() as tmpdir:
         input_path = os.path.join(tmpdir, "vocal.wav")
         file.save(input_path)
-        
         print(f"Analyzing Vocals for: {file.filename}...")
         
         try:
@@ -66,17 +64,13 @@ def analyze():
             lyrics = " ".join([s.text for s in segments]).strip()
             
             # 2. Gender Detection (Pitch-based heuristic)
-            # Male usually 85-155Hz, Female 165-255Hz
             y, sr = librosa.load(input_path, sr=16000)
             f0, voiced_flag, voiced_probs = librosa.pyin(y, fmin=librosa.note_to_hz('C2'), fmax=librosa.note_to_hz('C7'))
             
             gender = "Unknown"
             if f0 is not None and len(f0[voiced_flag]) > 0:
                 mean_f0 = np.nanmean(f0[voiced_flag])
-                if mean_f0 < 165:
-                    gender = "Male"
-                else:
-                    gender = "Female"
+                gender = "Male" if mean_f0 < 165 else "Female"
                 print(f"Detected Mean Pitch: {mean_f0:.1f}Hz -> {gender}")
 
             return {
@@ -84,49 +78,33 @@ def analyze():
                 "gender": gender,
                 "language": info.language
             }, 200
-            
         except Exception as e:
             print(f"Analysis Error: {e}")
             return str(e), 500
 
 @app.route('/analyze/sections', methods=['POST'])
 def analyze_sections():
-    """Identifies musical sections (Intro, Verse, Build, Drop) using spectral clustering."""
     print(f"[REQ] /analyze/sections from {request.remote_addr}")
     if 'file' not in request.files:
         return "No file part", 400
     
     file = request.files['file']
-    
     with tempfile.TemporaryDirectory() as tmpdir:
         input_path = os.path.join(tmpdir, "input.wav")
         file.save(input_path)
-        
         try:
             y, sr = librosa.load(input_path, sr=22050)
-            
-            # 1. Feature Extraction (MFCC + Chroma)
             mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13)
             chroma = librosa.feature.chroma_cqt(y=y, sr=sr)
-            # Stack features and take transpose for librosa.segment.agglomerative (needs [n_features, n_samples])
-            # mfcc is [13, frames], chroma is [12, frames]
             features = np.vstack([mfcc, chroma])
-            
-            # 2. Segment into structural blocks
-            # k=5 sections
             bound_frames = librosa.segment.agglomerative(features.T, 5) 
             bound_times = librosa.frames_to_time(bound_frames, sr=sr)
             
-            # 3. Analyze each section to assign labels (Heuristic)
             sections = []
             for i in range(len(bound_times) - 1):
-                start = bound_times[i]
-                end = bound_times[i+1]
-                
-                # Check energy and onset density of this section
+                start, end = bound_times[i], bound_times[i+1]
                 y_seg = y[int(start*sr):int(end*sr)]
                 if len(y_seg) == 0: continue
-                
                 rms = np.mean(librosa.feature.rms(y=y_seg))
                 onset_env = librosa.onset.onset_strength(y=y_seg, sr=sr)
                 density = np.mean(onset_env)
@@ -136,66 +114,41 @@ def analyze_sections():
                 elif rms > 0.15 and density > 1.0: label = "Drop"
                 elif density > 0.8: label = "Build"
                 
-                sections.append({
-                    "start": float(start),
-                    "end": float(end),
-                    "label": label,
-                    "energy": float(rms)
-                })
-                
+                sections.append({"start": float(start), "end": float(end), "label": label, "energy": float(rms)})
             return {"sections": sections}, 200
-            
         except Exception as e:
             print(f"Section Analysis Error: {e}")
             return str(e), 500
 
 @app.route('/process/pad', methods=['POST'])
 def process_pad():
-    """Transforms audio into a lush spectral pad using GPU-accelerated blurring."""
     print(f"[REQ] /process/pad from {request.remote_addr}")
     if 'file' not in request.files:
-        print("[ERR] No file part in request")
-        return "Missing 'file' parameter (multipart/form-data expected)", 400
+        return "Missing 'file' parameter", 400
     
     file = request.files['file']
-    if file.filename == '':
-        print("[ERR] Empty filename")
-        return "No selected file", 400
-    
     duration = float(request.form.get('duration', 10.0))
-    print(f"[PROC] Generating {duration}s spectral pad for {file.filename}...")
+    
+    with tempfile.TemporaryDirectory() as tmpdir:
         input_path = os.path.join(tmpdir, "input.wav")
         file.save(input_path)
-        
         try:
             y, sr = librosa.load(input_path, sr=44100)
-            
-            # 1. Spectral Blurring (STFT -> Magnitude Smoothing -> Random Phase -> ISTFT)
-            n_fft = 4096
-            hop_length = 512
-            stft = librosa.stft(y, n_fft=n_fft, hop_length=hop_length)
+            stft = librosa.stft(y, n_fft=4096, hop_length=512)
             mag, _ = librosa.magphase(stft)
-            
-            # Smooth magnitudes across time frames to 'blur' the sound
             from scipy.ndimage import gaussian_filter1d
             mag_blurred = gaussian_filter1d(mag, sigma=15, axis=1)
-            
-            # Reconstruct with random phases to eliminate rhythmic transients
             random_phase = np.exp(1j * np.random.uniform(0, 2*np.pi, size=stft.shape))
-            y_pad = librosa.istft(mag_blurred * random_phase, hop_length=hop_length)
+            y_pad = librosa.istft(mag_blurred * random_phase, hop_length=512)
             
-            # 2. Add Massive 'Dreamy' FX Chain
             board = Pedalboard([
                 HighpassFilter(cutoff_frequency_hz=400),
                 Chorus(rate_hz=0.5, depth=0.5),
                 Reverb(room_size=0.95, damping=0.5, wet_level=0.8, dry_level=0.2)
             ])
-            
-            # Normalize and format for Pedalboard
             y_pad = y_pad / (np.max(np.abs(y_pad)) + 1e-9)
             processed = board(y_pad.reshape(1, -1).astype(np.float32), sr)
             
-            # Trim/Loop to requested duration
             num_samples = int(sr * duration)
             if processed.shape[1] > num_samples:
                 final_wav = processed[:, :num_samples]
@@ -206,94 +159,60 @@ def process_pad():
             byte_io = io.BytesIO()
             sf.write(byte_io, final_wav.T, sr, format='WAV')
             byte_io.seek(0)
-            
             return send_file(byte_io, mimetype="audio/wav")
-            
         except Exception as e:
             print(f"Pad Processing Error: {e}")
             return str(e), 500
 
 @app.route('/process/harmonize', methods=['POST'])
 def harmonize_vocals():
-    """Generates a 3-part backing harmony for a vocal stem."""
     print(f"[REQ] /process/harmonize from {request.remote_addr}")
     if 'file' not in request.files:
         return "No file part", 400
-    
     file = request.files['file']
-    
     with tempfile.TemporaryDirectory() as tmpdir:
         input_path = os.path.join(tmpdir, "vocal.wav")
         file.save(input_path)
-        
         try:
             y, sr = librosa.load(input_path, sr=44100)
-            
-            # Simple but effective harmonization using pitch shifts
             v_low = librosa.effects.pitch_shift(y, sr=sr, n_steps=-5)
             v_high = librosa.effects.pitch_shift(y, sr=sr, n_steps=7)
-            
-            # Use Pedalboard to add individual character to voices
             board_low = Pedalboard([LowpassFilter(cutoff_frequency_hz=1000), Chorus()])
             board_high = Pedalboard([HighpassFilter(cutoff_frequency_hz=800), Chorus()])
-            
             v_low_p = board_low(v_low.reshape(1, -1).astype(np.float32), sr).flatten()
             v_high_p = board_high(v_high.reshape(1, -1).astype(np.float32), sr).flatten()
-            
-            # Mix: Orig (1.0) + Low (0.6) + High (0.5)
-            # Ensure lengths match
             min_len = min(len(y), len(v_low_p), len(v_high_p))
             mixed = y[:min_len] + (v_low_p[:min_len] * 0.6) + (v_high_p[:min_len] * 0.5)
-            
-            # Final Master for the harmony
             master = Pedalboard([Reverb(room_size=0.3, wet_level=0.2)])
             final = master(mixed.reshape(1, -1).astype(np.float32), sr)
-            
             byte_io = io.BytesIO()
             sf.write(byte_io, final.T, sr, format='WAV')
             byte_io.seek(0)
-            
             return send_file(byte_io, mimetype="audio/wav")
-            
         except Exception as e:
             print(f"Harmonization Error: {e}")
             return str(e), 500
 
 @app.route('/process/continue', methods=['POST'])
 def continue_audio():
-    """Takes a short audio snippet and generates a continuation using MusicGen."""
     if 'file' not in request.files:
         return "No file part", 400
-    
     file = request.files['file']
     duration = float(request.form.get('duration', 4.0))
     prompt = request.form.get('prompt', 'continue this loop')
-    
     with tempfile.TemporaryDirectory() as tmpdir:
         input_path = os.path.join(tmpdir, "input.wav")
         file.save(input_path)
-        
         try:
-            # Load snippet
-            # MusicGen expects a specific format
             y, sr = torchaudio.load(input_path)
-            
-            if model is None:
-                return "MusicGen model not loaded.", 503
-                
+            if model is None: return "MusicGen model not loaded.", 503
             model.set_generation_params(duration=duration)
-            
-            # Generate continuation
-            # MusicGen expects [B, C, T]
             wav = model.generate_continuation(y.unsqueeze(0).to(device), sr, [prompt], progress=True)
-            
             samples = wav[0].cpu().numpy().T
             byte_io = io.BytesIO()
             sf.write(byte_io, samples, 32000, format='WAV')
             byte_io.seek(0)
-            
             return send_file(byte_io, mimetype="audio/wav")
-            
         except Exception as e:
             print(f"Continuation Error: {e}")
             return str(e), 500
@@ -302,60 +221,28 @@ def continue_audio():
 def separate():
     if 'file' not in request.files:
         return "No file part", 400
-    
     file = request.files['file']
-    if file.filename == '':
-        return "No selected file", 400
-
     with tempfile.TemporaryDirectory() as tmpdir:
         input_path = os.path.join(tmpdir, "input.wav")
         file.save(input_path)
-        
         output_dir = os.path.join(tmpdir, "output")
         os.makedirs(output_dir, exist_ok=True)
-        
-        print(f"Separating Stems for: {file.filename}...")
-        
         try:
-            # Call Demucs via subprocess for reliability and easy CUDA handling
-            # Force torchaudio to use 'soundfile' backend to avoid torchcodec issues
             env = os.environ.copy()
             env["TORCHAUDIO_BACKEND"] = "soundfile"
-            
-            cmd = [
-                "python", "-m", "demucs", 
-                "--out", output_dir, 
-                "--device", device,
-                input_path
-            ]
+            cmd = ["python", "-m", "demucs", "--out", output_dir, "--device", device, input_path]
             subprocess.run(cmd, check=True, env=env)
-            
-            # Demucs creates a nested structure: output/htdemucs/input/drums.wav etc.
-            model_name = "htdemucs" # default model
-            stems_src = os.path.join(output_dir, model_name, "input")
-            
+            stems_src = os.path.join(output_dir, "htdemucs", "input")
             if not os.path.exists(stems_src):
-                # Check for alternative model names if demucs changed defaults
                 subdirs = os.listdir(output_dir)
-                if subdirs:
-                    stems_src = os.path.join(output_dir, subdirs[0], "input")
-
-            # Create ZIP in memory
+                if subdirs: stems_src = os.path.join(output_dir, subdirs[0], "input")
             memory_file = io.BytesIO()
             with zipfile.ZipFile(memory_file, 'w') as zf:
                 for stem in ["vocals.wav", "drums.wav", "bass.wav", "other.wav"]:
-                    stem_path = os.path.join(stems_src, stem)
-                    if os.path.exists(stem_path):
-                        zf.write(stem_path, stem)
-            
+                    p = os.path.join(stems_src, stem)
+                    if os.path.exists(p): zf.write(p, stem)
             memory_file.seek(0)
-            return send_file(
-                memory_file,
-                mimetype='application/zip',
-                as_attachment=True,
-                download_name=f"{os.path.splitext(file.filename)[0]}_stems.zip"
-            )
-            
+            return send_file(memory_file, mimetype='application/zip', as_attachment=True, download_name="stems.zip")
         except Exception as e:
             print(f"Separation Error: {e}")
             return str(e), 500
@@ -363,108 +250,47 @@ def separate():
 @app.route('/generate', methods=['POST'])
 def generate():
     data = request.json
-    prompt = data.get('prompt', 'cinematic riser')
-    duration = data.get('duration', 4)
-    # High-quality settings for MusicGen
-    top_k = data.get('top_k', 250)
-    top_p = data.get('top_p', 0)
-    temperature = data.get('temperature', 1.0)
-    cfg_coef = data.get('cfg_coef', 3.0)
-    
-    print(f"Generating: '{prompt}' ({duration}s) | CFG: {cfg_coef} | Temp: {temperature}...")
-    
-    if model is None:
-        return "MusicGen model failed to load on server startup.", 503
-    
+    prompt, duration = data.get('prompt', 'cinematic riser'), data.get('duration', 4)
+    top_k, top_p = data.get('top_k', 250), data.get('top_p', 0)
+    temp, cfg = data.get('temperature', 1.0), data.get('cfg_coef', 3.0)
+    if model is None: return "MusicGen model not loaded.", 503
     try:
-        model.set_generation_params(
-            duration=duration,
-            top_k=top_k,
-            top_p=top_p,
-            temperature=temperature,
-            cfg_coef=cfg_coef
-        )
-        
-        # Multi-prompt generation (if array provided)
-        prompts = [prompt] if isinstance(prompt, str) else prompt
-        wav = model.generate(prompts, progress=True)
-        
-        # Convert to Bytes for transport
-        # torchaudio expectations: (channels, samples)
-        # soundfile expectations: (samples, channels)
-        samples = wav[0].cpu().numpy() # [channels, samples]
-        
-        # Transpose for soundfile: [samples, channels]
-        samples = samples.T 
-
-        # Save to memory-buffered WAV
+        model.set_generation_params(duration=duration, top_k=top_k, top_p=top_p, temperature=temp, cfg_coef=cfg)
+        wav = model.generate([prompt] if isinstance(prompt, str) else prompt, progress=True)
+        samples = wav[0].cpu().numpy().T
         byte_io = io.BytesIO()
-                sf.write(byte_io, samples, 32000, format='WAV')
-                byte_io.seek(0)
-                return send_file(byte_io, mimetype="audio/wav")
-                
-            except Exception as e:
-                print(f"Generation Error: {e}")
-                return str(e), 500
-        
-        @app.route('/process/gender_transform', methods=['POST'])
-        def gender_transform():
-            """Transforms vocal gender using pitch and formant-shaping filters."""
-            print(f"[REQ] /process/gender_transform from {request.remote_addr}")
-            if 'file' not in request.files:
-                return "No file part", 400
-            
-            file = request.files['file']
-            # target: 'male' or 'female'
-            target = request.form.get('target', 'female')
-            # steps: optional pitch shift override
-            try:
-                steps = float(request.form.get('steps', 0))
-            except:
-                steps = 0
-            
-            with tempfile.TemporaryDirectory() as tmpdir:
-                input_path = os.path.join(tmpdir, "input.wav")
-                file.save(input_path)
-                
-                try:
-                    y, sr = librosa.load(input_path, sr=44100)
-                    
-                    # Determine base pitch shift if not provided (default to full octave swap)
-                    if steps == 0:
-                        steps = 12 if target == 'female' else -12
-                    
-                    # 1. High-quality pitch shift
-                    y_shifted = librosa.effects.pitch_shift(y, sr=sr, n_steps=steps)
-                    
-                    # 2. Formant-shaping approximation using Pedalboard
-                    if target == 'female':
-                        # Shift resonance up: Remove low 'chest' frequencies, boost 'head' clarity
-                        board = Pedalboard([
-                            HighpassFilter(cutoff_frequency_hz=350),
-                            Chorus(rate_hz=0.2, depth=0.2), # Subtle thickening
-                            Compressor(threshold_db=-18, ratio=4),
-                        ])
-                    else:
-                        # Shift resonance down: Keep lows, cut super-highs
-                        board = Pedalboard([
-                            LowpassFilter(cutoff_frequency_hz=3500),
-                            Chorus(rate_hz=0.5, depth=0.1),
-                            Compressor(threshold_db=-12, ratio=3),
-                        ])
-                    
-                    processed = board(y_shifted.reshape(1, -1).astype(np.float32), sr)
-                    
-                    byte_io = io.BytesIO()
-                    sf.write(byte_io, processed.T, sr, format='WAV')
-                    byte_io.seek(0)
-                    return send_file(byte_io, mimetype="audio/wav")
-                    
-                except Exception as e:
-                    print(f"Gender Transform Error: {e}")
-                    return str(e), 500
-        
+        sf.write(byte_io, samples, 32000, format='WAV')
+        byte_io.seek(0)
+        return send_file(byte_io, mimetype="audio/wav")
+    except Exception as e:
+        print(f"Generation Error: {e}")
+        return str(e), 500
+
+@app.route('/process/gender_transform', methods=['POST'])
+def gender_transform():
+    print(f"[REQ] /process/gender_transform from {request.remote_addr}")
+    if 'file' not in request.files: return "No file part", 400
+    file = request.files['file']
+    target, steps = request.form.get('target', 'female'), float(request.form.get('steps', 0))
+    with tempfile.TemporaryDirectory() as tmpdir:
+        input_path = os.path.join(tmpdir, "input.wav")
+        file.save(input_path)
+        try:
+            y, sr = librosa.load(input_path, sr=44100)
+            if steps == 0: steps = 12 if target == 'female' else -12
+            y_shifted = librosa.effects.pitch_shift(y, sr=sr, n_steps=steps)
+            if target == 'female':
+                board = Pedalboard([HighpassFilter(cutoff_frequency_hz=350), Chorus(rate_hz=0.2, depth=0.2), Compressor(threshold_db=-18, ratio=4)])
+            else:
+                board = Pedalboard([LowpassFilter(cutoff_frequency_hz=3500), Chorus(rate_hz=0.5, depth=0.1), Compressor(threshold_db=-12, ratio=3)])
+            processed = board(y_shifted.reshape(1, -1).astype(np.float32), sr)
+            byte_io = io.BytesIO()
+            sf.write(byte_io, processed.T, sr, format='WAV')
+            byte_io.seek(0)
+            return send_file(byte_io, mimetype="audio/wav")
+        except Exception as e:
+            print(f"Gender Transform Error: {e}")
+            return str(e), 500
 
 if __name__ == '__main__':
-    # Listen on all interfaces so your main machine can connect
     app.run(host='0.0.0.0', port=5001)
