@@ -434,12 +434,21 @@ class FullMixOrchestrator:
                     should_stack = is_vocal_heavy or (random.random() > 0.5)
                     if should_stack and not is_build:
                         for s_shift in [7, -5]:
+                            # AI Intelligence: occasionally swap gender for harmony to sound like a separate singer
+                            h_gswap = "none"
+                            if s_shift == 7 and lead.get('vocal_gender'):
+                                orig_g = lead.get('vocal_gender').lower()
+                                h_gswap = "female" if "male" in orig_g and "female" not in orig_g else "male"
+
                             lane = find_free_lane(current_ms, b_dur + overlap, role="atmosphere")
                             segments.append({
                                 'id': lead['id'], 'filename': f"{lead['filename']} (H{s_shift:+})", 'file_path': lead['file_path'], 'bpm': lead['bpm'], 'harmonic_key': lead['harmonic_key'],
                                 'start_ms': current_ms, 'duration_ms': b_dur + overlap, 'offset_ms': get_best_offset(lead, b_name), 'stems_path': lead.get('stems_path'),
+                                'vocal_lyrics': lead.get('vocal_lyrics'), 'vocal_gender': lead.get('vocal_gender'),
                                 'volume': 0.4, 'pan': -0.7 if s_shift > 0 else 0.7, 'lane': lane, 'pitch_shift': ps, 'low_cut': 800, 'fade_in_ms': 5000, 'fade_out_ms': 5000,
-                                'vocal_vol': 1.0 if is_vocal_heavy else 0.0, 'instr_vol': 0.0 if is_vocal_heavy else 0.8, 'bass_vol': 0.0, 'vocal_shift': s_shift, 'ducking_depth': 0.8, 'reverb': 0.5, 'duck_low': 0.1, 'duck_mid': 0.6,
+                                'vocal_vol': 1.0 if is_vocal_heavy else 0.0, 'instr_vol': 0.0 if is_vocal_heavy else 0.8, 'bass_vol': 0.0, 'vocal_shift': s_shift, 
+                                'gender_swap': h_gswap, 
+                                'ducking_depth': 0.8, 'reverb': 0.5, 'duck_low': 0.1, 'duck_mid': 0.6,
                                 'keyframes': {}
                             })
                         
