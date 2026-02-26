@@ -149,35 +149,34 @@ class FullMixOrchestrator:
         # 1. Select Melodic/Vocal Pools using Smart Scoring against the seed
         scored_others = []
         for t in others:
-            # Score against seed (or random rotation if no seed)
+            # Score against seed
             if seed_track:
-                # We don't have embeddings here easily, so we use BPM/Harmonic/Energy/Groove
                 score = self.scorer.get_total_score(seed_track, t)['total']
             else:
-                score = random.random() * 100
-            scored_others.append((score, t))
+                score = 50.0
+            # Add depth-based jitter for rotation
+            jitter = ((t['id'] * (d_idx + 1)) % 100) / 10.0
+            scored_others.append((score + jitter, t))
+        
         scored_others.sort(key=lambda x: x[0], reverse=True)
+        melodic_leads = [x[1] for x in scored_others[:15]]
+        if not melodic_leads: melodic_leads = others[:min(10, len(others))] if others else all_tracks[:10]
         
-        # Take top compatible tracks for this depth section
-        pool_start = (d_idx * 6) % max(1, len(scored_others))
-        melodic_leads = [x[1] for x in scored_others[pool_start : pool_start+10]]
-        if not melodic_leads: melodic_leads = [x[1] for x in scored_others[:10]]
-        
-        fx_tracks = melodic_leads[6:10] if len(melodic_leads) >= 10 else melodic_leads[:4]
+        fx_tracks = melodic_leads[6:12] if len(melodic_leads) >= 12 else melodic_leads[:4]
 
-        # 2. Select Vocal Pool using Smart Scoring
+        # 2. Select Vocal Pool using Smart Scoring + Jitter
         scored_vocals = []
         for t in vocal_pool:
             if seed_track:
                 score = self.scorer.get_total_score(seed_track, t)['total']
             else:
-                score = random.random() * 100
-            scored_vocals.append((score, t))
-        scored_vocals.sort(key=lambda x: x[0], reverse=True)
+                score = 50.0
+            jitter = ((t['id'] * (d_idx + 1)) % 100) / 10.0
+            scored_vocals.append((score + jitter, t))
         
-        v_start = (d_idx * 3) % max(1, len(scored_vocals))
-        rotated_vocals = [x[1] for x in scored_vocals[v_start : v_start+10]]
-        if not rotated_vocals and vocal_pool: rotated_vocals = [x[1] for x in scored_vocals[:10]]
+        scored_vocals.sort(key=lambda x: x[0], reverse=True)
+        rotated_vocals = [x[1] for x in scored_vocals[:10]]
+        if not rotated_vocals and vocal_pool: rotated_vocals = vocal_pool[:10]
 
         main_drum = drums[d_idx % len(drums)] if drums else all_tracks[0]
         if seed_track and depth == 0: # Only seed key on start
