@@ -480,14 +480,18 @@ class AudioSequencerApp(QMainWindow):
         th.addWidget(self.agb)
         
         self.h_mix_btn = QPushButton("💥 Hyper-Mix")
-        self.h_mix_btn.setStyleSheet("background-color: #528;")
-        self.h_mix_btn.clicked.connect(self.auto_populate_hyper_mix)
+        self.h_mix_btn.setStyleSheet("background-color: #528; font-weight: bold;")
+        
+        # Dropdown Menu for Hyper-Mix
+        hm_menu = QMenu(self)
+        hm_menu.addAction("🆕 Start New Journey", lambda: self.auto_populate_hyper_mix(mode="start"))
+        hm_menu.addAction("🔜 Continue Journey", lambda: self.auto_populate_hyper_mix(mode="continue"))
+        hm_menu.addSeparator()
+        hm_menu.addAction("🏆 Create Full Experience", self.create_full_journey_dialog)
+        hm_menu.addAction("🏁 Append Grand Finale", self.auto_populate_hyper_mix_ending)
+        
+        self.h_mix_btn.setMenu(hm_menu)
         th.addWidget(self.h_mix_btn)
-
-        self.h_mix_end_btn = QPushButton("🏁 Hyper-Mix Ending")
-        self.h_mix_end_btn.setStyleSheet("background-color: #258;")
-        self.h_mix_end_btn.clicked.connect(self.auto_populate_hyper_mix_ending)
-        th.addWidget(self.h_mix_end_btn)
         
         self.fill_btn = QPushButton("🩹 Fill Gaps")
         self.fill_btn.setStyleSheet("background-color: #264;")
@@ -1627,10 +1631,13 @@ class AudioSequencerApp(QMainWindow):
         
         self.loading_overlay.hide_loading()
 
-    def auto_populate_hyper_mix(self):
+    def auto_populate_hyper_mix(self, mode="start"):
         if not self.ai_enabled:
             QMessageBox.warning(self, "AI Disabled", "AI Engine Offline.")
             return
+        
+        if mode == "start":
+            self.new_project() # Clear existing
         
         start_ms = 0
         seed = self.selected_library_track
@@ -1693,6 +1700,72 @@ class AudioSequencerApp(QMainWindow):
         except Exception as e:
             self.loading_overlay.hide_loading()
             show_error(self, "Hyper Error", "Failed.", e)
+
+    def create_full_journey_dialog(self):
+        if not self.ai_enabled:
+            QMessageBox.warning(self, "AI Disabled", "AI Engine Offline.")
+            return
+            
+        from PyQt6.QtWidgets import QInputDialog
+        minutes, ok = QInputDialog.getInt(self, "Journey Length", "How many minutes should the experience be?", 5, 1, 60)
+        if ok:
+            self.run_full_journey_generation(minutes)
+
+    def run_full_journey_generation(self, minutes):
+        self.new_project() # Start fresh
+        self.push_undo()
+        
+        target_ms = minutes * 60 * 1000
+        current_ms = 0
+        depth = 0
+        seed = self.selected_library_track
+        
+        self.loading_overlay.show_loading(f"Generating {minutes}min Journey...", total=target_ms)
+        
+        try:
+            self.orchestrator.lane_count = self.timeline_widget.lane_count
+            
+            while current_ms < target_ms:
+                # Last iteration should be the ending
+                is_last = (target_ms - current_ms) < 120000 # If less than 2 mins left, wrap it up
+                
+                self.status_bar.showMessage(f"AI: Building journey section {depth+1}...")
+                
+                h_segs = self.orchestrator.get_hyper_segments(
+                    seed_track=seed, 
+                    start_time_ms=current_ms - (4000 if depth > 0 else 0), 
+                    depth=depth,
+                    force_ending=is_last
+                )
+                
+                if not h_segs: break
+                
+                # Add to timeline
+                for sd in h_segs:
+                    seg = self.timeline_widget.add_track(sd, start_ms=sd['start_ms'], lane=sd['lane'])
+                    # Apply all properties
+                    for key, val in sd.items():
+                        if hasattr(seg, key): setattr(seg, key, val)
+                    self.load_waveform_async(seg)
+                
+                # Calculate new end point
+                last_seg = max(h_segs, key=lambda s: s['start_ms'] + s['duration_ms'])
+                current_ms = last_seg['start_ms'] + last_seg['duration_ms']
+                
+                # Use the last track of this section as the seed for the next to ensure flow
+                seed = h_segs[-1]
+                depth += 1
+                
+                self.loading_overlay.set_progress(int(current_ms))
+                if is_last: break
+
+            self.timeline_widget.update_geometry()
+            self.loading_overlay.hide_loading()
+            QMessageBox.information(self, "Journey Complete", f"Created a {int(current_ms/60000)} minute musical experience.")
+            
+        except Exception as e:
+            self.loading_overlay.hide_loading()
+            show_error(self, "Journey Error", "Generation failed.", e)
 
     def auto_populate_hyper_mix_ending(self):
         if not self.ai_enabled:

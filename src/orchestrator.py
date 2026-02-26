@@ -143,26 +143,32 @@ class FullMixOrchestrator:
         if seed_track:
             target_bpm = seed_track.get('bpm', 124.0)
 
-        main_drum = random.choice(drums) if drums else all_tracks[0]
-        if seed_track:
+        # Dynamic Pool Selection based on depth (DJ-style swapping)
+        d_idx = int(depth)
+        main_drum = drums[d_idx % len(drums)] if drums else all_tracks[0]
+        if seed_track and depth == 0: # Only seed key on start
             sk = seed_track.get('harmonic_key') or seed_track.get('key')
             if sk:
                 comp_drums = [t for t in drums if self.scorer.calculate_harmonic_score(sk, t['harmonic_key']) >= 80]
                 if comp_drums: main_drum = random.choice(comp_drums)
 
-        bass_track = random.choice([t for t in others if t['harmonic_key'] == main_drum['harmonic_key']] or [others[0]])
+        # Rotate bass and melodic pools based on depth
+        rotated_others = others[d_idx % len(others):] + others[:d_idx % len(others)]
+        bass_track = random.choice([t for t in rotated_others if t['harmonic_key'] == main_drum['harmonic_key']] or [rotated_others[0]])
         
         # Melodic Pool for backgrounds
-        melodic_leads = others[:min(6, len(others))]
-        fx_tracks = others[6:10] if len(others) >= 10 else others[:4]
+        melodic_leads = rotated_others[:min(6, len(rotated_others))]
+        fx_tracks = rotated_others[6:10] if len(rotated_others) >= 10 else rotated_others[:4]
 
+        # Rotate vocal pool too
+        rotated_vocals = vocal_pool[d_idx % len(vocal_pool):] + vocal_pool[:d_idx % len(vocal_pool)] if vocal_pool else []
         used_vocal_ids = []
 
         os.makedirs("generated_assets", exist_ok=True)
-        cloud_path = os.path.abspath(f"generated_assets/spectral_pad_{main_drum['id']}_{random.randint(0,999)}.wav")
+        cloud_path = os.path.abspath(f"generated_assets/spectral_pad_{main_drum['id']}_d{depth}_{random.randint(0,99)}.wav")
         if not os.path.exists(cloud_path):
             try: 
-                source_p = seed_track['file_path'] if seed_track else random.choice(melodic_leads)['file_path']
+                source_p = seed_track['file_path'] if (seed_track and depth==0) else random.choice(melodic_leads)['file_path']
                 # Use high-fidelity remote pad if possible
                 self.processor.generate_spectral_pad_remote(source_p, cloud_path, duration=20.0)
             except: cloud_path = main_drum['file_path']
@@ -308,11 +314,11 @@ class FullMixOrchestrator:
                 # Regular melodic blocks (Verses, Bridges, Drops)
                 
                 # Vocal Selection Strategy: Try to pick a new vocal track for each block
-                available_vocals = [t for t in vocal_pool if t['id'] not in used_vocal_ids]
-                if not available_vocals and vocal_pool:
+                available_vocals = [t for t in rotated_vocals if t['id'] not in used_vocal_ids]
+                if not available_vocals and rotated_vocals:
                     # Reset memory if we run out of unique vocalists
                     used_vocal_ids = []
-                    available_vocals = vocal_pool
+                    available_vocals = rotated_vocals
                 
                 if available_vocals:
                     lead = random.choice(available_vocals)

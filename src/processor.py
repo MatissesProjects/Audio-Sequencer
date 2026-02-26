@@ -325,6 +325,10 @@ class AudioProcessor:
                 # Invert energy for ducking (High energy = Low volume)
                 # target_vol = 1.0 - (energy * depth)
                 val = 1.0 - (min(1.0, energy / sensitivity) * depth)
+                
+                # Ensure it never goes to total silence (keep at least 15% volume)
+                val = max(0.15, val)
+                
                 keyframes.append((t_ms, float(val)))
                 
             return keyframes
