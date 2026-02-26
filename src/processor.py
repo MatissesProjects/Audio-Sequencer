@@ -336,3 +336,30 @@ class AudioProcessor:
             print(f"Error calculating sidechain: {e}")
             return []
 
+    def generate_gender_swap_remote(self, source_path, output_path, target="female", steps=0):
+        """Calls remote 4090 for gender transformation (formant shifting)."""
+        from src.core.config import AppConfig
+        url = AppConfig.REMOTE_GENDER_URL
+        
+        try:
+            import requests
+            print(f"Requesting Remote Gender Swap ({target}): {os.path.basename(source_path)}...")
+            with open(source_path, 'rb') as f:
+                response = requests.post(
+                    url,
+                    files={'file': f},
+                    data={'target': target, 'steps': steps},
+                    timeout=60
+                )
+            
+            if response.status_code == 200:
+                with open(output_path, 'wb') as f:
+                    f.write(response.content)
+                return output_path
+            else:
+                print(f"Remote gender swap failed ({response.status_code}).")
+        except Exception as e:
+            print(f"Remote gender swap error: {e}.")
+            
+        return None
+

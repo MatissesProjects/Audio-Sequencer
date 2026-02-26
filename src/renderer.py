@@ -84,7 +84,7 @@ def _process_single_segment(s, i, target_bpm, sr, time_range):
 
     # Create unique hash for this segment's heavy processing
     # (file + bpm + pitch + duration + offset + stem mix + harmony + frequency ducking + keyframes)
-    key_str = f"{s['file_path']}_{s['bpm']}_{target_bpm}_{s.get('pitch_shift',0)}_{s_dur}_{s_off}_{stems_dir}_{s.get('vocal_shift',0)}_{s.get('harmony_level',0)}_{s.get('vocal_vol',1.0)}_{s.get('drum_vol',1.0)}_{s.get('bass_vol',1.0)}_{s.get('instr_vol',1.0)}_{s.get('duck_low',1.0)}_{s.get('duck_mid',1.0)}_{s.get('duck_high',1.0)}_{str(s.get('keyframes', {}))}"
+    key_str = f"{s['file_path']}_{s['bpm']}_{target_bpm}_{s.get('pitch_shift',0)}_{s_dur}_{s_off}_{stems_dir}_{s.get('vocal_shift',0)}_{s.get('gender_swap','none')}_{s.get('harmony_level',0)}_{s.get('vocal_vol',1.0)}_{s.get('drum_vol',1.0)}_{s.get('bass_vol',1.0)}_{s.get('instr_vol',1.0)}_{s.get('duck_low',1.0)}_{s.get('duck_mid',1.0)}_{s.get('duck_high',1.0)}_{str(s.get('keyframes', {}))}"
     cache_hash = hashlib.md5(key_str.encode()).hexdigest()
     cache_file = os.path.join(cache_dir, f"{cache_hash}.npy")
     
@@ -118,6 +118,20 @@ def _process_single_segment(s, i, target_bpm, sr, time_range):
             stem_file = os.path.join(stems_dir, f"{stype}.wav")
             if not os.path.exists(stem_file): continue
             
+            # --- Remote Gender Swap / Formant Shift ---
+            v_shift_applied = False
+            if stype == "vocals":
+                g_swap = s.get('gender_swap', 'none')
+                if g_swap != "none":
+                    v_shift = s.get('vocal_shift', 0)
+                    gs_hash = hashlib.md5(f"{stem_file}_{g_swap}_{v_shift}".encode()).hexdigest()
+                    gs_cache = os.path.join(AppConfig.CACHE_DIR, f"gs_{gs_hash}.wav")
+                    if not os.path.exists(gs_cache):
+                        proc.generate_gender_swap_remote(stem_file, gs_cache, target=g_swap, steps=v_shift)
+                    if os.path.exists(gs_cache):
+                        stem_file = gs_cache
+                        v_shift_applied = True
+
             # 1. Load & Loop
             y, _ = librosa.load(stem_file, sr=sr)
             onsets = [float(x)*1000 for x in s.get('onsets_json', "").split(',') if x]
@@ -128,7 +142,9 @@ def _process_single_segment(s, i, target_bpm, sr, time_range):
             
             # 3. Pitch Shift
             if stype == "vocals":
-                v_ps = s.get('pitch_shift', 0) + s.get('vocal_shift', 0)
+                v_ps = s.get('pitch_shift', 0)
+                if not v_shift_applied:
+                    v_ps += s.get('vocal_shift', 0)
                 if v_ps != 0:
                     y_sync = proc.shift_pitch_numpy(y_sync, sr, v_ps)
             else:

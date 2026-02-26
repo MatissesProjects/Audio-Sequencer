@@ -25,6 +25,7 @@ class AppConfig:
     REMOTE_SECTIONS_URL = f"http://{REMOTE_AI_HOST}:{REMOTE_AI_PORT}/analyze/sections"
     REMOTE_HARMONIZE_URL = f"http://{REMOTE_AI_HOST}:{REMOTE_AI_PORT}/process/harmonize"
     REMOTE_CONTINUE_URL = f"http://{REMOTE_AI_HOST}:{REMOTE_AI_PORT}/process/continue"
+    REMOTE_GENDER_URL = f"http://{REMOTE_AI_HOST}:{REMOTE_AI_PORT}/process/gender_transform"
     
     # Ollama Settings (Local AI on remote 4090)
     OLLAMA_URL = f"http://{REMOTE_AI_HOST}:11434/api/generate"

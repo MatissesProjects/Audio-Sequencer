@@ -399,14 +399,71 @@ def generate():
 
         # Save to memory-buffered WAV
         byte_io = io.BytesIO()
-        sf.write(byte_io, samples, 32000, format='WAV')
-        byte_io.seek(0)
+                sf.write(byte_io, samples, 32000, format='WAV')
+                byte_io.seek(0)
+                return send_file(byte_io, mimetype="audio/wav")
+                
+            except Exception as e:
+                print(f"Generation Error: {e}")
+                return str(e), 500
         
-        return send_file(byte_io, mimetype="audio/wav")
+        @app.route('/process/gender_transform', methods=['POST'])
+        def gender_transform():
+            """Transforms vocal gender using pitch and formant-shaping filters."""
+            print(f"[REQ] /process/gender_transform from {request.remote_addr}")
+            if 'file' not in request.files:
+                return "No file part", 400
+            
+            file = request.files['file']
+            # target: 'male' or 'female'
+            target = request.form.get('target', 'female')
+            # steps: optional pitch shift override
+            try:
+                steps = float(request.form.get('steps', 0))
+            except:
+                steps = 0
+            
+            with tempfile.TemporaryDirectory() as tmpdir:
+                input_path = os.path.join(tmpdir, "input.wav")
+                file.save(input_path)
+                
+                try:
+                    y, sr = librosa.load(input_path, sr=44100)
+                    
+                    # Determine base pitch shift if not provided (default to full octave swap)
+                    if steps == 0:
+                        steps = 12 if target == 'female' else -12
+                    
+                    # 1. High-quality pitch shift
+                    y_shifted = librosa.effects.pitch_shift(y, sr=sr, n_steps=steps)
+                    
+                    # 2. Formant-shaping approximation using Pedalboard
+                    if target == 'female':
+                        # Shift resonance up: Remove low 'chest' frequencies, boost 'head' clarity
+                        board = Pedalboard([
+                            HighpassFilter(cutoff_frequency_hz=350),
+                            Chorus(rate_hz=0.2, depth=0.2), # Subtle thickening
+                            Compressor(threshold_db=-18, ratio=4),
+                        ])
+                    else:
+                        # Shift resonance down: Keep lows, cut super-highs
+                        board = Pedalboard([
+                            LowpassFilter(cutoff_frequency_hz=3500),
+                            Chorus(rate_hz=0.5, depth=0.1),
+                            Compressor(threshold_db=-12, ratio=3),
+                        ])
+                    
+                    processed = board(y_shifted.reshape(1, -1).astype(np.float32), sr)
+                    
+                    byte_io = io.BytesIO()
+                    sf.write(byte_io, processed.T, sr, format='WAV')
+                    byte_io.seek(0)
+                    return send_file(byte_io, mimetype="audio/wav")
+                    
+                except Exception as e:
+                    print(f"Gender Transform Error: {e}")
+                    return str(e), 500
         
-    except Exception as e:
-        print(f"Generation Error: {e}")
-        return str(e), 500
 
 if __name__ == '__main__':
     # Listen on all interfaces so your main machine can connect

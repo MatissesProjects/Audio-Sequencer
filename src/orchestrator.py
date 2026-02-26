@@ -406,6 +406,22 @@ class FullMixOrchestrator:
                                 'vocal_vol': 1.0 if is_vocal_heavy else 0.0, 'instr_vol': 0.0 if is_vocal_heavy else 0.8, 'bass_vol': 0.0, 'vocal_shift': s_shift, 'ducking_depth': 0.8, 'reverb': 0.5, 'duck_low': 0.1, 'duck_mid': 0.6,
                                 'keyframes': {}
                             })
+                        
+                        # 2. Gender-Swapped Layer (Pro Feature)
+                        if is_vocal_heavy and lead.get('vocal_gender'):
+                            # Detect opposite gender
+                            orig_g = lead.get('vocal_gender').lower()
+                            target_g = "female" if "male" in orig_g and "female" not in orig_g else "male"
+                            
+                            lane = find_free_lane(current_ms, b_dur + overlap, role="atmosphere")
+                            segments.append({
+                                'id': lead['id'], 'filename': f"{lead['filename']} ({target_g.upper()})", 'file_path': lead['file_path'], 'bpm': lead['bpm'], 'harmonic_key': lead['harmonic_key'],
+                                'start_ms': current_ms, 'duration_ms': b_dur + overlap, 'offset_ms': get_best_offset(lead, b_name), 'stems_path': lead.get('stems_path'),
+                                'vocal_lyrics': lead.get('vocal_lyrics'), 'vocal_gender': lead.get('vocal_gender'),
+                                'volume': 0.5, 'pan': 0.4, 'lane': lane, 'pitch_shift': ps, 'low_cut': 400, 'fade_in_ms': 4000, 'fade_out_ms': 4000,
+                                'vocal_vol': 1.2, 'instr_vol': 0.0, 'bass_vol': 0.0, 'vocal_shift': 0, 'gender_swap': target_g, 'ducking_depth': 0.7, 'reverb': 0.4,
+                                'keyframes': {}
+                            })
 
             # --- ATMOSPHERE GLUE (Lanes 6-7) ---
             if not is_intro and not is_outro:

@@ -46,6 +46,7 @@ class TrackSegment:
             except:
                 pass
         self.vocal_shift = 0 # Independent pitch shift for vocals
+        self.gender_swap = "none" # "none", "male", "female"
         self.harmony_level = 0.0 # 0.0 to 1.0 (Mix of rhythmic harmonic layer)
         self.vocal_vol = 1.0
         self.drum_vol = 1.0
@@ -127,6 +128,7 @@ class TrackSegment:
             'vocal_energy': self.vocal_energy,
             'vocal_lyrics': self.vocal_lyrics,
             'vocal_gender': self.vocal_gender,
+            'gender_swap': self.gender_swap,
             'sections_json': json.dumps(self.sections),
             'vocal_shift': self.vocal_shift,
             'harmony_level': self.harmony_level,
