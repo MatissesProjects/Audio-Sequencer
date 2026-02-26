@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QTableWidgetItem, QLineEdit, QLabel, QPushButton, 
                              QFrame, QMessageBox, QScrollArea, QFileDialog,
                              QSlider, QComboBox, QCheckBox, QStatusBar, QApplication,
-                             QSplitter, QFormLayout)
+                             QSplitter, QFormLayout, QMenu)
 from PyQt6.QtCore import Qt, QSize, QTimer, QUrl, QMimeData
 from PyQt6.QtGui import QBrush, QColor, QDrag
 from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
