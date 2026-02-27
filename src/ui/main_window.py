@@ -14,6 +14,11 @@ from PyQt6.QtGui import QBrush, QColor, QDrag, QDropEvent, QDragEnterEvent
 
 # ... imports ...
 
+from src.scoring import CompatibilityScorer
+from src.generator import TransitionGenerator
+from src.orchestrator import FullMixOrchestrator
+from src.core.models import TrackSegment, TrackMetadata
+
 def sqlite3_factory(cursor: sqlite3.Cursor, row: Tuple[Any, ...]) -> Dict[str, Any]:
     d = {}
     for idx, col in enumerate(cursor.description):
@@ -24,33 +29,37 @@ class AudioSequencerApp(QMainWindow):
     def __init__(self) -> None:
         boot_start = time.time()
         super().__init__()
-        # ... properties ...
+        print("[BOOT] Main Window Class Initialized")
+        
+        AppConfig.ensure_dirs()
         self.dm: DataManager = DataManager()
         self.processor: AudioProcessor = AudioProcessor(sample_rate=AppConfig.SAMPLE_RATE)
         self.renderer: FlowRenderer = FlowRenderer(sample_rate=AppConfig.SAMPLE_RATE)
         self.undo_manager: UndoManager = UndoManager()
         
-        self.scorer: Optional[Any] = None
-        self.generator: Optional[Any] = None
-        self.orchestrator: Optional[Any] = None
-        # ...
+        # AI state
+        self.scorer: Optional[CompatibilityScorer] = None
+        self.generator: Optional[TransitionGenerator] = None
+        self.orchestrator: Optional[FullMixOrchestrator] = None
+        self.ai_enabled: bool = False
+        self.ai_loading: bool = True
         
-        self.selected_library_track = None
-        self.player = QMediaPlayer()
-        self.audio_output = QAudioOutput()
+        self.selected_library_track: Optional[TrackMetadata] = None
+        self.player: QMediaPlayer = QMediaPlayer()
+        self.audio_output: QAudioOutput = QAudioOutput()
         self.player.setAudioOutput(self.audio_output)
         self.audio_output.setVolume(0.8)
-        self.preview_path = os.path.join(AppConfig.GENERATED_ASSETS_DIR, "temp_preview.wav")
-        self.preview_dirty = True
+        self.preview_path: str = os.path.join(AppConfig.GENERATED_ASSETS_DIR, "temp_preview.wav")
+        self.preview_dirty: bool = True
         
-        self.play_timer = QTimer()
+        self.play_timer: QTimer = QTimer()
         self.play_timer.setInterval(20)
         self.play_timer.timeout.connect(self.update_playback_cursor)
-        self.is_playing = False
+        self.is_playing: bool = False
         
-        self.waveform_loaders = []
-        self.copy_buffer = None
-        self.is_library_preview = False
+        self.waveform_loaders: List[WaveformLoader] = []
+        self.copy_buffer: Optional[TrackSegment] = None
+        self.is_library_preview: bool = False
         
         print(f"[BOOT] Core components ready ({time.time() - boot_start:.3f}s)")
         ui_start = time.time()
@@ -58,22 +67,24 @@ class AudioSequencerApp(QMainWindow):
         print(f"[BOOT] UI Layout built ({time.time() - ui_start:.3f}s)")
         
         self.load_library()
-        self.loading_overlay = LoadingOverlay(self.centralWidget())
+        self.central_widget = self.centralWidget()
+        if self.central_widget:
+            self.loading_overlay: LoadingOverlay = LoadingOverlay(self.central_widget)
         self.setAcceptDrops(True)
         
         # Start AI in background
         self.start_ai_warmup()
         print(f"[BOOT] Total window ready in {time.time() - boot_start:.3f}s")
 
-    def start_ai_warmup(self):
+    def start_ai_warmup(self) -> None:
         """Dispatches AI model loading to background thread."""
         self.status_bar.showMessage("Warming up AI Engine (Loading Models)...")
-        self.ai_thread = AIInitializerThread()
+        self.ai_thread: AIInitializerThread = AIInitializerThread()
         self.ai_thread.finished.connect(self.on_ai_ready)
         self.ai_thread.error.connect(self.on_ai_error)
         self.ai_thread.start()
 
-    def on_ai_ready(self, s, g, o):
+    def on_ai_ready(self, s: CompatibilityScorer, g: TransitionGenerator, o: FullMixOrchestrator) -> None:
         self.scorer = s
         self.generator = g
         self.orchestrator = o
@@ -82,7 +93,7 @@ class AudioSequencerApp(QMainWindow):
         self.status_bar.showMessage("AI Engine Online.")
         print("[BOOT] Background AI load complete.")
 
-    def on_ai_error(self, e):
+    def on_ai_error(self, e: str) -> None:
         self.ai_enabled = False
         self.ai_loading = False
         self.status_bar.showMessage("AI Engine Offline (Check internet/models).")
