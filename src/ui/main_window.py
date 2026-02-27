@@ -3,52 +3,37 @@ import os
 import sqlite3
 import json
 import time
+from typing import List, Dict, Optional, Any, Union, Tuple, Set
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                              QTableWidgetItem, QLineEdit, QLabel, QPushButton, 
                              QFrame, QMessageBox, QScrollArea, QFileDialog,
                              QSlider, QComboBox, QCheckBox, QStatusBar, QApplication,
                              QSplitter, QFormLayout, QMenu, QSpinBox)
-from PyQt6.QtCore import Qt, QSize, QTimer, QUrl, QMimeData
-from PyQt6.QtGui import QBrush, QColor, QDrag
-from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
+from PyQt6.QtCore import Qt, QSize, QTimer, QUrl, QMimeData, QPoint
+from PyQt6.QtGui import QBrush, QColor, QDrag, QDropEvent, QDragEnterEvent
 
-# Project Imports (Lightweight)
-from src.database import DataManager
-from src.processor import AudioProcessor
-from src.renderer import FlowRenderer
+# ... imports ...
 
-# Modular Imports
-from src.core.config import AppConfig
-from src.core.models import TrackSegment
-from src.core.undo import UndoManager
-from src.ui.dialogs import show_error
-from src.ui.threads import SearchThread, IngestionThread, WaveformLoader, AIInitializerThread, StemSeparationThread
-from src.ui.widgets import TimelineWidget, DraggableTable, LibraryWaveformPreview, LoadingOverlay
-
-def sqlite3_factory(cursor, row):
+def sqlite3_factory(cursor: sqlite3.Cursor, row: Tuple[Any, ...]) -> Dict[str, Any]:
     d = {}
     for idx, col in enumerate(cursor.description):
         d[col[0]] = row[idx]
     return d
 
 class AudioSequencerApp(QMainWindow):
-    def __init__(self):
+    def __init__(self) -> None:
         boot_start = time.time()
         super().__init__()
-        print("[BOOT] Main Window Class Initialized")
+        # ... properties ...
+        self.dm: DataManager = DataManager()
+        self.processor: AudioProcessor = AudioProcessor(sample_rate=AppConfig.SAMPLE_RATE)
+        self.renderer: FlowRenderer = FlowRenderer(sample_rate=AppConfig.SAMPLE_RATE)
+        self.undo_manager: UndoManager = UndoManager()
         
-        AppConfig.ensure_dirs()
-        self.dm = DataManager()
-        self.processor = AudioProcessor(sample_rate=AppConfig.SAMPLE_RATE)
-        self.renderer = FlowRenderer(sample_rate=AppConfig.SAMPLE_RATE)
-        self.undo_manager = UndoManager()
-        
-        # Placeholder AI state
-        self.scorer = None
-        self.generator = None
-        self.orchestrator = None
-        self.ai_enabled = False
-        self.ai_loading = True
+        self.scorer: Optional[Any] = None
+        self.generator: Optional[Any] = None
+        self.orchestrator: Optional[Any] = None
+        # ...
         
         self.selected_library_track = None
         self.player = QMediaPlayer()

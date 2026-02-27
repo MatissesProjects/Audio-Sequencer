@@ -1,8 +1,9 @@
-from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QTextEdit, QPushButton, QApplication, QMessageBox
+from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QTextEdit, QPushButton, QApplication, QMessageBox, QWidget
 import traceback
+from typing import List, Dict, Optional, Any, Union, Tuple
 
 class DetailedErrorDialog(QDialog):
-    def __init__(self, title, message, details, parent=None):
+    def __init__(self, title: str, message: str, details: str, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setWindowTitle(title)
         self.setMinimumSize(600, 400)
@@ -18,7 +19,6 @@ class DetailedErrorDialog(QDialog):
         msg_label.setWordWrap(True)
         msg_label.setStyleSheet("font-size: 14px; font-weight: bold; color: white;")
         msg_layout.addWidget(msg_label, stretch=1)
-        
         layout.addLayout(msg_layout)
         
         l = QLabel("Technical Details:")
@@ -44,11 +44,13 @@ class DetailedErrorDialog(QDialog):
         layout.addLayout(btn_layout)
         self.setStyleSheet("QDialog { background-color: #252525; } QPushButton { background-color: #444; color: white; padding: 8px; border-radius: 4px; }")
 
-    def copy_to_clipboard(self):
-        QApplication.clipboard().setText(self.details_box.toPlainText())
-        QMessageBox.information(self, "Copied", "Error details copied to clipboard.")
+    def copy_to_clipboard(self) -> None:
+        clipboard = QApplication.clipboard()
+        if clipboard:
+            clipboard.setText(self.details_box.toPlainText())
+            QMessageBox.information(self, "Copied", "Error details copied to clipboard.")
 
-def show_error(parent, title, message, exception):
+def show_error(parent: Optional[QWidget], title: str, message: str, exception: Exception) -> None:
     details = "".join(traceback.format_exception(type(exception), exception, exception.__traceback__))
     dialog = DetailedErrorDialog(title, message, details, parent)
     dialog.exec()

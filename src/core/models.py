@@ -1,6 +1,32 @@
 from PyQt6.QtGui import QColor
 import json
-from typing import Dict, List, Optional, Any, Tuple, Union
+from typing import Dict, List, Optional, Any, Tuple, Union, TypedDict
+
+# Strong Typing for Audio Metadata from Database
+class TrackMetadata(TypedDict, total=False):
+    id: int
+    file_path: str
+    filename: str
+    duration: float
+    sample_rate: int
+    bpm: float
+    harmonic_key: str
+    key: str
+    energy: float
+    vocal_energy: float
+    onset_density: float
+    stems_path: Optional[str]
+    vocal_lyrics: Optional[str]
+    vocal_gender: Optional[str]
+    onsets_json: str
+    sections_json: str
+    clp_embedding_id: Optional[str]
+
+class MusicalSection(TypedDict):
+    start: float
+    end: float
+    label: str
+    energy: float
 
 class TrackSegment:
     KEY_COLORS: Dict[str, QColor] = {
@@ -12,7 +38,7 @@ class TrackSegment:
         'A#': QColor(200, 100, 255), 'B': QColor(100, 255, 100)
     }
 
-    def __init__(self, track_data: Dict[str, Any], start_ms: int = 0, duration_ms: int = 20000, lane: int = 0, offset_ms: int = 0):
+    def __init__(self, track_data: Union[TrackMetadata, Dict[str, Any]], start_ms: int = 0, duration_ms: int = 20000, lane: int = 0, offset_ms: float = 0):
         self.id: int = track_data.get('id', -1)
         self.filename: str = track_data.get('filename', "Unknown")
         self.file_path: str = track_data.get('file_path', "")
@@ -20,11 +46,11 @@ class TrackSegment:
         self.key: str = str(track_data.get('harmonic_key') or track_data.get('key', 'N/A'))
         self.start_ms: int = start_ms
         self.duration_ms: int = duration_ms
-        self.offset_ms: int = offset_ms
+        self.offset_ms: float = offset_ms
         self.volume: float = 1.0
         self.pan: float = 0.0 # -1.0 (Left) to 1.0 (Right)
-        self.low_cut: int = 20 # Hz
-        self.high_cut: int = 20000 # Hz
+        self.low_cut: float = 20.0 # Hz
+        self.high_cut: float = 20000.0 # Hz
         self.is_ambient: bool = False 
         self.lane: int = lane
         self.is_primary: bool = False
@@ -41,7 +67,7 @@ class TrackSegment:
         self.vocal_energy: float = float(track_data.get('vocal_energy') or 0.0)
         self.vocal_lyrics: Optional[str] = track_data.get('vocal_lyrics')
         self.vocal_gender: Optional[str] = track_data.get('vocal_gender')
-        self.sections: List[Dict[str, Any]] = []
+        self.sections: List[MusicalSection] = []
         if 'sections_json' in track_data and track_data['sections_json']:
             try:
                 self.sections = json.loads(track_data['sections_json'])
@@ -107,7 +133,7 @@ class TrackSegment:
                 return v1 + (v2 - v1) * ratio
         return default_val
 
-    def get_end_ms(self) -> int:
+    def get_end_ms(self) -> float:
         """Returns the absolute end time of the segment on the timeline."""
         return self.start_ms + self.duration_ms
 

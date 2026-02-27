@@ -1,5 +1,6 @@
 import os
 import sys
+from typing import List, Dict, Optional, Any, Union, Tuple
 
 # Ensure the project root is in PYTHONPATH
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -9,16 +10,16 @@ from src.database import DataManager
 from src.ingestion import IngestionEngine
 from tqdm import tqdm
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description="AudioSequencer AI - The Flow")
     parser.add_argument("--scan", type=str, help="Directory to scan for audio files")
     parser.add_argument("--stats", action="store_true", help="Show library statistics")
     parser.add_argument("--embed", action="store_true", help="Generate AI embeddings for all tracks")
     parser.add_argument("--gui", action="store_true", help="Launch the Desktop GUI")
-    parser.add_argument("--full-mix", action="store_true", help="Sequence and mix ALL tracks into a continuous journey")
-    parser.add_argument("--layered", action="store_true", help="Create a 2-minute layered journey with a foundation track")
-    parser.add_argument("--hyper", action="store_true", help="Create a professional 5-lane generative arrangement")
-    parser.add_argument("--separate-all", action="store_true", help="Batch process stem separation for all tracks in the library")
+    parser.add_argument("--full-mix", action="store_true", help="Sequence and mix ALL tracks")
+    parser.add_argument("--layered", action="store_true", help="Create a 2-minute layered journey")
+    parser.add_argument("--hyper", action="store_true", help="Create a professional generative arrangement")
+    parser.add_argument("--separate-all", action="store_true", help="Batch process stem separation")
     
     args = parser.parse_args()
     dm = DataManager()
@@ -35,12 +36,10 @@ def main():
         conn = dm.get_conn()
         cursor = conn.cursor()
         cursor.execute("SELECT id, file_path, filename, stems_path FROM tracks")
-        tracks = cursor.fetchall()
+        tracks: List[Tuple[Any, ...]] = cursor.fetchall()
         
         for tid, f_path, fname, existing_stems in tqdm(tracks):
-            if existing_stems and os.path.exists(existing_stems):
-                continue
-            
+            if existing_stems and os.path.exists(existing_stems): continue
             try:
                 stems_dir = AppConfig.get_stems_path(fname)
                 proc.separate_stems(f_path, stems_dir)
@@ -48,23 +47,17 @@ def main():
                 conn.commit()
             except Exception as e:
                 print(f"Error separating {fname}: {e}")
-        conn.close()
-        print("Bulk separation complete.")
+        conn.close(); print("Bulk separation complete.")
         
     if args.embed:
         print("Initializing AI Embedding Engine...")
         from src.embeddings import EmbeddingEngine
         embed_engine = EmbeddingEngine()
-        conn = dm.get_conn()
-        cursor = conn.cursor()
+        conn = dm.get_conn(); cursor = conn.cursor()
         cursor.execute("SELECT id, file_path, clp_embedding_id FROM tracks")
         tracks = cursor.fetchall()
-        
-        print(f"Checking {len(tracks)} tracks for missing embeddings...")
         for track_id, file_path, existing_embed in tqdm(tracks):
-            if existing_embed:
-                continue
-            
+            if existing_embed: continue
             try:
                 embedding = embed_engine.get_embedding(file_path)
                 dm.add_embedding(track_id, embedding, metadata={"file_path": file_path})
@@ -77,9 +70,9 @@ def main():
         print("\n=== Audio Library Statistics ===")
         print(f"Total Tracks: {stats.get('total_tracks', 0)}")
         if stats.get('total_tracks', 0) > 0:
-            print(f"BPM Range:    {stats['min_bpm']} - {stats['max_bpm']} (Avg: {stats['avg_bpm']})")
+            print(f"BPM Range:    {stats.get('min_bpm')} - {stats.get('max_bpm')} (Avg: {stats.get('avg_bpm')})")
             print("Key Distribution:")
-            for key, count in stats['key_distribution'].items():
+            for key, count in stats.get('key_distribution', {}).items():
                 print(f"  {key}: {count}")
         print("================================\n")
 
@@ -93,18 +86,7 @@ def main():
 
     if args.full_mix:
         from src.orchestrator import FullMixOrchestrator
-        orch = FullMixOrchestrator()
-        orch.generate_full_mix(target_bpm=124)
-
-    if args.layered:
-        from src.orchestrator import FullMixOrchestrator
-        orch = FullMixOrchestrator()
-        orch.generate_layered_journey(target_bpm=124)
-
-    if args.hyper:
-        from src.orchestrator import FullMixOrchestrator
-        orch = FullMixOrchestrator()
-        orch.generate_hyper_mix(target_bpm=124)
+        FullMixOrchestrator().generate_hyper_mix(target_bpm=124.0)
 
 if __name__ == "__main__":
     main()

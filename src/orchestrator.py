@@ -11,12 +11,13 @@ from src.scoring import CompatibilityScorer
 from src.processor import AudioProcessor
 from src.renderer import FlowRenderer
 from src.generator import TransitionGenerator
+from src.core.models import TrackSegment, TrackMetadata, MusicalSection
 from tqdm import tqdm
 
 class FullMixOrchestrator:
     """Sequences and layers curated selections for maximum musical flow."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.dm: DataManager = DataManager()
         self.scorer: CompatibilityScorer = CompatibilityScorer()
         self.processor: AudioProcessor = AudioProcessor()
@@ -25,13 +26,13 @@ class FullMixOrchestrator:
         self.min_score_threshold: float = 55.0
         self.lane_count: int = 20
 
-    def find_curated_sequence(self, max_tracks: int = 6, seed_track: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+    def find_curated_sequence(self, max_tracks: int = 6, seed_track: Optional[TrackMetadata] = None) -> List[TrackMetadata]:
         """Finds a high-compatibility path, starting from a seed if provided."""
         conn = self.dm.get_conn()
         conn.row_factory = lambda cursor, row: {col[0]: row[idx] for idx, col in enumerate(cursor.description)}
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM tracks")
-        all_tracks: List[Dict[str, Any]] = cursor.fetchall()
+        all_tracks: List[TrackMetadata] = cursor.fetchall()
         conn.close()
 
         if not all_tracks:
@@ -52,10 +53,10 @@ class FullMixOrchestrator:
             best_score = -1.0
             best_idx = -1
 
-            curr_emb = self.dm.get_embedding(current['clp_embedding_id']) if current['clp_embedding_id'] else None
+            curr_emb = self.dm.get_embedding(current['clp_embedding_id']) if current.get('clp_embedding_id') else None
 
             for i, candidate in enumerate(unvisited):
-                cand_emb = self.dm.get_embedding(candidate['clp_embedding_id']) if candidate['clp_embedding_id'] else None
+                cand_emb = self.dm.get_embedding(candidate['clp_embedding_id']) if candidate.get('clp_embedding_id') else None
                 score = float(self.scorer.get_total_score(current, candidate, curr_emb, cand_emb)['total'])
 
                 if score > best_score:
@@ -71,7 +72,7 @@ class FullMixOrchestrator:
 
         return sequence
 
-    def generate_hyper_mix(self, output_path: str = "hyper_automated_mix.mp3", target_bpm: float = 124.0, seed_track: Optional[Dict[str, Any]] = None) -> Optional[str]:
+    def generate_hyper_mix(self, output_path: str = "hyper_automated_mix.mp3", target_bpm: float = 124.0, seed_track: Optional[TrackMetadata] = None) -> Optional[str]:
         """Direct rendering of a Hyper-Mix journey."""
         segments = self.get_hyper_segments(seed_track=seed_track)
         if not segments:
@@ -80,16 +81,18 @@ class FullMixOrchestrator:
         self.renderer.render_timeline(segments, output_path, target_bpm=target_bpm)
         return output_path
 
-    def get_hyper_segments(self, seed_track: Optional[Dict[str, Any]] = None, start_time_ms: int = 0, depth: int = 0, force_ending: bool = False) -> List[Dict[str, Any]]:
+    def get_hyper_segments(self, seed_track: Optional[TrackMetadata] = None, start_time_ms: int = 0, depth: int = 0, force_ending: bool = False) -> List[Dict[str, Any]]:
         """Returns organized segment data for a hyper-mix."""
         conn = self.dm.get_conn()
         conn.row_factory = lambda cursor, row: {col[0]: row[idx] for idx, col in enumerate(cursor.description)}
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM tracks")
-        all_tracks: List[Dict[str, Any]] = cursor.fetchall()
+        all_tracks: List[TrackMetadata] = cursor.fetchall()
         conn.close()
 
         if len(all_tracks) < 5: return []
+
+        print(f"[AI] Orchestrating Hyper-Mix Depth {depth} (Pool: {len(all_tracks)} clips)")
 
         vocal_pool = [t for t in all_tracks if ((t.get('vocal_energy') or 0) > 0.02 or t.get('vocal_lyrics')) and t.get('stems_path')]
         
@@ -181,12 +184,12 @@ class FullMixOrchestrator:
                 if l not in busy_lanes: return l
             return preferred or 0
 
-        def get_best_offset(track: Dict[str, Any], block_type: str) -> float:
-            default_offset = (track.get('loop_start') or 0) * 1000.0
+        def get_best_offset(track: TrackMetadata, block_type: str) -> float:
+            default_offset = float(track.get('loop_start') or 0) * 1000.0
             s_json = track.get('sections_json')
             if not s_json: return default_offset
             try:
-                sections = json.loads(s_json)
+                sections: List[MusicalSection] = json.loads(s_json)
                 if not sections: return default_offset
                 target = "Verse"
                 bt_l = block_type.lower()
@@ -399,12 +402,12 @@ class FullMixOrchestrator:
             except: pass
         return segments
 
-    def find_best_filler_for_gap(self, prev_track_id: Optional[int] = None, next_track_id: Optional[int] = None) -> Optional[Dict[str, Any]]:
+    def find_best_filler_for_gap(self, prev_track_id: Optional[int] = None, next_track_id: Optional[int] = None) -> Optional[TrackMetadata]:
         """Finds the most compatible track to fill a gap."""
         conn = self.dm.get_conn()
         conn.row_factory = lambda cursor, row: {col[0]: row[idx] for idx, col in enumerate(cursor.description)}
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM tracks"); all_tracks: List[Dict[str, Any]] = cursor.fetchall(); conn.close()
+        cursor.execute("SELECT * FROM tracks"); all_tracks: List[TrackMetadata] = cursor.fetchall(); conn.close()
         if not all_tracks: return None
         prev_track = next((t for t in all_tracks if t['id'] == prev_track_id), None) if prev_track_id else None
         next_track = next((t for t in all_tracks if t['id'] == next_track_id), None) if next_track_id else None
@@ -412,14 +415,14 @@ class FullMixOrchestrator:
         for cand in all_tracks:
             if prev_track and cand['id'] == prev_track['id']: continue
             if next_track and cand['id'] == next_track['id']: continue
-            c_emb = self.dm.get_embedding(cand['clp_embedding_id']) if cand['clp_embedding_id'] else None
+            c_emb = self.dm.get_embedding(cand['clp_embedding_id']) if cand.get('clp_embedding_id') else None
             if prev_track and next_track:
                 score = float(self.scorer.calculate_bridge_score(prev_track, next_track, cand, c_emb=c_emb))
             elif prev_track:
-                p_emb = self.dm.get_embedding(prev_track['clp_embedding_id']) if prev_track['clp_embedding_id'] else None
+                p_emb = self.dm.get_embedding(prev_track['clp_embedding_id']) if prev_track.get('clp_embedding_id') else None
                 score = float(self.scorer.get_total_score(prev_track, cand, p_emb, c_emb)['total'])
             elif next_track:
-                n_emb = self.dm.get_embedding(next_track['clp_embedding_id']) if next_track['clp_embedding_id'] else None
+                n_emb = self.dm.get_embedding(next_track['clp_embedding_id']) if next_track.get('clp_embedding_id') else None
                 score = float(self.scorer.get_total_score(next_track, cand, n_emb, c_emb)['total'])
             else:
                 score = (float(cand.get('energy') or 0)) * 100

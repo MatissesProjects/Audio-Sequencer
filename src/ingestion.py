@@ -1,5 +1,7 @@
 import os
 import sqlite3
+import json
+from typing import List, Dict, Optional, Any, Union, Tuple
 from src.analysis import AnalysisModule
 from src.processor import AudioProcessor
 from src.database import init_db
@@ -9,21 +11,20 @@ from tqdm import tqdm
 class IngestionEngine:
     """Manages scanning directories and populating the database."""
     
-    SUPPORTED_EXTENSIONS = ('.wav', '.mp3', '.flac', '.aiff', '.ogg')
+    SUPPORTED_EXTENSIONS: Tuple[str, ...] = ('.wav', '.mp3', '.flac', '.aiff', '.ogg')
 
-    def __init__(self, db_path=None):
-        self.db_path = db_path or AppConfig.DB_PATH
-        self.analyzer = AnalysisModule()
-        self.processor = AudioProcessor()
+    def __init__(self, db_path: Optional[str] = None) -> None:
+        self.db_path: str = db_path or AppConfig.DB_PATH
+        self.analyzer: AnalysisModule = AnalysisModule()
+        self.processor: AudioProcessor = AudioProcessor()
         AppConfig.ensure_dirs()
-        # Ensure DB exists
         if not os.path.exists(self.db_path):
             init_db(self.db_path)
 
-    def scan_directory(self, root_dir):
+    def scan_directory(self, root_dir: str) -> None:
         """Recursively scans a directory for audio files and processes them."""
         print(f"Scanning directory: {root_dir}")
-        audio_files = []
+        audio_files: List[str] = []
         for root, _, files in os.walk(root_dir):
             for f in files:
                 if f.lower().endswith(self.SUPPORTED_EXTENSIONS):
@@ -36,7 +37,7 @@ class IngestionEngine:
 
         print("Ingestion complete.")
 
-    def ingest_single_file(self, file_path):
+    def ingest_single_file(self, file_path: str) -> None:
         """Analyzes a single file, separates stems, and stores in DB."""
         abs_path = os.path.abspath(file_path)
         conn = sqlite3.connect(self.db_path)
@@ -53,10 +54,9 @@ class IngestionEngine:
             stems_dir = AppConfig.get_stems_path(features['filename'])
             self.processor.separate_stems(file_path, stems_dir)                
             
-            # Vocal Analysis
-            vocal_lyrics = None
-            vocal_gender = None
-            if features.get('vocal_energy', 0) > 0.1:
+            vocal_lyrics: Optional[str] = None
+            vocal_gender: Optional[str] = None
+            if float(features.get('vocal_energy', 0)) > 0.1:
                 vocal_path = os.path.join(stems_dir, "vocals.wav")
                 if os.path.exists(vocal_path):
                     from src.vocal_analyzer import VocalAnalyzer
@@ -65,10 +65,8 @@ class IngestionEngine:
                     vocal_lyrics = res.get("lyrics")
                     vocal_gender = res.get("gender")
 
-            import json
             sections_json = json.dumps(features.get('sections', []))
 
-            # Update DB with stems_path
             cursor.execute("UPDATE tracks SET stems_path = ? WHERE file_path = ?", (os.path.abspath(stems_dir), abs_path))
             
             if not row:

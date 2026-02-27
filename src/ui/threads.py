@@ -1,17 +1,21 @@
 from PyQt6.QtCore import QThread, pyqtSignal
 import os
 import time
+from typing import List, Dict, Optional, Any, Union, Tuple
+from src.database import DataManager
+from src.core.models import TrackSegment
+from src.processor import AudioProcessor
 
 class SearchThread(QThread):
     resultsFound = pyqtSignal(list)
     errorOccurred = pyqtSignal(str)
     
-    def __init__(self, query, dm):
+    def __init__(self, query: str, dm: DataManager) -> None:
         super().__init__()
-        self.query = query
-        self.dm = dm
+        self.query: str = query
+        self.dm: DataManager = dm
         
-    def run(self):
+    def run(self) -> None:
         try:
             from src.embeddings import EmbeddingEngine
             engine = EmbeddingEngine()
@@ -26,7 +30,7 @@ class AIInitializerThread(QThread):
     finished = pyqtSignal(object, object, object) # scorer, generator, orchestrator
     error = pyqtSignal(str)
     
-    def run(self):
+    def run(self) -> None:
         try:
             from src.core.config import AppConfig
             import requests
@@ -34,9 +38,7 @@ class AIInitializerThread(QThread):
             print(f"[BOOT] AI Warm-up started in background... (Remote AI: {AppConfig.REMOTE_AI_HOST})")
             start = time.time()
             
-            # Fast connectivity check
             try:
-                # We just ping the root or generate without data to see if it's there
                 requests.get(f"http://{AppConfig.REMOTE_AI_HOST}:{AppConfig.REMOTE_AI_PORT}/", timeout=2)
             except:
                 print(f"[BOOT] Warning: Remote AI Server ({AppConfig.REMOTE_AI_HOST}) seems offline.")
@@ -47,11 +49,9 @@ class AIInitializerThread(QThread):
             from src.embeddings import EmbeddingEngine
             
             s = CompatibilityScorer()
-            # TransitionGenerator now uses remote network calls
             g = TransitionGenerator()
             o = FullMixOrchestrator()
             
-            # Warm up CLAP model in background
             print("[BOOT] Pre-loading CLAP model...")
             _ = EmbeddingEngine()
             
@@ -64,15 +64,15 @@ class AIInitializerThread(QThread):
 class WaveformLoader(QThread):
     waveformLoaded = pyqtSignal(object, list, dict) # segment, full_waveform, stem_waveforms
     
-    def __init__(self, segment, processor):
+    def __init__(self, segment: TrackSegment, processor: AudioProcessor) -> None:
         super().__init__()
-        self.segment = segment
-        self.processor = processor
+        self.segment: TrackSegment = segment
+        self.processor: AudioProcessor = processor
         
-    def run(self):
+    def run(self) -> None:
         try:
             w = self.processor.get_waveform_envelope(self.segment.file_path)
-            sw = {}
+            sw: Dict[str, List[float]] = {}
             if self.segment.stems_path and os.path.exists(self.segment.stems_path):
                 for s in ["vocals", "drums", "bass", "other"]:
                     sp = os.path.join(self.segment.stems_path, f"{s}.wav")
@@ -80,18 +80,17 @@ class WaveformLoader(QThread):
                         sw[s] = self.processor.get_waveform_envelope(sp)
             
             self.waveformLoaded.emit(self.segment, w, sw)
-        except:
-            pass
+        except: pass
 
 class IngestionThread(QThread):
     finished = pyqtSignal()
     
-    def __init__(self, paths, dm):
+    def __init__(self, paths: List[str], dm: DataManager) -> None:
         super().__init__()
-        self.paths = paths
-        self.dm = dm
+        self.paths: List[str] = paths
+        self.dm: DataManager = dm
         
-    def run(self):
+    def run(self) -> None:
         try:
             from src.ingestion import IngestionEngine
             ie = IngestionEngine(db_path=self.dm.db_path)
@@ -99,21 +98,20 @@ class IngestionThread(QThread):
                 if os.path.isdir(p):
                     ie.scan_directory(p)
                 else:
-                    ie.analyze_and_store(p)
+                    ie.ingest_single_file(p)
             self.finished.emit()
-        except:
-            pass
+        except: pass
 
 class StemSeparationThread(QThread):
     finished = pyqtSignal(str) # stems_dir
     error = pyqtSignal(str)
     
-    def __init__(self, segment, processor):
+    def __init__(self, segment: TrackSegment, processor: AudioProcessor) -> None:
         super().__init__()
-        self.segment = segment
-        self.processor = processor
+        self.segment: TrackSegment = segment
+        self.processor: AudioProcessor = processor
         
-    def run(self):
+    def run(self) -> None:
         try:
             from src.core.config import AppConfig
             stems_dir = AppConfig.get_stems_path(self.segment.filename)
