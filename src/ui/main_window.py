@@ -11,13 +11,23 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                              QSplitter, QFormLayout, QMenu, QSpinBox)
 from PyQt6.QtCore import Qt, QSize, QTimer, QUrl, QMimeData, QPoint
 from PyQt6.QtGui import QBrush, QColor, QDrag, QDropEvent, QDragEnterEvent
+from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
 
-# ... imports ...
+# Project Imports (Lightweight)
+from src.database import DataManager
+from src.processor import AudioProcessor
+from src.renderer import FlowRenderer
 
+# Modular Imports
+from src.core.config import AppConfig
+from src.core.models import TrackSegment, TrackMetadata
+from src.core.undo import UndoManager
+from src.ui.dialogs import show_error
+from src.ui.threads import SearchThread, IngestionThread, WaveformLoader, AIInitializerThread, StemSeparationThread
+from src.ui.widgets import TimelineWidget, DraggableTable, LibraryWaveformPreview, LoadingOverlay
 from src.scoring import CompatibilityScorer
 from src.generator import TransitionGenerator
 from src.orchestrator import FullMixOrchestrator
-from src.core.models import TrackSegment, TrackMetadata
 
 def sqlite3_factory(cursor: sqlite3.Cursor, row: Tuple[Any, ...]) -> Dict[str, Any]:
     d = {}
@@ -99,7 +109,7 @@ class AudioSequencerApp(QMainWindow):
         self.status_bar.showMessage("AI Engine Offline (Check internet/models).")
         print(f"[BOOT] AI background error: {e}")
         
-    def init_ui(self):
+    def init_ui(self) -> None:
         self.setWindowTitle("AudioSequencer AI - The Pro Flow")
         self.setMinimumSize(QSize(1400, 950))
         
