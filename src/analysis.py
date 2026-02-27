@@ -1,66 +1,50 @@
 import librosa
 import numpy as np
 import os
+from typing import List, Dict, Optional, Any, Union, Tuple
 
 class AnalysisModule:
     """Wrapper for librosa to extract musical features from audio files."""
     
-    def __init__(self, sample_rate=44100):
-        self.target_sr = sample_rate
+    def __init__(self, sample_rate: int = 44100):
+        self.target_sr: int = sample_rate
 
-    def analyze_file(self, file_path):
+    def analyze_file(self, file_path: str) -> Dict[str, Any]:
         """Analyzes a single audio file and returns a dictionary of features."""
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"File not found: {file_path}")
 
-        # Load audio (mono for analysis)
         y, sr = librosa.load(file_path, sr=self.target_sr, mono=True)
         duration = librosa.get_duration(y=y, sr=sr)
 
-        # 1. BPM Detection
         onset_env = librosa.onset.onset_strength(y=y, sr=sr)
         tempo, beat_frames = librosa.beat.beat_track(onset_envelope=onset_env, sr=sr)
-        # librosa 0.10+ returns tempo as a scalar or array; handle both
-        bpm = float(tempo[0]) if isinstance(tempo, (np.ndarray, list)) else float(tempo)
+        bpm: float = float(tempo[0]) if isinstance(tempo, (np.ndarray, list)) else float(tempo)
         
-        # 1b. Beat Onsets (for seamless looping/alignment)
-        beat_times = librosa.frames_to_time(beat_frames, sr=sr)
-        onsets_json = ",".join([str(round(t, 4)) for t in beat_times])
-        
-        # 1c. Onset Density (Activity)
-        onset_density = len(beat_times) / duration if duration > 0 else 0
+        beat_times: np.ndarray = librosa.frames_to_time(beat_frames, sr=sr)
+        onsets_json: str = ",".join([str(round(t, 4)) for t in beat_times])
+        onset_density: float = len(beat_times) / duration if duration > 0 else 0.0
 
-        # 2. Harmonic Key Detection (Simplified Chromagram)
-        # Using a simple chromagram-based approach for root note estimation
         chroma = librosa.feature.chroma_stft(y=y, sr=sr)
         mean_chroma = np.mean(chroma, axis=1)
         notes = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
-        key_index = np.argmax(mean_chroma)
-        harmonic_key = notes[key_index]
+        harmonic_key: str = notes[np.argmax(mean_chroma)]
 
-        # 3. Energy / Loudness (RMS)
         rms = librosa.feature.rms(y=y)
-        energy = float(np.mean(rms))
+        energy: float = float(np.mean(rms))
         
-        # 4. Best Loop Detection (Smart Clip Extraction)
-        # Find 16-beat window with stable energy
         loop_start, loop_dur = self.detect_best_loop(y, sr, beat_times, bars=4)
+        vocal_energy: float = self.detect_vocal_prominence(y, sr)
 
-        # 5. Vocal Prominence (Mid-range energy vs total)
-        vocal_energy = self.detect_vocal_prominence(y, sr)
-
-        # 6. Deep Structural MIR (Remote)
-        sections = []
+        sections: List[Dict[str, Any]] = []
         try:
             from src.core.config import AppConfig
             import requests
-            print(f"Requesting Remote Structural Analysis for: {os.path.basename(file_path)}...")
             with open(file_path, 'rb') as f:
                 r = requests.post(AppConfig.REMOTE_SECTIONS_URL, files={'file': f}, timeout=15)
             if r.status_code == 200:
                 sections = r.json().get("sections", [])
-        except:
-            pass
+        except: pass
 
         return {
             "file_path": os.path.abspath(file_path),
@@ -78,59 +62,29 @@ class AnalysisModule:
             "sections": sections
         }
 
-    def detect_vocal_prominence(self, y, sr):
+    def detect_vocal_prominence(self, y: np.ndarray, sr: int) -> float:
         """Estimates how prominent vocals/mid-range leads are."""
-        # Compute spectrogram
-        S = np.abs(librosa.stft(y))
-        freqs = librosa.fft_frequencies(sr=sr)
-        
-        # Vocal mask: 300 - 3000 Hz
+        S = np.abs(librosa.stft(y)); freqs = librosa.fft_frequencies(sr=sr)
         vocal_mask = (freqs >= 300) & (freqs <= 3000)
-        vocal_energy = np.mean(S[vocal_mask, :])
-        total_energy = np.mean(S)
-        
-        return float(vocal_energy / (total_energy + 1e-9))
+        v_energy = np.mean(S[vocal_mask, :]); total_energy = np.mean(S)
+        return float(v_energy / (total_energy + 1e-9))
 
-    def detect_best_loop(self, y, sr, beat_times, bars=4):
+    def detect_best_loop(self, y: np.ndarray, sr: int, beat_times: np.ndarray, bars: int = 4) -> Tuple[float, float]:
         """Finds the most energetic and rhythmic 'n' bar section."""
-        if len(beat_times) < 4 * bars: # Assuming 4/4
-            return 0.0, librosa.get_duration(y=y, sr=sr)
-            
-        # Estimate beats per bar = 4
-        beats_per_loop = 4 * bars
-        max_energy = -1
-        best_start = 0
-        best_end = 0
-        
-        # Slide a window of 'beats_per_loop'
-        # We check every downbeat (every 4th beat)
+        if len(beat_times) < 4 * bars: return 0.0, librosa.get_duration(y=y, sr=sr)
+        beats_per_loop = 4 * bars; max_energy = -1.0; best_start = 0.0; best_end = 0.0
         for i in range(0, len(beat_times) - beats_per_loop, 4):
-            start_t = beat_times[i]
-            end_t = beat_times[i + beats_per_loop]
-            
-            start_sample = int(start_t * sr)
-            end_sample = int(end_t * sr)
-            
-            segment = y[start_sample:end_sample]
+            start_t, end_t = beat_times[i], beat_times[i + beats_per_loop]
+            segment = y[int(start_t * sr):int(end_t * sr)]
             if len(segment) == 0: continue
-            
             seg_rms = np.mean(librosa.feature.rms(y=segment))
-            
-            # Simple heuristic: Loudest 4 bars is usually the 'drop' or main loop
             if seg_rms > max_energy:
-                max_energy = seg_rms
-                best_start = start_t
-                best_end = end_t
-                
-        if max_energy == -1: # Fallback
-            return 0.0, librosa.get_duration(y=y, sr=sr)
-            
+                max_energy = float(seg_rms); best_start = float(start_t); best_end = float(end_t)
+        if max_energy == -1.0: return 0.0, librosa.get_duration(y=y, sr=sr)
         return best_start, (best_end - best_start)
 
 if __name__ == "__main__":
-    # Quick test logic
     import sys
     if len(sys.argv) > 1:
         analyzer = AnalysisModule()
-        results = analyzer.analyze_file(sys.argv[1])
-        print(results)
+        print(analyzer.analyze_file(sys.argv[1]))

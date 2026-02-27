@@ -2,24 +2,23 @@ import sqlite3
 import os
 import chromadb
 import numpy as np
+from typing import List, Dict, Optional, Any, Union, Tuple
 from src.core.config import AppConfig
 
 class DataManager:
     """Unified manager for SQLite (metadata) and ChromaDB (vectors)."""
     
-    def __init__(self, db_path=None, vector_dir=None):
-        self.db_path = db_path or AppConfig.DB_PATH
-        self.vector_dir = vector_dir or AppConfig.VECTOR_DB_DIR
+    def __init__(self, db_path: Optional[str] = None, vector_dir: Optional[str] = None):
+        self.db_path: str = db_path or AppConfig.DB_PATH
+        self.vector_dir: str = vector_dir or AppConfig.VECTOR_DB_DIR
         self.init_sqlite()
         self.init_chroma()
 
-    def init_sqlite(self):
+    def init_sqlite(self) -> None:
         """Initializes the SQLite database with the required schema."""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        # Table for audio file metadata and MIR features
-        # Added 'onsets_json' to store beat timings for seamless looping
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS tracks (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -31,63 +30,47 @@ class DataManager:
                 harmonic_key TEXT,
                 loudness_lufs REAL,
                 energy REAL,
-                onset_density REAL, -- New: Rhythmic activity measure
-                loop_start REAL, -- New: Smart loop start point
-                loop_duration REAL, -- New: Smart loop duration
-                onsets_json TEXT, -- JSON string of beat timestamps
+                onset_density REAL,
+                loop_start REAL,
+                loop_duration REAL,
+                onsets_json TEXT,
                 date_added DATETIME DEFAULT CURRENT_TIMESTAMP,
                 last_analyzed DATETIME,
-                clp_embedding_id TEXT, -- Link to vector database ID
-                stems_path TEXT, -- New: Path to directory containing extracted stems
-                vocal_energy REAL, -- New: Detected vocal prominence
-                vocal_lyrics TEXT, -- New: Transcribed lyrics
-                vocal_gender TEXT, -- New: Detected gender
-                sections_json TEXT -- New: Structural sections metadata
+                clp_embedding_id TEXT,
+                stems_path TEXT,
+                vocal_energy REAL,
+                vocal_lyrics TEXT,
+                vocal_gender TEXT,
+                sections_json TEXT
             )
         ''')
         
-        # Migration for existing databases
-        try:
-            cursor.execute("ALTER TABLE tracks ADD COLUMN onset_density REAL")
-        except sqlite3.OperationalError: pass
-        try:
-            cursor.execute("ALTER TABLE tracks ADD COLUMN loop_start REAL")
-        except sqlite3.OperationalError: pass
-        try:
-            cursor.execute("ALTER TABLE tracks ADD COLUMN loop_duration REAL")
-        except sqlite3.OperationalError: pass
-        try:
-            cursor.execute("ALTER TABLE tracks ADD COLUMN stems_path TEXT")
-        except sqlite3.OperationalError: pass
-        try:
-            cursor.execute("ALTER TABLE tracks ADD COLUMN vocal_energy REAL")
-        except sqlite3.OperationalError: pass
-        try:
-            cursor.execute("ALTER TABLE tracks ADD COLUMN vocal_lyrics TEXT")
-        except sqlite3.OperationalError: pass
-        try:
-            cursor.execute("ALTER TABLE tracks ADD COLUMN vocal_gender TEXT")
-        except sqlite3.OperationalError: pass
-        try:
-            cursor.execute("ALTER TABLE tracks ADD COLUMN sections_json TEXT")
-        except sqlite3.OperationalError: pass
+        # Migrations
+        migrations = [
+            "onset_density REAL", "loop_start REAL", "loop_duration REAL",
+            "stems_path TEXT", "vocal_energy REAL", "vocal_lyrics TEXT",
+            "vocal_gender TEXT", "sections_json TEXT"
+        ]
+        for col in migrations:
+            try:
+                cursor.execute(f"ALTER TABLE tracks ADD COLUMN {col}")
+            except sqlite3.OperationalError: pass
         
         conn.commit()
         conn.close()
 
-    def init_chroma(self):
+    def init_chroma(self) -> None:
         """Initializes the ChromaDB vector storage."""
         if not os.path.exists(self.vector_dir):
             os.makedirs(self.vector_dir)
             
         self.chroma_client = chromadb.PersistentClient(path=self.vector_dir)
-        # Collection for CLAP embeddings
         self.collection = self.chroma_client.get_or_create_collection(name="audio_embeddings")
 
-    def get_conn(self):
+    def get_conn(self) -> sqlite3.Connection:
         return sqlite3.connect(self.db_path)
 
-    def add_embedding(self, track_id, embedding, metadata=None):
+    def add_embedding(self, track_id: int, embedding: Union[np.ndarray, List[float]], metadata: Optional[Dict[str, Any]] = None) -> str:
         """Stores a vector in ChromaDB and links it to the track_id."""
         embed_id = f"track_{track_id}"
         self.collection.add(
@@ -96,7 +79,6 @@ class DataManager:
             metadatas=[metadata] if metadata else None
         )
         
-        # Link back to SQLite
         conn = self.get_conn()
         cursor = conn.cursor()
         cursor.execute("UPDATE tracks SET clp_embedding_id = ? WHERE id = ?", (embed_id, track_id))
@@ -104,14 +86,14 @@ class DataManager:
         conn.close()
         return embed_id
 
-    def get_embedding(self, embed_id):
+    def get_embedding(self, embed_id: str) -> Optional[np.ndarray]:
         """Retrieves a vector from ChromaDB."""
         result = self.collection.get(ids=[embed_id], include=['embeddings'])
         if result and 'embeddings' in result and result['embeddings'] is not None and len(result['embeddings']) > 0:
             return np.array(result['embeddings'][0])
         return None
 
-    def search_embeddings(self, query_vector, n_results=10):
+    def search_embeddings(self, query_vector: Union[np.ndarray, List[float]], n_results: int = 10) -> List[Dict[str, Any]]:
         """Performs a vector search in ChromaDB and joins with SQLite metadata."""
         results = self.collection.query(
             query_embeddings=[query_vector.tolist() if isinstance(query_vector, np.ndarray) else query_vector],
@@ -121,7 +103,7 @@ class DataManager:
         if not results['ids'] or not results['ids'][0]:
             return []
             
-        final_results = []
+        final_results: List[Dict[str, Any]] = []
         conn = self.get_conn()
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
@@ -138,21 +120,21 @@ class DataManager:
         conn.close()
         return final_results
 
-    def get_library_stats(self):
+    def get_library_stats(self) -> Dict[str, Any]:
         """Returns high-level statistics about the audio library."""
         conn = self.get_conn()
         cursor = conn.cursor()
         
-        stats = {}
+        stats: Dict[str, Any] = {}
         cursor.execute("SELECT COUNT(*) FROM tracks")
         stats['total_tracks'] = cursor.fetchone()[0]
         
         if stats['total_tracks'] > 0:
             cursor.execute("SELECT AVG(bpm), MIN(bpm), MAX(bpm) FROM tracks")
             bpm_stats = cursor.fetchone()
-            stats['avg_bpm'] = round(bpm_stats[0], 2)
-            stats['min_bpm'] = round(bpm_stats[1], 2)
-            stats['max_bpm'] = round(bpm_stats[2], 2)
+            stats['avg_bpm'] = round(bpm_stats[0], 2) if bpm_stats[0] else 0
+            stats['min_bpm'] = round(bpm_stats[1], 2) if bpm_stats[1] else 0
+            stats['max_bpm'] = round(bpm_stats[2], 2) if bpm_stats[2] else 0
             
             cursor.execute("SELECT harmonic_key, COUNT(*) as count FROM tracks GROUP BY harmonic_key ORDER BY count DESC")
             stats['key_distribution'] = dict(cursor.fetchall())
@@ -160,8 +142,7 @@ class DataManager:
         conn.close()
         return stats
 
-def init_db(db_path="audio_library.db"):
-    # Keeping this for backward compatibility
+def init_db(db_path: str = "audio_library.db") -> None:
     DataManager(db_path=db_path)
 
 if __name__ == "__main__":

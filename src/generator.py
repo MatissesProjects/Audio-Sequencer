@@ -6,13 +6,14 @@ from pedalboard import Pedalboard, Reverb, Delay, HighpassFilter, LowpassFilter
 from dotenv import load_dotenv
 import re
 import json
+from typing import List, Dict, Optional, Any, Union, Tuple
 
 load_dotenv()
 
 class TransitionGenerator:
     """Uses Ollama (Local) or Gemini to orchestrate transitions and a remote 4090 machine to generate them."""
     
-    def __init__(self, api_key=None):
+    def __init__(self, api_key: Optional[str] = None):
         from src.core.config import AppConfig
         api_key = api_key or os.getenv("GOOGLE_API_KEY")
         if api_key:
@@ -20,86 +21,51 @@ class TransitionGenerator:
         else:
             self.client = None
         
-        self.remote_url = AppConfig.REMOTE_GEN_URL
-        self.ollama_url = AppConfig.OLLAMA_URL
-        self.ollama_model = AppConfig.OLLAMA_MODEL
+        self.remote_url: str = AppConfig.REMOTE_GEN_URL
+        self.ollama_url: str = AppConfig.OLLAMA_URL
+        self.ollama_model: str = AppConfig.OLLAMA_MODEL
 
-    def _call_ai(self, prompt, system_instruction=""):
+    def _call_ai(self, prompt: str, system_instruction: str = "") -> Optional[str]:
         """Tries Ollama first, then Gemini as fallback."""
-        # 1. Try Ollama (Local)
         try:
             import requests
             full_prompt = f"{system_instruction}\n\n{prompt}" if system_instruction else prompt
-            print(f"[AI] Attempting Ollama connection: {self.ollama_url} (Model: {self.ollama_model})")
-            
+            print(f"[AI] Attempting Ollama connection: {self.ollama_url}")
             response = requests.post(
                 self.ollama_url,
-                json={
-                    "model": self.ollama_model,
-                    "prompt": full_prompt,
-                    "stream": False,
-                    "format": "json"
-                },
-                timeout=15 # Reduced timeout for faster fallback detection
+                json={"model": self.ollama_model, "prompt": full_prompt, "stream": False, "format": "json"},
+                timeout=15
             )
             if response.status_code == 200:
-                print(f"[AI] Ollama Success.")
                 return response.json().get("response")
-            else:
-                print(f"[AI] Ollama returned error status {response.status_code}: {response.text}")
-        except requests.exceptions.Timeout:
-            print(f"[AI] Ollama connection timed out at {self.ollama_url}")
-        except Exception as e:
-            print(f"[AI] Ollama connection failed: {e}")
+        except: pass
 
-        # 2. Gemini Fallback
         if self.client:
             try:
-                print("[AI] Falling back to Gemini...")
-                response = self.client.models.generate_content(
-                    model="gemini-2.0-flash",
-                    contents=prompt
-                )
+                response = self.client.models.generate_content(model="gemini-2.0-flash", contents=prompt)
                 return response.text
-            except Exception as e:
-                print(f"[AI] Gemini fallback error: {e}")
-        
+            except: pass
         return None
 
-    def get_transition_params(self, track_a, track_b, type_context=""):
-        """Asks Gemini for transition characteristics based on track metadata."""
-        if not self.client:
-            return {"noise_type": "white", "filter_type": "highpass", "reverb_amount": 0.7, "prompt": "cinematic riser sweep"}
+    def get_transition_params(self, track_a: Dict[str, Any], track_b: Dict[str, Any], type_context: str = "") -> Dict[str, Any]:
+        """Asks AI for transition characteristics based on track metadata."""
+        bpm_a = track_a.get('bpm', 120); key_a = track_a.get('harmonic_key') or track_a.get('key') or 'Unknown'
+        name_a = track_a.get('filename', 'Track A'); lyrics_a = track_a.get('vocal_lyrics')
+        bpm_b = track_b.get('bpm', 120); key_b = track_b.get('harmonic_key') or track_b.get('key') or 'Unknown'
+        name_b = track_b.get('filename', 'Track B'); lyrics_b = track_b.get('vocal_lyrics')
 
-        bpm_a = track_a.get('bpm', 120)
-        key_a = track_a.get('harmonic_key') or track_a.get('key') or 'Unknown'
-        name_a = track_a.get('filename', 'Track A')
-        lyrics_a = track_a.get('vocal_lyrics')
-        
-        bpm_b = track_b.get('bpm', 120)
-        key_b = track_b.get('harmonic_key') or track_b.get('key') or 'Unknown'
-        name_b = track_b.get('filename', 'Track B')
-        lyrics_b = track_b.get('vocal_lyrics')
-
-        lyrics_context = ""
+        l_ctx = ""
         if lyrics_a or lyrics_b:
-            lyrics_context = "Consider the lyrics/vocals to make the transition make narrative sense:\n"
-            if lyrics_a: lyrics_context += f"Track A Lyrics: '{lyrics_a}'\n"
-            if lyrics_b: lyrics_context += f"Track B Lyrics: '{lyrics_b}'\n"
+            l_ctx = "Consider the lyrics/vocals to make the transition make narrative sense:\n"
+            if lyrics_a: l_ctx += f"Track A Lyrics: '{lyrics_a}'\n"
+            if lyrics_b: l_ctx += f"Track B Lyrics: '{lyrics_b}'\n"
 
         prompt = f"""
         Analyze these two tracks and describe a 4-second audio transition to bridge them.
-        {type_context}
-        {lyrics_context}
+        {type_context} {l_ctx}
         Track A: {name_a}, {bpm_a} BPM, Key: {key_a}
         Track B: {name_b}, {bpm_b} BPM, Key: {key_b}
-        
-        Provide ONLY valid JSON output with keys: 
-        'noise_type' (white, pink, or brown),
-        'filter_type' (lowpass or highpass),
-        'reverb_amount' (float 0.0 to 1.0),
-        'prompt' (A text prompt for MusicGen generation, e.g. 'heavy sub bass impact with reverb in {key_b}, {bpm_b} bpm. If vocals are present, match their thematic vibe.'),
-        'description' (brief vibe description).
+        Provide ONLY valid JSON: 'noise_type', 'filter_type', 'reverb_amount', 'prompt', 'description'.
         """
         res_text = self._call_ai(prompt)
         if res_text:
@@ -107,27 +73,14 @@ class TransitionGenerator:
             if match:
                 try: return json.loads(match.group())
                 except: pass
-        
         return {"noise_type": "white", "filter_type": "highpass", "reverb_amount": 0.7, "prompt": "cinematic riser"}
 
-    def get_journey_structure(self, depth=0):
-        """Asks Gemini for a musically logical sequence of blocks for the current depth."""
-        if not self.client:
-            return self.get_journey_structure_fallback(depth=depth)
-
+    def get_journey_structure(self, depth: int = 0) -> List[Dict[str, Any]]:
+        """Asks AI for a musically logical sequence of blocks for the current depth."""
         prompt = f"""
-        Suggest a list of musical blocks for an AI-generated music journey at depth {depth}.
-        Depth 0 is the start of the mix. Depth 1+ are extensions.
-        
-        CRITICAL: 
-        - Return exactly 5 to 7 blocks total.
-        - If depth > 0, do NOT include an 'Outro' or 'End' block. Instead, end with a 'Transition' or 'Connector' block so the journey can continue.
-        
-        Provide ONLY valid JSON output as a list of objects with keys:
-        'name' (e.g., Intro, Verse, Build, Drop, Bridge, Connect, Transition),
-        'dur' (duration in milliseconds, between 16000 and 32000, usually multiples of 4000 or 8000).
-        
-        Ensure the structure flows logically from the previous sections.
+        Suggest a list of musical blocks for an AI journey at depth {depth}. 5-7 blocks.
+        If depth > 0, end with 'Transition' or 'Connector', NOT 'Outro'.
+        Provide ONLY valid JSON list: 'name', 'dur' (16000-32000ms).
         """
         res_text = self._call_ai(prompt)
         if res_text:
@@ -135,97 +88,41 @@ class TransitionGenerator:
             if match:
                 try: return json.loads(match.group())
                 except: pass
-        
         return self.get_journey_structure_fallback(depth=depth)
 
-    def get_journey_structure_fallback(self, depth=0):
-        """Fallback deterministic structures if Gemini fails."""
+    def get_journey_structure_fallback(self, depth: int = 0) -> List[Dict[str, Any]]:
+        """Fallback deterministic structures."""
         if depth == 0:
-            return [
-                {'name': 'Intro', 'dur': 16000},
-                {'name': 'Verse 1', 'dur': 32000},
-                {'name': 'Build', 'dur': 16000},
-                {'name': 'Drop', 'dur': 32000},
-                {'name': 'Verse 2', 'dur': 32000},
-                {'name': 'Transition', 'dur': 16000}
-            ]
+            return [{'name': 'Intro', 'dur': 16000}, {'name': 'Verse 1', 'dur': 32000}, {'name': 'Build', 'dur': 16000}, {'name': 'Drop', 'dur': 32000}, {'name': 'Verse 2', 'dur': 32000}, {'name': 'Transition', 'dur': 16000}]
         elif depth == 1:
-            return [
-                {'name': 'Connect', 'dur': 16000},
-                {'name': 'Verse 3', 'dur': 32000},
-                {'name': 'Bridge', 'dur': 24000},
-                {'name': 'Build', 'dur': 16000},
-                {'name': 'Power Drop', 'dur': 32000},
-                {'name': 'Transition', 'dur': 16000}
-            ]
+            return [{'name': 'Connect', 'dur': 16000}, {'name': 'Verse 3', 'dur': 32000}, {'name': 'Bridge', 'dur': 24000}, {'name': 'Build', 'dur': 16000}, {'name': 'Power Drop', 'dur': 32000}, {'name': 'Transition', 'dur': 16000}]
         else:
-            return [
-                {'name': 'Connect', 'dur': 16000},
-                {'name': 'Atmospheric Breakdown', 'dur': 32000},
-                {'name': 'Build', 'dur': 16000},
-                {'name': 'Grand Finale', 'dur': 32000},
-                {'name': 'Transition', 'dur': 16000}
-            ]
+            return [{'name': 'Connect', 'dur': 16000}, {'name': 'Atmospheric Breakdown', 'dur': 32000}, {'name': 'Build', 'dur': 16000}, {'name': 'Grand Finale', 'dur': 32000}, {'name': 'Transition', 'dur': 16000}]
 
-    def generate_riser(self, duration_sec, bpm, output_path, params=None):
+    def generate_riser(self, duration_sec: float, bpm: float, output_path: str, params: Optional[Dict[str, Any]] = None) -> str:
         """Generates a procedural noise riser OR calls remote 4090 for neural riser."""
         prompt = params.get('prompt') if params else None
-        
         if prompt:
             try:
                 import requests
-                print(f"Requesting Remote Neural Riser: '{prompt}'...")
-                response = requests.post(
-                    self.remote_url,
-                    json={'prompt': prompt, 'duration': duration_sec},
-                    timeout=45 # Increased timeout for remote gen
-                )
+                response = requests.post(self.remote_url, json={'prompt': prompt, 'duration': duration_sec}, timeout=45)
                 if response.status_code == 200:
-                    with open(output_path, 'wb') as f:
-                        f.write(response.content)
+                    with open(output_path, 'wb') as f: f.write(response.content)
                     return output_path
-                else:
-                    print(f"Remote server error: {response.status_code}")
-            except Exception as e:
-                print(f"Remote neural generation failed: {e}. Falling back to procedural noise.")
+            except: pass
 
-        # Fallback: Procedural Noise
-        sr = 44100
-        num_samples = int(sr * duration_sec)
-        # ... (remaining noise logic)
-        
+        sr = 44100; num_samples = int(sr * duration_sec)
         noise_type = params.get('noise_type', 'white') if params else 'white'
         if noise_type == 'pink':
-            white = np.random.uniform(-1, 1, num_samples)
-            b = [0.0405096, -0.0601927, 0.056985, -0.0328239, 0.00959452]
+            white = np.random.uniform(-1, 1, num_samples); b = [0.0405096, -0.0601927, 0.056985, -0.0328239, 0.00959452]
             noise = np.convolve(white, b, mode='same')
-        else:
-            noise = np.random.uniform(-1, 1, num_samples)
-
-        # 2. Apply smoother cubic volume ramp (The Riser)
-        fade_in = np.linspace(0, 1, num_samples) ** 3
-        noise = noise * fade_in
-        
-        # Force the first 10ms to be absolute silence to avoid "weird noise" at start
-        silence_samples = int(sr * 0.01)
-        noise[:silence_samples] = 0
-
-        filter_type = params.get('filter_type', 'highpass') if params else 'highpass'
-        rev_amt = params.get('reverb_amount', 0.5) if params else 0.5
-        
-        board = Pedalboard([
-            HighpassFilter(cutoff_frequency_hz=200) if filter_type == 'highpass' else LowpassFilter(cutoff_frequency_hz=5000),
-            Reverb(room_size=rev_amt),
-            Delay(delay_seconds=0.25, feedback=0.3)
-        ])
-        
-        noise_input = noise.reshape(1, -1).astype(np.float32)
-        processed = board(noise_input, sr)
-        
-        # Normalize
+        else: noise = np.random.uniform(-1, 1, num_samples)
+        noise = noise * (np.linspace(0, 1, num_samples) ** 3)
+        noise[:int(sr * 0.01)] = 0
+        f_type = params.get('filter_type', 'highpass') if params else 'highpass'; rev_amt = params.get('reverb_amount', 0.5) if params else 0.5
+        board = Pedalboard([HighpassFilter(cutoff_frequency_hz=200) if f_type == 'highpass' else LowpassFilter(cutoff_frequency_hz=5000), Reverb(room_size=rev_amt), Delay(delay_seconds=0.25, feedback=0.3)])
+        processed = board(noise.reshape(1, -1).astype(np.float32), sr)
         peak = np.max(np.abs(processed))
-        if peak > 0:
-            processed = processed / peak
-        
+        if peak > 0: processed /= peak
         sf.write(output_path, processed.flatten(), sr)
         return output_path

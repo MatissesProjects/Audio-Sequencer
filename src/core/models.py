@@ -1,8 +1,9 @@
 from PyQt6.QtGui import QColor
 import json
+from typing import Dict, List, Optional, Any, Tuple, Union
 
 class TrackSegment:
-    KEY_COLORS = {
+    KEY_COLORS: Dict[str, QColor] = {
         'C': QColor(255, 50, 50), 'C#': QColor(255, 100, 200),
         'D': QColor(255, 150, 50), 'D#': QColor(255, 50, 255),
         'E': QColor(255, 255, 50), 'F': QColor(255, 50, 150),
@@ -10,70 +11,70 @@ class TrackSegment:
         'G#': QColor(150, 50, 255), 'A': QColor(50, 150, 255),
         'A#': QColor(200, 100, 255), 'B': QColor(100, 255, 100)
     }
-    def __init__(self, track_data, start_ms=0, duration_ms=20000, lane=0, offset_ms=0):
-        self.id = track_data.get('id', -1)
-        self.filename = track_data.get('filename', "Unknown")
-        self.file_path = track_data.get('file_path', "")
-        self.bpm = track_data.get('bpm', 120.0)
-        self.key = track_data.get('harmonic_key') or track_data.get('key', 'N/A')
-        self.start_ms = start_ms
-        self.duration_ms = duration_ms
-        self.offset_ms = offset_ms
-        self.volume = 1.0
-        self.pan = 0.0 # -1.0 (Left) to 1.0 (Right)
-        self.low_cut = 20 # Hz
-        self.high_cut = 20000 # Hz
-        self.is_ambient = False # NEW: Background/Ambient role
-        self.lane = lane
-        self.is_primary = False
-        self.waveform = []
-        self.stem_waveforms = {} # New: store envelopes for stems
-        self.fade_in_ms = 2000
-        self.fade_out_ms = 2000
-        self.pitch_shift = 0
-        self.reverb = 0.0 # 0.0 to 1.0 (Wet amount)
-        self.harmonics = 0.0 # 0.0 to 1.0 (Saturation/Harmonic excitement)
-        self.delay = 0.0 # New: Echo intensity
-        self.chorus = 0.0 # New: Thickness intensity
-        self.stems_path = track_data.get('stems_path')
-        self.vocal_energy = track_data.get('vocal_energy') or 0.0
-        self.vocal_lyrics = track_data.get('vocal_lyrics')
-        self.vocal_gender = track_data.get('vocal_gender')
-        self.sections = []
+
+    def __init__(self, track_data: Dict[str, Any], start_ms: int = 0, duration_ms: int = 20000, lane: int = 0, offset_ms: int = 0):
+        self.id: int = track_data.get('id', -1)
+        self.filename: str = track_data.get('filename', "Unknown")
+        self.file_path: str = track_data.get('file_path', "")
+        self.bpm: float = float(track_data.get('bpm', 120.0))
+        self.key: str = str(track_data.get('harmonic_key') or track_data.get('key', 'N/A'))
+        self.start_ms: int = start_ms
+        self.duration_ms: int = duration_ms
+        self.offset_ms: int = offset_ms
+        self.volume: float = 1.0
+        self.pan: float = 0.0 # -1.0 (Left) to 1.0 (Right)
+        self.low_cut: int = 20 # Hz
+        self.high_cut: int = 20000 # Hz
+        self.is_ambient: bool = False 
+        self.lane: int = lane
+        self.is_primary: bool = False
+        self.waveform: List[float] = []
+        self.stem_waveforms: Dict[str, List[float]] = {} 
+        self.fade_in_ms: int = 2000
+        self.fade_out_ms: int = 2000
+        self.pitch_shift: int = 0
+        self.reverb: float = 0.0 # 0.0 to 1.0
+        self.harmonics: float = 0.0 # 0.0 to 1.0
+        self.delay: float = 0.0 
+        self.chorus: float = 0.0 
+        self.stems_path: Optional[str] = track_data.get('stems_path')
+        self.vocal_energy: float = float(track_data.get('vocal_energy') or 0.0)
+        self.vocal_lyrics: Optional[str] = track_data.get('vocal_lyrics')
+        self.vocal_gender: Optional[str] = track_data.get('vocal_gender')
+        self.sections: List[Dict[str, Any]] = []
         if 'sections_json' in track_data and track_data['sections_json']:
             try:
                 self.sections = json.loads(track_data['sections_json'])
             except:
                 pass
-        self.vocal_shift = 0 # Independent pitch shift for vocals
-        self.bass_shift = 0 # New: Independent pitch shift for bass
-        self.drum_shift = 0 # New: Independent pitch shift for drums
-        self.instr_shift = 0 # New: Independent pitch shift for instruments
-        self.gender_swap = "none" # "none", "male", "female"
-        self.harmony_level = 0.0 # 0.0 to 1.0 (Mix of rhythmic harmonic layer)
-        self.vocal_vol = 1.0
-        self.drum_vol = 1.0
-        self.bass_vol = 1.0
-        self.instr_vol = 1.0
-        self.ducking_depth = 0.7 # Overall ducking depth
-        self.duck_low = 1.0 # Frequency-specific ducking multipliers
-        self.duck_mid = 1.0
-        self.duck_high = 1.0
+        self.vocal_shift: int = 0
+        self.bass_shift: int = 0
+        self.drum_shift: int = 0
+        self.instr_shift: int = 0
+        self.gender_swap: str = "none" # "none", "male", "female"
+        self.harmony_level: float = 0.0
+        self.vocal_vol: float = 1.0
+        self.drum_vol: float = 1.0
+        self.bass_vol: float = 1.0
+        self.instr_vol: float = 1.0
+        self.ducking_depth: float = 0.7 
+        self.duck_low: float = 1.0 
+        self.duck_mid: float = 1.0
+        self.duck_high: float = 1.0
         
-        # KEYFRAMES: { 'volume': [(0, 1.0), (5000, 0.5)], 'low_cut': ... }
-        # Stored as relative MS from start of clip
-        self.keyframes = {} 
+        # KEYFRAMES: { 'volume': [(0, 1.0), (5000, 0.5)] }
+        self.keyframes: Dict[str, List[Tuple[float, float]]] = {} 
         
         base_color = self.KEY_COLORS.get(self.key, QColor(70, 130, 180))
-        self.color = QColor(base_color.red(), base_color.green(), base_color.blue(), 200)
-        self.onsets = []
+        self.color: QColor = QColor(base_color.red(), base_color.green(), base_color.blue(), 200)
+        self.onsets: List[float] = []
         if 'onsets_json' in track_data and track_data['onsets_json']:
             try:
                 self.onsets = [float(x) * 1000.0 for x in track_data['onsets_json'].split(',')]
             except:
                 pass
 
-    def add_keyframe(self, param, relative_ms, value):
+    def add_keyframe(self, param: str, relative_ms: float, value: float) -> None:
         """Adds a keyframe for a parameter. Overwrites if exists at same time."""
         if param not in self.keyframes:
             self.keyframes[param] = []
@@ -83,7 +84,7 @@ class TrackSegment:
         self.keyframes[param].append((relative_ms, value))
         self.keyframes[param].sort(key=lambda x: x[0])
 
-    def get_value_at(self, param, relative_ms, default_val):
+    def get_value_at(self, param: str, relative_ms: float, default_val: float) -> float:
         """Linearly interpolates value for a parameter at a given time."""
         if param not in self.keyframes or not self.keyframes[param]:
             return default_val
@@ -106,15 +107,15 @@ class TrackSegment:
                 return v1 + (v2 - v1) * ratio
         return default_val
 
-    def get_end_ms(self):
+    def get_end_ms(self) -> int:
         """Returns the absolute end time of the segment on the timeline."""
         return self.start_ms + self.duration_ms
 
-    def overlaps_with(self, other):
+    def overlaps_with(self, other: 'TrackSegment') -> bool:
         """Checks if this segment overlaps with another segment in time."""
         return max(self.start_ms, other.start_ms) < min(self.get_end_ms(), other.get_end_ms())
 
-    def to_dict(self):
+    def to_dict(self) -> Dict[str, Any]:
         d = {
             'id': self.id, 'filename': self.filename, 'file_path': self.file_path, 
             'bpm': self.bpm, 'key': self.key, 'start_ms': self.start_ms, 
