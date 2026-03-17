@@ -1198,7 +1198,7 @@ class AudioSequencerApp(QMainWindow):
                             next_track = s
                 
                 # If no surrounding tracks (empty timeline case), use selected library track as seed
-                seed_id = self.selected_library_track['id'] if self.selected_library_track else None
+                seed_id = self.selected_library_track.get('id') if self.selected_library_track else None
                 
                 # Find best filler
                 filler_data = self.orchestrator.find_best_filler_for_gap(
@@ -1571,28 +1571,28 @@ class AudioSequencerApp(QMainWindow):
             
             seg = self.timeline_widget.add_track(self.copy_buffer, start_ms=start_ms, lane=lane)
             # Restore properties from buffer
-            seg.duration_ms = self.copy_buffer['duration_ms']
-            seg.offset_ms = self.copy_buffer['offset_ms']
-            seg.volume = self.copy_buffer['volume']
-            seg.pan = self.copy_buffer.get('pan', 0.0)
-            seg.pitch_shift = self.copy_buffer.get('pitch_shift', 0)
-            seg.reverb = self.copy_buffer.get('reverb', 0.0)
-            seg.harmonics = self.copy_buffer.get('harmonics', 0.0)
-            seg.delay = self.copy_buffer.get('delay', 0.0)
-            seg.chorus = self.copy_buffer.get('chorus', 0.0)
-            seg.vocal_shift = self.copy_buffer.get('vocal_shift', 0)
-            seg.harmony_level = self.copy_buffer.get('harmony_level', 0.0)
-            seg.vocal_vol = self.copy_buffer.get('vocal_vol', 1.0)
-            seg.drum_vol = self.copy_buffer.get('drum_vol', 1.0)
-            seg.bass_vol = self.copy_buffer.get('bass_vol', 1.0)
-            seg.instr_vol = self.copy_buffer.get('instr_vol', 1.0)
-            seg.ducking_depth = self.copy_buffer.get('ducking_depth', 0.7)
-            seg.duck_low = self.copy_buffer.get('duck_low', 1.0)
-            seg.duck_mid = self.copy_buffer.get('duck_mid', 1.0)
-            seg.duck_high = self.copy_buffer.get('duck_high', 1.0)
-            seg.keyframes = self.copy_buffer.get('keyframes', {})
-            seg.is_primary = self.copy_buffer['is_primary']
-            seg.is_ambient = self.copy_buffer.get('is_ambient', False)
+            seg.duration_ms = self.copy_buffer.duration_ms
+            seg.offset_ms = self.copy_buffer.offset_ms
+            seg.volume = self.copy_buffer.volume
+            seg.pan = self.copy_buffer.pan
+            seg.pitch_shift = self.copy_buffer.pitch_shift
+            seg.reverb = self.copy_buffer.reverb
+            seg.harmonics = self.copy_buffer.harmonics
+            seg.delay = self.copy_buffer.delay
+            seg.chorus = self.copy_buffer.chorus
+            seg.vocal_shift = self.copy_buffer.vocal_shift
+            seg.harmony_level = self.copy_buffer.harmony_level
+            seg.vocal_vol = self.copy_buffer.vocal_vol
+            seg.drum_vol = self.copy_buffer.drum_vol
+            seg.bass_vol = self.copy_buffer.bass_vol
+            seg.instr_vol = self.copy_buffer.instr_vol
+            seg.ducking_depth = self.copy_buffer.ducking_depth
+            seg.duck_low = self.copy_buffer.duck_low
+            seg.duck_mid = self.copy_buffer.duck_mid
+            seg.duck_high = self.copy_buffer.duck_high
+            seg.keyframes = self.copy_buffer.keyframes
+            seg.is_primary = self.copy_buffer.is_primary
+            seg.is_ambient = self.copy_buffer.is_ambient
             
             self.load_waveform_async(seg)
             self.timeline_widget.update()
@@ -1600,7 +1600,7 @@ class AudioSequencerApp(QMainWindow):
 
     def add_selected_to_timeline(self):
         if self.selected_library_track:
-            self.add_track_by_id(self.selected_library_track['id'])
+            self.add_track_by_id(self.selected_library_track.get('id'))
 
     def on_rec_double_clicked(self, i):
         self.add_track_by_id(self.rec_list.item(i.row(), 0).data(Qt.ItemDataRole.UserRole))
@@ -1613,6 +1613,7 @@ class AudioSequencerApp(QMainWindow):
         # Use existing timeline state if available
         seed = self.selected_library_track
         start_ms = 0
+        last_seg = None
         
         if self.timeline_widget.segments:
             # Find the latest track to continue from it
@@ -1641,7 +1642,7 @@ class AudioSequencerApp(QMainWindow):
         
         if seq:
             # If we used the last track as seed, skip it in the sequence to avoid duplicates
-            if self.timeline_widget.segments and seq[0]['id'] == last_seg.id:
+            if self.timeline_widget.segments and last_seg and seq[0].get('id') == last_seg.id:
                 seq = seq[1:]
                 
             cm = start_ms
@@ -1681,6 +1682,7 @@ class AudioSequencerApp(QMainWindow):
         start_ms = 0
         seed = self.selected_library_track
         depth = 0
+        last_seg = None
         
         if mode == "start" and not seed:
             # Pick a random high-energy track from the database to start things off
