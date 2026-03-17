@@ -117,9 +117,11 @@ def _process_single_segment(s: Dict[str, Any], i: int, target_bpm: float, sr: in
                 else: stem_np *= s.get('vocal_vol', 1.0)
                 h_level = float(s.get('harmony_level', 0.0))
                 if h_level > 0:
-                    h_layer1 = proc.shift_pitch_numpy(y_sync, sr, 7); if len(h_layer1.shape) == 1: h_layer1 = np.stack([h_layer1, h_layer1])
+                    h_layer1 = proc.shift_pitch_numpy(y_sync, sr, 7)
+                    if len(h_layer1.shape) == 1: h_layer1 = np.stack([h_layer1, h_layer1])
                     h_layer1 = proc.apply_rhythmic_gate(h_layer1, sr, target_bpm, pattern="1/8")
-                    h_layer2 = proc.shift_pitch_numpy(y_sync, sr, 12); if len(h_layer2.shape) == 1: h_layer2 = np.stack([h_layer2, h_layer2])
+                    h_layer2 = proc.shift_pitch_numpy(y_sync, sr, 12)
+                    if len(h_layer2.shape) == 1: h_layer2 = np.stack([h_layer2, h_layer2])
                     h_layer2 = proc.apply_rhythmic_gate(h_layer2, sr, target_bpm, pattern="1/4")
                     min_l = min(stem_np.shape[1], h_layer1.shape[1], h_layer2.shape[1]); stem_np[:, :min_l] += (h_layer1[:, :min_l] * h_level * 0.5) + (h_layer2[:, :min_l] * h_level * 0.3)
             elif stype == "drums":
@@ -137,19 +139,24 @@ def _process_single_segment(s: Dict[str, Any], i: int, target_bpm: float, sr: in
                     rms = np.sqrt(np.mean(combined_seg_np**2, axis=0)); envelope = np.repeat(rms[::512], 512)[:combined_seg_np.shape[1]]
                     if len(envelope) < combined_seg_np.shape[1]: envelope = np.pad(envelope, (0, combined_seg_np.shape[1]-len(envelope)))
                     if len(envelope) > 0:
-                        mv = np.max(envelope); if mv > 0: envelope /= mv
+                        mv = np.max(envelope)
+                        if mv > 0: envelope /= mv
                         stem_np *= (1.0 - (envelope * 0.5))
                 min_l = min(combined_seg_np.shape[1], stem_np.shape[1]); combined_seg_np[:, :min_l] += stem_np[:, :min_l]
         seg_np = combined_seg_np
     else:
         y, _ = librosa.load(s['file_path'], sr=sr); onsets = [float(x)*1000 for x in s.get('onsets_json', "").split(',') if x]
         y_looped = proc.loop_numpy(y, sr, required_raw_dur + 1.0, onsets); y_sync = proc.stretch_numpy(y_looped, sr, float(s['bpm']), target_bpm)
-        ps = float(s.get('pitch_shift', 0)); if ps != 0: y_sync = proc.shift_pitch_numpy(y_sync, sr, ps)
+        ps = float(s.get('pitch_shift', 0))
+        if ps != 0: y_sync = proc.shift_pitch_numpy(y_sync, sr, ps)
         s_smpl = int(render_offset_ms * sr / 1000.0); e_smpl = int((render_offset_ms + effective_dur) * sr / 1000.0); y_sync = y_sync[s_smpl : e_smpl]
         seg_np = np.stack([y_sync, y_sync]) if len(y_sync.shape) == 1 else y_sync
     c_rms = np.sqrt(np.mean(seg_np**2)) + 1e-9; seg_np *= (0.15 / c_rms) * s.get('volume', 1.0)
     fi_s = int(s.get('fade_in_ms', 2000) * sr / 1000.0); fo_s = int(s.get('fade_out_ms', 2000) * sr / 1000.0)
-    if time_range and s_start < range_start: fi_s = 0; if time_range and (s_start + s_dur) > range_end: fo_s = 0
+    if time_range and s_start < range_start: 
+        fi_s = 0
+    if time_range and (s_start + s_dur) > range_end: 
+        fo_s = 0
     env = np.ones(seg_np.shape[1], dtype=np.float32)
     if fi_s > 0: t_in = np.linspace(0, 1, min(fi_s, seg_np.shape[1])); env[:len(t_in)] = 0.5 * (1 - np.cos(np.pi * t_in))
     if fo_s > 0: t_out = np.linspace(0, 1, min(fo_s, seg_np.shape[1])); env[-len(t_out):] *= 0.5 * (1 + np.cos(np.pi * t_out))
@@ -167,7 +174,8 @@ def _process_single_segment(s: Dict[str, Any], i: int, target_bpm: float, sr: in
                 if p_name == 'low_cut' and freq > 30: seg_np[:, i:end] = HighpassFilter(cutoff_frequency_hz=freq)(seg_np[:, i:end], sr)
                 elif p_name == 'high_cut' and freq < 19000: seg_np[:, i:end] = LowpassFilter(cutoff_frequency_hz=freq)(seg_np[:, i:end], sr)
     seg_np = FXChain().process(seg_np, sr, s)
-    pan = float(s.get('pan', 0.0)); if pan != 0 and not s.get('pan_applied'): seg_np[0, :] *= max(0.0, min(1.0, 1.0 - pan)); seg_np[1, :] *= max(0.0, min(1.0, 1.0 + pan))
+    pan = float(s.get('pan', 0.0))
+    if pan != 0 and not s.get('pan_applied'): seg_np[0, :] *= max(0.0, min(1.0, 1.0 - pan)); seg_np[1, :] *= max(0.0, min(1.0, 1.0 + pan))
     try: np.save(cache_file, seg_np)
     except: pass
     return {
@@ -192,7 +200,8 @@ class FlowRenderer:
     def numpy_to_segment(self, samples: np.ndarray, sr: int) -> AudioSegment:
         """Helper to convert numpy float32 back to pydub segment."""
         if samples.size == 0: return AudioSegment.empty()
-        peak = np.max(np.abs(samples)); if peak > 1.0: samples /= (peak + 1e-6)
+        peak = np.max(np.abs(samples))
+        if peak > 1.0: samples /= (peak + 1e-6)
         samples_int = (samples * 32767).astype(np.int16)
         if samples_int.shape[0] == 2:
             return AudioSegment(samples_int.T.flatten().tobytes(), frame_rate=sr, sample_width=2, channels=2)
@@ -226,7 +235,8 @@ class FlowRenderer:
         if not os.path.exists(output_folder): os.makedirs(output_folder)
         lanes: Dict[int, List[Dict[str, Any]]] = {}
         for s in segments:
-            l = int(s.get('lane', 0)); if l not in lanes: lanes[l] = []
+            l = int(s.get('lane', 0))
+            if l not in lanes: lanes[l] = []
             lanes[l].append(s)
         stem_paths = []; global_processed = 0
         for lane_id, lane_segs in lanes.items():
@@ -244,7 +254,8 @@ class FlowRenderer:
         env = np.repeat(rms, h_len)[:source_samples.shape[1]]
         if len(env) < source_samples.shape[1]: env = np.pad(env, (0, source_samples.shape[1] - len(env)))
         if len(env) > 0:
-            mv = np.max(env); if mv > 0: env /= mv
+            mv = np.max(env)
+            if mv > 0: env /= mv
         duck = np.clip(1.0 - (env * amount), 0.2, 1.0); min_l = min(target_samples.shape[1], len(duck))
         target_samples[:, :min_l] *= duck[:min_l]
         return target_samples
@@ -272,8 +283,10 @@ class FlowRenderer:
             futures = [executor.submit(_process_single_segment, s, i, target_bpm, self.sr, time_range) for i, s in enumerate(active_segments)]
             completed = 0
             for f in as_completed(futures):
-                res = f.result(); if res: processed_data.append(res)
-                completed += 1; if progress_cb: progress_cb(completed)
+                res = f.result()
+                if res: processed_data.append(res)
+                completed += 1
+                if progress_cb: progress_cb(completed)
         for current in processed_data:
             samples = current['samples']; start = current['start_idx']; end = start + samples.shape[1]
             if not current['is_primary']:

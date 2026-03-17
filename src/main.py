@@ -22,6 +22,11 @@ def main() -> None:
     parser.add_argument("--separate-all", action="store_true", help="Batch process stem separation")
     
     args = parser.parse_args()
+    
+    # Default to GUI if no arguments provided
+    if len(sys.argv) == 1:
+        args.gui = True
+
     dm = DataManager()
     
     if args.scan:
