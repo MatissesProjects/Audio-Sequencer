@@ -359,6 +359,14 @@ class AudioSequencerApp(QMainWindow):
         self.harmony_slider.valueChanged.connect(self.on_prop_changed)
         form.addRow("Voc Rhythm:", self.harmony_slider)
         
+        self.harmony_type_combo = QComboBox()
+        self.harmony_type_combo.addItem("Classic (+7/+12)", "classic")
+        self.harmony_type_combo.addItem("Gender Swapped Layers", "gender_swap")
+        self.harmony_type_combo.addItem("Deep Octave Support", "deep_octave")
+        self.harmony_type_combo.addItem("Custom Pitch (Vocal Shift)", "custom_pitch")
+        self.harmony_type_combo.currentIndexChanged.connect(self.on_prop_changed)
+        form.addRow("Harmony Mode:", self.harmony_type_combo)
+        
         inspector_layout.addLayout(form)
 
         # --- STEM MIXER ---
@@ -846,6 +854,7 @@ class AudioSequencerApp(QMainWindow):
             seg.harmonics = s.get('harmonics', 0.0)
             seg.vocal_shift = s.get('vocal_shift', 0)
             seg.harmony_level = s.get('harmony_level', 0.0)
+            seg.harmony_type = s.get('harmony_type', 'classic')
             seg.vocal_vol = s.get('vocal_vol', 1.0)
             seg.drum_vol = s.get('drum_vol', 1.0)
             seg.bass_vol = s.get('bass_vol', 1.0)
@@ -912,6 +921,11 @@ class AudioSequencerApp(QMainWindow):
             self.harmony_slider.setValue(int(s.harmony_level * 100))
             self.harmony_slider.blockSignals(False)
             
+            self.harmony_type_combo.blockSignals(True)
+            idx = self.harmony_type_combo.findData(s.harmony_type)
+            self.harmony_type_combo.setCurrentIndex(idx if idx >= 0 else 0)
+            self.harmony_type_combo.blockSignals(False)
+            
             self.v_vol_s.blockSignals(True)
             self.v_vol_s.setValue(int(s.vocal_vol * 100))
             self.v_vol_s.blockSignals(False)
@@ -976,6 +990,7 @@ class AudioSequencerApp(QMainWindow):
             sel.drum_shift = self.drum_shift_s.value()
             sel.instr_shift = self.instr_shift_s.value()
             sel.harmony_level = self.harmony_slider.value() / 100.0
+            sel.harmony_type = self.harmony_type_combo.currentData()
             
             sel.vocal_vol = self.v_vol_s.value() / 100.0
             sel.drum_vol = self.d_vol_s.value() / 100.0

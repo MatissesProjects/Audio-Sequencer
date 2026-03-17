@@ -79,6 +79,7 @@ class TrackSegment:
         self.instr_shift: int = 0
         self.gender_swap: str = "none" # "none", "male", "female"
         self.harmony_level: float = 0.0
+        self.harmony_type: str = "classic" # "classic", "gender_swap", "deep_octave", "custom_pitch"
         self.vocal_vol: float = 1.0
         self.drum_vol: float = 1.0
         self.bass_vol: float = 1.0
@@ -165,6 +166,7 @@ class TrackSegment:
             'drum_shift': self.drum_shift,
             'instr_shift': self.instr_shift,
             'harmony_level': self.harmony_level,
+            'harmony_type': self.harmony_type,
             'vocal_vol': self.vocal_vol,
             'drum_vol': self.drum_vol,
             'bass_vol': self.bass_vol,

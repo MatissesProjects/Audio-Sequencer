@@ -1,5 +1,10 @@
 import os
 import sys
+
+# Silence technical spam (FFmpeg/Qt Multimedia warnings)
+os.environ["QT_LOGGING_RULES"] = "qt.multimedia.ffmpeg=false;*.debug=false;driver.usb=false"
+os.environ["FFMPEG_LOG_LEVEL"] = "quiet"
+
 from typing import List, Dict, Optional, Any, Union, Tuple
 
 # Ensure the project root is in PYTHONPATH

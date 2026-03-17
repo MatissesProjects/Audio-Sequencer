@@ -116,14 +116,52 @@ def _process_single_segment(s: Dict[str, Any], i: int, target_bpm: float, sr: in
                 if 'vocal_vol' in keyframes: stem_np *= _get_modulation_envelope(keyframes['vocal_vol'], stem_np.shape[1], sr, default_val=s.get('vocal_vol', 1.0))
                 else: stem_np *= s.get('vocal_vol', 1.0)
                 h_level = float(s.get('harmony_level', 0.0))
+                h_type = s.get('harmony_type', 'classic')
                 if h_level > 0:
-                    h_layer1 = proc.shift_pitch_numpy(y_sync, sr, 7)
-                    if len(h_layer1.shape) == 1: h_layer1 = np.stack([h_layer1, h_layer1])
-                    h_layer1 = proc.apply_rhythmic_gate(h_layer1, sr, target_bpm, pattern="1/8")
-                    h_layer2 = proc.shift_pitch_numpy(y_sync, sr, 12)
-                    if len(h_layer2.shape) == 1: h_layer2 = np.stack([h_layer2, h_layer2])
-                    h_layer2 = proc.apply_rhythmic_gate(h_layer2, sr, target_bpm, pattern="1/4")
-                    min_l = min(stem_np.shape[1], h_layer1.shape[1], h_layer2.shape[1]); stem_np[:, :min_l] += (h_layer1[:, :min_l] * h_level * 0.5) + (h_layer2[:, :min_l] * h_level * 0.3)
+                    h_layers = []
+                    if h_type == "gender_swap":
+                        # Create harmony by swapping to opposite gender and shifting
+                        opp_gender = "female" if s.get('gender_swap') == "male" else "male"
+                        v_shift = float(s.get('vocal_shift', 0))
+                        # Use cached or generate new gender swapped version for harmony
+                        gs_hash = hashlib.md5(f"{stem_file}_h_{opp_gender}_{v_shift+7}".encode()).hexdigest()
+                        gs_cache = os.path.join(AppConfig.CACHE_DIR, f"gs_h_{gs_hash}.wav")
+                        if not os.path.exists(gs_cache):
+                            proc.generate_gender_swap_remote(stem_file, gs_cache, target=opp_gender, steps=v_shift+7)
+                        
+                        if os.path.exists(gs_cache):
+                            y_h, _ = librosa.load(gs_cache, sr=sr)
+                            y_h_looped = proc.loop_numpy(y_h, sr, required_raw_dur + 1.0, onsets)
+                            y_h_sync = proc.stretch_numpy(y_h_looped, sr, float(s['bpm']), target_bpm)
+                            y_h_sync = y_h_sync[s_smpl : e_smpl]
+                            h_layers.append((y_h_sync, 0.6)) # 60% mix
+                    
+                    elif h_type == "deep_octave":
+                        # Sub-octave reinforcement
+                        h_layer = proc.shift_pitch_numpy(y_sync, sr, -12)
+                        h_layers.append((h_layer, 0.8))
+                        # And a 5th above
+                        h_layer2 = proc.shift_pitch_numpy(y_sync, sr, 7)
+                        h_layers.append((h_layer2, 0.4))
+                        
+                    elif h_type == "custom_pitch":
+                        # Use the manual vocal shift as the basis for a fixed harmony offset
+                        v_shift = float(s.get('vocal_shift', 0))
+                        h_layer = proc.shift_pitch_numpy(y_sync, sr, v_shift if v_shift != 0 else 7)
+                        h_layers.append((h_layer, 0.7))
+                        
+                    else: # Classic
+                        h_layer1 = proc.shift_pitch_numpy(y_sync, sr, 7)
+                        h_layers.append((h_layer1, 0.5))
+                        h_layer2 = proc.shift_pitch_numpy(y_sync, sr, 12)
+                        h_layers.append((h_layer2, 0.3))
+
+                    for h_y, h_mix in h_layers:
+                        if len(h_y.shape) == 1: h_y = np.stack([h_y, h_y])
+                        # Apply rhythmic gating to harmonies for movement
+                        h_y = proc.apply_rhythmic_gate(h_y, sr, target_bpm, pattern="1/8" if h_mix > 0.5 else "1/4")
+                        min_l = min(stem_np.shape[1], h_y.shape[1])
+                        stem_np[:, :min_l] += (h_y[:, :min_l] * h_level * h_mix)
             elif stype == "drums":
                 if 'drum_vol' in keyframes: stem_np *= _get_modulation_envelope(keyframes['drum_vol'], stem_np.shape[1], sr, default_val=s.get('drum_vol', 1.0))
                 else: stem_np *= s.get('drum_vol', 1.0)
