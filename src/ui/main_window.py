@@ -704,12 +704,12 @@ class AudioSequencerApp(QMainWindow):
         self.timeline_widget.update()
         self.waveform_loaders = [l for l in self.waveform_loaders if l.isRunning()]
 
-    def dragEnterEvent(self, e):
-        if e.mimeData().hasUrls():
-            e.acceptProposedAction()
+    def dragEnterEvent(self, a0):
+        if a0.mimeData().hasUrls():
+            a0.acceptProposedAction()
 
-    def dropEvent(self, e):
-        urls = e.mimeData().urls()
+    def dropEvent(self, a0):
+        urls = a0.mimeData().urls()
         paths = [u.toLocalFile() for u in urls if u.isLocalFile()]
         if paths:
             self.loading_overlay.show_loading("Ingesting Files...")
@@ -2122,22 +2122,22 @@ class AudioSequencerApp(QMainWindow):
         else:
             self.player.play()
 
-    def keyPressEvent(self, event):
-        if event.key() == Qt.Key.Key_Space:
+    def keyPressEvent(self, a0):
+        if a0.key() == Qt.Key.Key_Space:
             self.toggle_playback()
-        elif event.key() == Qt.Key.Key_M:
+        elif a0.key() == Qt.Key.Key_M:
             sel = self.timeline_widget.selected_segment
             if sel:
                 self.timeline_widget.mutes[sel.lane] = not self.timeline_widget.mutes[sel.lane]
                 self.timeline_widget.update()
                 self.preview_dirty = True
-        elif event.key() == Qt.Key.Key_S:
+        elif a0.key() == Qt.Key.Key_S:
             sel = self.timeline_widget.selected_segment
             if sel:
                 self.timeline_widget.solos[sel.lane] = not self.timeline_widget.solos[sel.lane]
                 self.timeline_widget.update()
                 self.preview_dirty = True
-        elif event.key() == Qt.Key.Key_Delete or event.key() == Qt.Key.Key_Backspace:
+        elif a0.key() == Qt.Key.Key_Delete or a0.key() == Qt.Key.Key_Backspace:
             sel = self.timeline_widget.selected_segment
             if sel:
                 self.push_undo()
@@ -2146,16 +2146,16 @@ class AudioSequencerApp(QMainWindow):
                 self.on_segment_selected(None)
                 self.timeline_widget.update_geometry()
                 self.update_status()
-        elif event.modifiers() & Qt.KeyboardModifier.ControlModifier:
-            if event.key() == Qt.Key.Key_Z:
+        elif a0.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            if a0.key() == Qt.Key.Key_Z:
                 self.undo()
-            elif event.key() == Qt.Key.Key_Y:
+            elif a0.key() == Qt.Key.Key_Y:
                 self.redo()
-            elif event.key() == Qt.Key.Key_C:
+            elif a0.key() == Qt.Key.Key_C:
                 self.copy_selected_segment()
-            elif event.key() == Qt.Key.Key_V or event.key() == Qt.Key.Key_P:
+            elif a0.key() == Qt.Key.Key_V or a0.key() == Qt.Key.Key_P:
                 self.paste_segment()
-            elif event.key() == Qt.Key.Key_B:
+            elif a0.key() == Qt.Key.Key_B:
                 # Blade Tool: Split selected at cursor
                 sel = self.timeline_widget.selected_segment
                 if sel:
@@ -2163,7 +2163,7 @@ class AudioSequencerApp(QMainWindow):
                     self.push_undo()
                     self.timeline_widget.split_segment(sel, cur_x)
         else:
-            super().keyPressEvent(event)
+            super().keyPressEvent(a0)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

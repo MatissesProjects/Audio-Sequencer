@@ -6,9 +6,9 @@ from src.scoring import CompatibilityScorer
 from src.core.models import TrackSegment
 
 class DraggableTable(QTableWidget):
-    def mousePressEvent(self, event: QMouseEvent) -> None:
-        if event.button() == Qt.MouseButton.LeftButton:
-            item = self.itemAt(event.pos())
+    def mousePressEvent(self, a0: QMouseEvent) -> None:
+        if a0.button() == Qt.MouseButton.LeftButton:
+            item = self.itemAt(a0.pos())
             if item:
                 row = item.row()
                 tid = self.item(row, 0).data(Qt.ItemDataRole.UserRole)
@@ -18,7 +18,7 @@ class DraggableTable(QTableWidget):
                     pixmap = self.viewport().grab(self.visualItemRect(item))
                     drag.setPixmap(pixmap); drag.setHotSpot(QPoint(pixmap.width() // 2, pixmap.height() // 2))
                     drag.exec(Qt.DropAction.CopyAction)
-        super().mousePressEvent(event)
+        super().mousePressEvent(a0)
 
 class LibraryWaveformPreview(QWidget):
     selectionChanged = pyqtSignal(float, float) # start_pct, end_pct
@@ -36,22 +36,22 @@ class LibraryWaveformPreview(QWidget):
     def set_waveform(self, w: List[float]) -> None:
         self.waveform = w; self.selection_start = None; self.selection_end = None; self.update()
         
-    def mousePressEvent(self, event: QMouseEvent) -> None:
-        if event.button() == Qt.MouseButton.RightButton:
+    def mousePressEvent(self, a0: QMouseEvent) -> None:
+        if a0.button() == Qt.MouseButton.RightButton:
             self.selection_start = None; self.selection_end = None; self.selectionChanged.emit(0.0, 1.0); self.update(); return
-        if event.button() == Qt.MouseButton.LeftButton:
-            x_pct = event.position().x() / self.width()
+        if a0.button() == Qt.MouseButton.LeftButton:
+            x_pct = a0.position().x() / self.width()
             if self.selection_start is not None and self.selection_end is not None:
                 if self.selection_start <= x_pct <= self.selection_end:
                     self.start_drag(); return
             self.selection_start = x_pct; self.selection_end = self.selection_start; self.is_selecting = True; self.update()
 
-    def mouseMoveEvent(self, event: QMouseEvent) -> None:
+    def mouseMoveEvent(self, a0: QMouseEvent) -> None:
         if self.is_selecting:
-            self.selection_end = event.position().x() / self.width(); self.update()
+            self.selection_end = a0.position().x() / self.width(); self.update()
             
-    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
-        if event.button() == Qt.MouseButton.LeftButton:
+    def mouseReleaseEvent(self, a0: QMouseEvent) -> None:
+        if a0.button() == Qt.MouseButton.LeftButton:
             self.is_selecting = False
             s = min(self.selection_start or 0.0, self.selection_end or 0.0)
             e = max(self.selection_start or 0.0, self.selection_end or 0.0)
@@ -65,7 +65,7 @@ class LibraryWaveformPreview(QWidget):
         if self.selection_start is not None and self.selection_end is not None:
             self.dragStarted.emit(self.selection_start, self.selection_end)
 
-    def paintEvent(self, event: QPaintEvent) -> None:
+    def paintEvent(self, a0: QPaintEvent) -> None:
         p = QPainter(self); p.setRenderHint(QPainter.RenderHint.Antialiasing); p.fillRect(self.rect(), QColor(25, 25, 25))
         if not self.waveform: return
         if self.selection_start is not None and self.selection_end is not None:
@@ -91,7 +91,7 @@ class LoadingOverlay(QWidget):
         self.progress_bar.setStyleSheet("QProgressBar { border: 2px solid #444; border-radius: 5px; text-align: center; color: white; background: #111; } QProgressBar::chunk { background-color: #007acc; width: 20px; }")
         self.layout.addWidget(self.progress_bar); self.hide()
         
-    def paintEvent(self, event: QPaintEvent) -> None:
+    def paintEvent(self, a0: QPaintEvent) -> None:
         p = QPainter(self); p.fillRect(self.rect(), QColor(0, 0, 0, 200))
         
     def show_loading(self, m: str = "Processing...", total: int = 0) -> None:
@@ -168,13 +168,13 @@ class TimelineWidget(QWidget):
         if in_gap: gaps.append((gap_start, float(total_len)))
         self.silence_regions = gaps; return gaps
 
-    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
-        if event.mimeData().hasText(): event.acceptProposedAction()
+    def dragEnterEvent(self, a0: QDragEnterEvent) -> None:
+        if a0.mimeData().hasText(): a0.acceptProposedAction()
 
-    def dropEvent(self, event: QDropEvent) -> None:
+    def dropEvent(self, a0: QDropEvent) -> None:
         try:
-            tid_str = event.mimeData().text(); pos = event.position()
-            self.trackDropped.emit(tid_str, int(pos.x()), int(pos.y())); event.acceptProposedAction()
+            tid_str = a0.mimeData().text(); pos = a0.position()
+            self.trackDropped.emit(tid_str, int(pos.x()), int(pos.y())); a0.acceptProposedAction()
         except: pass
 
     def update_geometry(self) -> None:
@@ -192,7 +192,7 @@ class TimelineWidget(QWidget):
         y_center = (seg.lane * (self.lane_height + self.lane_spacing)) + (self.lane_height // 2) + 40
         return QRect(x, y_center - (h // 2), w, h)
 
-    def paintEvent(self, event: QPaintEvent) -> None:
+    def paintEvent(self, a0: QPaintEvent) -> None:
         painter = QPainter(self); painter.setRenderHint(QPainter.RenderHint.Antialiasing); painter.fillRect(self.rect(), QColor(25, 25, 25))
         for start, end in self.silence_regions:
             sx = int(start * self.pixels_per_ms); sw = int((end - start) * self.pixels_per_ms)
@@ -290,54 +290,54 @@ class TimelineWidget(QWidget):
             painter.setPen(Qt.GlobalColor.white); painter.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold)); painter.drawText(rect.adjusted(8, 8, -8, -8), Qt.AlignmentFlag.AlignTop, seg.filename)
         cx = int(self.cursor_pos_ms * self.pixels_per_ms); painter.setPen(QPen(QColor(255, 255, 255, 200), 2)); painter.drawLine(cx, 0, cx, self.height()); painter.setBrush(QBrush(QColor(255, 255, 255))); painter.drawPolygon(QPoint(cx-6, 0), QPoint(cx+6, 0), QPoint(cx, 10))
 
-    def mousePressEvent(self, event: QMouseEvent) -> None:
-        if event.pos().y() > self.height() - 15: self.resizing_timeline = True; self.drag_start_pos = event.pos(); self.drag_start_h = self.height(); return
+    def mousePressEvent(self, a0: QMouseEvent) -> None:
+        if a0.pos().y() > self.height() - 15: self.resizing_timeline = True; self.drag_start_pos = a0.pos(); self.drag_start_h = self.height(); return
         for i in range(self.lane_count):
             y = i * (self.lane_height + self.lane_spacing) + 40; m_r = QRect(5, y + 25, 20, 20); s_r = QRect(30, y + 25, 20, 20)
-            if m_r.contains(event.pos()): self.mutes[i] = not self.mutes[i]; self.update(); self.timelineChanged.emit(); return
-            if s_r.contains(event.pos()): self.solos[i] = not self.solos[i]; self.update(); self.timelineChanged.emit(); return
-        if event.pos().y() < 40: self.setting_loop = True; self.loop_start_ms = event.pos().x() / self.pixels_per_ms; self.loop_end_ms = self.loop_start_ms; self.loop_enabled = True; self.update(); return
-        if event.button() == Qt.MouseButton.LeftButton:
+            if m_r.contains(a0.pos()): self.mutes[i] = not self.mutes[i]; self.update(); self.timelineChanged.emit(); return
+            if s_r.contains(a0.pos()): self.solos[i] = not self.solos[i]; self.update(); self.timelineChanged.emit(); return
+        if a0.pos().y() < 40: self.setting_loop = True; self.loop_start_ms = a0.pos().x() / self.pixels_per_ms; self.loop_end_ms = self.loop_start_ms; self.loop_enabled = True; self.update(); return
+        if a0.button() == Qt.MouseButton.LeftButton:
             for seg in reversed(self.segments):
                 rect = self.get_seg_rect(seg)
-                if rect.contains(event.pos()) and hasattr(seg, 'keyframes'):
+                if rect.contains(a0.pos()) and hasattr(seg, 'keyframes'):
                     for param, points in seg.keyframes.items():
                         for idx, (ms, val) in enumerate(points):
                             kx = rect.left() + int(ms * self.pixels_per_ms); ky = rect.bottom() - int(rect.height() * val)
-                            if QRect(kx - 6, ky - 6, 12, 12).contains(event.pos()): self.selected_segment = seg; self.selected_keyframe_param = param; self.selected_keyframe_idx = idx; self.keyframe_dragging = True; self.drag_start_pos = event.pos(); self.update(); return
-            if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+                            if QRect(kx - 6, ky - 6, 12, 12).contains(a0.pos()): self.selected_segment = seg; self.selected_keyframe_param = param; self.selected_keyframe_idx = idx; self.keyframe_dragging = True; self.drag_start_pos = a0.pos(); self.update(); return
+            if a0.modifiers() & Qt.KeyboardModifier.ControlModifier:
                 for seg in self.segments:
                     r = self.get_seg_rect(seg)
-                    if r.contains(event.pos()): seg.add_keyframe(self.active_automation_param, (event.pos().x() - r.left()) / self.pixels_per_ms, 1.0 - ((event.pos().y() - r.top()) / r.height())); self.update(); self.timelineChanged.emit(); return
+                    if r.contains(a0.pos()): seg.add_keyframe(self.active_automation_param, (a0.pos().x() - r.left()) / self.pixels_per_ms, 1.0 - ((a0.pos().y() - r.top()) / r.height())); self.update(); self.timelineChanged.emit(); return
             cs = None
             for seg in reversed(self.segments):
                 r = self.get_seg_rect(seg); fi = r.left() + int(seg.fade_in_ms * self.pixels_per_ms); fo = r.right() - int(seg.fade_out_ms * self.pixels_per_ms)
-                if QRect(fi-10, r.top()-10, 20, 20).contains(event.pos()): self.selected_segment = seg; self.fade_in_dragging = True; self.drag_start_pos = event.pos(); self.drag_start_fade = float(seg.fade_in_ms); self.update(); return
-                if QRect(fo-10, r.top()-10, 20, 20).contains(event.pos()): self.selected_segment = seg; self.fade_out_dragging = True; self.drag_start_pos = event.pos(); self.drag_start_fade = float(seg.fade_out_ms); self.update(); return
-                if r.contains(event.pos()): cs = seg; break
+                if QRect(fi-10, r.top()-10, 20, 20).contains(a0.pos()): self.selected_segment = seg; self.fade_in_dragging = True; self.drag_start_pos = a0.pos(); self.drag_start_fade = float(seg.fade_in_ms); self.update(); return
+                if QRect(fo-10, r.top()-10, 20, 20).contains(a0.pos()): self.selected_segment = seg; self.fade_out_dragging = True; self.drag_start_pos = a0.pos(); self.drag_start_fade = float(seg.fade_out_ms); self.update(); return
+                if r.contains(a0.pos()): cs = seg; break
             self.selected_segment = cs; self.segmentSelected.emit(cs)
             if self.selected_segment:
-                self.undoRequested.emit(); self.drag_start_pos = event.pos(); self.drag_start_ms = float(self.selected_segment.start_ms); self.drag_start_dur = float(self.selected_segment.duration_ms); self.drag_start_vol = float(self.selected_segment.volume); self.drag_start_lane = int(self.selected_segment.lane); self.drag_start_offset = float(self.selected_segment.offset_ms); r = self.get_seg_rect(self.selected_segment)
-                if event.modifiers() & Qt.KeyboardModifier.AltModifier: self.slipping = True
-                elif event.position().x() < (r.left() + 20): self.resizing_left = True
-                elif event.position().x() > (r.right() - 20): self.resizing = True
-                elif event.modifiers() & Qt.KeyboardModifier.ShiftModifier: self.vol_dragging = True
+                self.undoRequested.emit(); self.drag_start_pos = a0.pos(); self.drag_start_ms = float(self.selected_segment.start_ms); self.drag_start_dur = float(self.selected_segment.duration_ms); self.drag_start_vol = float(self.selected_segment.volume); self.drag_start_lane = int(self.selected_segment.lane); self.drag_start_offset = float(self.selected_segment.offset_ms); r = self.get_seg_rect(self.selected_segment)
+                if a0.modifiers() & Qt.KeyboardModifier.AltModifier: self.slipping = True
+                elif a0.position().x() < (r.left() + 20): self.resizing_left = True
+                elif a0.position().x() > (r.right() - 20): self.resizing = True
+                elif a0.modifiers() & Qt.KeyboardModifier.ShiftModifier: self.vol_dragging = True
                 else: self.dragging = True
-            else: self.cursor_pos_ms = event.pos().x() / self.pixels_per_ms; self.cursorJumped.emit(self.cursor_pos_ms)
+            else: self.cursor_pos_ms = a0.pos().x() / self.pixels_per_ms; self.cursorJumped.emit(self.cursor_pos_ms)
             self.update()
-        elif event.button() == Qt.MouseButton.RightButton:
+        elif a0.button() == Qt.MouseButton.RightButton:
             ts = None
             for seg in reversed(self.segments):
-                if self.get_seg_rect(seg).contains(event.pos()): ts = seg; break
+                if self.get_seg_rect(seg).contains(a0.pos()): ts = seg; break
             m = QMenu(self)
             if ts:
                 pa = m.addAction("⭐ Unmark Primary" if ts.is_primary else "⭐ Set as Primary"); sa = m.addAction("✂ Split at Cursor"); qa = m.addAction("🪄 Quantize to Grid"); da_dup = m.addAction("👯 Duplicate Track"); m.addSeparator(); sa_stems = m.addAction("🔪 Separate Stems (Remote AI)"); m.addSeparator(); pm = m.addMenu("🎵 Shift Pitch")
                 for i in range(-6, 7): a = pm.addAction(f"{i:+} st"); a.setData(i)
                 sl = m.addAction("💾 Capture as New Loop"); da_rem = m.addAction("🗑 Remove Track"); m.addSeparator(); ra_keys = m.addAction("🧹 Remove Keyframes"); m.addSeparator(); scm = m.addMenu("🔗 Auto-Sidechain to Lane")
                 for i in range(self.lane_count): la = scm.addAction(f"Lane {i+1}"); la.setData(i)
-                act = m.exec(self.mapToGlobal(event.pos()))
+                act = m.exec(self.mapToGlobal(a0.pos()))
                 if act == pa: self.undoRequested.emit(); ts.is_primary = not ts.is_primary
-                elif act == sa: self.undoRequested.emit(); self.split_segment(ts, float(event.pos().x()))
+                elif act == sa: self.undoRequested.emit(); self.split_segment(ts, float(a0.pos().x()))
                 elif act == qa: self.undoRequested.emit(); self.quantize_segment(ts)
                 elif act == da_dup: self.undoRequested.emit(); self.duplicateRequested.emit(ts)
                 elif act == sa_stems: self.stemsRequested.emit(ts)
@@ -353,40 +353,40 @@ class TimelineWidget(QWidget):
                 fa = fs = fe = None
                 if self.loop_enabled and (self.loop_end_ms - self.loop_start_ms) > 1000: m.addSeparator(); fa = m.addAction("🩹 AI: Fill Selected Range")
                 else: m.addSeparator(); fs = m.addAction("🩹 AI: Fill from Start to Here"); fe = m.addAction("🩹 AI: Fill from Here to End")
-                act = m.exec(self.mapToGlobal(event.pos()))
-                if act == ba: self.bridgeRequested.emit(float(event.pos().x()))
-                elif act == ar: self.aiTransitionRequested.emit(float(event.pos().x()), "riser")
-                elif act == ad: self.aiTransitionRequested.emit(float(event.pos().x()), "drop")
-                elif act == ap: self.aiTransitionRequested.emit(float(event.pos().x()), "pad")
-                elif act == ab: self.aiTransitionRequested.emit(float(event.pos().x()), "percussion")
+                act = m.exec(self.mapToGlobal(a0.pos()))
+                if act == ba: self.bridgeRequested.emit(float(a0.pos().x()))
+                elif act == ar: self.aiTransitionRequested.emit(float(a0.pos().x()), "riser")
+                elif act == ad: self.aiTransitionRequested.emit(float(a0.pos().x()), "drop")
+                elif act == ap: self.aiTransitionRequested.emit(float(a0.pos().x()), "pad")
+                elif act == ab: self.aiTransitionRequested.emit(float(a0.pos().x()), "percussion")
                 elif act == fa: self.fillRangeRequested.emit(self.loop_start_ms, self.loop_end_ms)
-                elif act == fs: self.fillRangeRequested.emit(0.0, event.pos().x() / self.pixels_per_ms)
-                elif act == fe: self.fillRangeRequested.emit(event.pos().x() / self.pixels_per_ms, max([s.get_end_ms() for s in self.segments]) if self.segments else 30000.0)
+                elif act == fs: self.fillRangeRequested.emit(0.0, a0.pos().x() / self.pixels_per_ms)
+                elif act == fe: self.fillRangeRequested.emit(a0.pos().x() / self.pixels_per_ms, max([s.get_end_ms() for s in self.segments]) if self.segments else 30000.0)
 
-    def mouseMoveEvent(self, event: QMouseEvent) -> None:
+    def mouseMoveEvent(self, a0: QMouseEvent) -> None:
         if not any([self.dragging, self.resizing, self.resizing_left, self.vol_dragging, self.fade_in_dragging, self.fade_out_dragging, self.slipping]):
             over_edge = False
             for seg in self.segments:
                 r = self.get_seg_rect(seg)
-                if r.contains(event.pos()):
+                if r.contains(a0.pos()):
                     if hasattr(seg, 'vocal_lyrics') and (seg.vocal_lyrics or seg.vocal_gender):
                         tip = ""
                         if seg.vocal_gender: tip += f"[{seg.vocal_gender}] "
                         if seg.vocal_lyrics: tip += f'"{seg.vocal_lyrics}"'
-                        from PyQt6.QtWidgets import QToolTip; QToolTip.showText(event.globalPosition().toPoint(), tip, self)
-                    if event.position().x() < (r.left() + 20) or event.position().x() > (r.right() - 20): self.setCursor(Qt.CursorShape.SizeHorCursor)
+                        from PyQt6.QtWidgets import QToolTip; QToolTip.showText(a0.globalPosition().toPoint(), tip, self)
+                    if a0.position().x() < (r.left() + 20) or a0.position().x() > (r.right() - 20): self.setCursor(Qt.CursorShape.SizeHorCursor)
                     else: self.setCursor(Qt.CursorShape.PointingHandCursor)
                     over_edge = True; break
             if not over_edge: self.setCursor(Qt.CursorShape.ArrowCursor)
-        if self.resizing_timeline: self.setMinimumHeight(max(400, int(self.drag_start_h + (event.pos().y() - self.drag_start_pos.y())))); self.update_geometry(); return
-        if self.setting_loop: self.loop_end_ms = max(self.loop_start_ms, event.pos().x() / self.pixels_per_ms); self.update(); return
+        if self.resizing_timeline: self.setMinimumHeight(max(400, int(self.drag_start_h + (a0.pos().y() - self.drag_start_pos.y())))); self.update_geometry(); return
+        if self.setting_loop: self.loop_end_ms = max(self.loop_start_ms, a0.pos().x() / self.pixels_per_ms); self.update(); return
         if self.keyframe_dragging and self.selected_segment:
-            rect = self.get_seg_rect(self.selected_segment); rel_ms = max(0.0, min(self.selected_segment.duration_ms, (event.pos().x() - rect.left()) / self.pixels_per_ms)); val = max(0.0, min(1.0, 1.0 - ((event.pos().y() - rect.top()) / rect.height()))); pts = self.selected_segment.keyframes[self.selected_keyframe_param]; pts[self.selected_keyframe_idx] = (rel_ms, val); pts.sort(key=lambda x: x[0])
+            rect = self.get_seg_rect(self.selected_segment); rel_ms = max(0.0, min(self.selected_segment.duration_ms, (a0.pos().x() - rect.left()) / self.pixels_per_ms)); val = max(0.0, min(1.0, 1.0 - ((a0.pos().y() - rect.top()) / rect.height()))); pts = self.selected_segment.keyframes[self.selected_keyframe_param]; pts[self.selected_keyframe_idx] = (rel_ms, val); pts.sort(key=lambda x: x[0])
             for i, p in enumerate(pts):
                 if p[0] == rel_ms: self.selected_keyframe_idx = i; break
             self.update(); return
         if not self.selected_segment or self.drag_start_pos is None: return
-        dx = event.pos().x() - self.drag_start_pos.x(); dy = event.pos().y() - self.drag_start_pos.y(); mpb = self.get_ms_per_beat()
+        dx = a0.pos().x() - self.drag_start_pos.x(); dy = a0.pos().y() - self.drag_start_pos.y(); mpb = self.get_ms_per_beat()
         if self.slipping: self.selected_segment.offset_ms = max(0.0, self.drag_start_offset - dx/self.pixels_per_ms)
         elif self.resizing_left:
             delta_ms = dx / self.pixels_per_ms; actual_delta = round((self.drag_start_ms + delta_ms) / mpb) * mpb - self.drag_start_ms if self.snap_to_grid else delta_ms
@@ -401,15 +401,15 @@ class TimelineWidget(QWidget):
                 if o == self.selected_segment: continue
                 oe = float(o.get_end_ms()); if abs(ns - oe) < self.snap_threshold_ms: ns = oe
                 elif abs(ns - o.start_ms) < self.snap_threshold_ms: ns = float(o.start_ms)
-            self.selected_segment.start_ms = int(ns); self.selected_segment.lane = max(0, min(self.lane_count - 1, int((event.pos().y() - 40) // (self.lane_height + self.lane_spacing))))
+            self.selected_segment.start_ms = int(ns); self.selected_segment.lane = max(0, min(self.lane_count - 1, int((a0.pos().y() - 40) // (self.lane_height + self.lane_spacing))))
         self.update_geometry(); self.timelineChanged.emit()
 
-    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+    def mouseReleaseEvent(self, a0: QMouseEvent) -> None:
         self.dragging = self.resizing = self.resizing_left = self.vol_dragging = self.fade_in_dragging = self.fade_out_dragging = self.slipping = self.setting_loop = self.resizing_timeline = self.keyframe_dragging = False; self.update_geometry(); self.timelineChanged.emit()
 
-    def wheelEvent(self, event: QWheelEvent) -> None:
-        if event.modifiers() & Qt.KeyboardModifier.ControlModifier: nv = max(10, min(200, int(self.pixels_per_ms * 1000) + (event.angleDelta().y() // 120 * 10))); self.pixels_per_ms = nv / 1000.0; self.update_geometry(); self.zoomChanged.emit(nv)
-        else: super().wheelEvent(event)
+    def wheelEvent(self, a0: QWheelEvent) -> None:
+        if a0.modifiers() & Qt.KeyboardModifier.ControlModifier: nv = max(10, min(200, int(self.pixels_per_ms * 1000) + (a0.angleDelta().y() // 120 * 10))); self.pixels_per_ms = nv / 1000.0; self.update_geometry(); self.zoomChanged.emit(nv)
+        else: super().wheelEvent(a0)
     
     def split_segment(self, seg: TrackSegment, x_pos: float) -> None:
         sm = x_pos / self.pixels_per_ms; rs = sm - seg.start_ms
