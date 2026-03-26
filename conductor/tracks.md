@@ -14,6 +14,7 @@ This file tracks the epic-level progress of the AudioSequencer AI project.
 | `audio-rndr`| **Playback & Export Engine** | ✅ Completed | MVP | `pydub` engine for applying crossfades, EQ ducking, and rendering the final mix file. |
 | `gui-core` | **UI Canvas & Browser** | 🏗️ In Progress | MVP | PyQt6 library browser, drag-and-drop timeline, and real-time state visualization. |
 | `ai-gen` | **Generative Audio Expansion** | ⏳ Blocked | v2.0 | Local `AudioCraft` generation for custom transition sweeps/risers. |
+| `infinite-stream` | **Infinite Radio Stream** | 📝 Planned | v2.0 | Continuous generative audio engine, background chunk rendering, and realtime playback. |
 
 ## Dependency Graph
 - `sys-data` is foundational.
@@ -22,6 +23,7 @@ This file tracks the epic-level progress of the AudioSequencer AI project.
 - `audio-dsp` runs independently but is fed parameters by `logic-seq`.
 - `audio-rndr` depends on `audio-dsp`.
 - `gui-core` depends on all MVP tracks to function fully.
+- `infinite-stream` depends on `audio-rndr` and `logic-seq`.
 
 ## Active Sprint / Next Actions
 1. Spin up the SQLite database schema (`sys-data`) to store the outputs from `core-mir`.
